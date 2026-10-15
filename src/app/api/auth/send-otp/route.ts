@@ -7,6 +7,7 @@ import {
 } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import {
+  pullActivityFromCloud,
   pullCatalogFromCloud,
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
@@ -14,7 +15,7 @@ import {
 export async function POST(req: NextRequest) {
   try {
     await pullCatalogFromCloud();
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     const rawPhone = String(body.phone || "").trim();
     const normalized = normalizePhone(rawPhone);

@@ -12,6 +12,11 @@ import {
   mergeCatalogFromCloud,
 } from "@/lib/db";
 
+const DEFAULT_TURSO_URL =
+  "libsql://restoran-siparis-h716043.aws-eu-west-1.turso.io";
+const DEFAULT_TURSO_TOKEN =
+  "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTIwMjk4NTksImlkIjoiMDFhMTNkNGQtMTIwMS03MjBmLWJiM2EtMzQwMmMzOTJiMmJiIiwia2lkIjoicU5MRDQ0b2tMUmMzYUVXU1BfUVhTQzk1RUFfLUUzUS1MZmhOVkFKY215ZyIsInJpZCI6ImQwNjhlMzJjLTMzOWYtNDcyZi04NWE5LTZiMDljNzdkNDA5MSJ9.loMcw0-7YNgjdnkq7LW78c4dmIRRobd4eeISokLfSwyAP_QMGRjDi8LKctOWpRPlSwgXdy__t5u8f2ir3_b_Bw";
+
 function resolveTursoCredentials(): {
   endpoint: string;
   token: string;
@@ -20,19 +25,24 @@ function resolveTursoCredentials(): {
   const rawUrl = (
     process.env.TURSO_DATABASE_URL ||
     settings.cloudSyncConfig?.tursoUrl ||
-    ""
+    DEFAULT_TURSO_URL
   ).trim();
   const token = (
     process.env.TURSO_AUTH_TOKEN ||
     settings.cloudSyncConfig?.tursoAuthToken ||
-    ""
+    DEFAULT_TURSO_TOKEN
   ).trim();
 
-  const isEnabled =
-    Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) ||
-    Boolean(settings.cloudSyncConfig?.enabled && rawUrl && token);
+  // Eğer yerel ayarlarda açıkça devre dışı bırakılmışsa (enabled === false) ve Netlify'da değilsek kullanma
+  const isNetlify =
+    process.env.NETLIFY === "true" ||
+    process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
+  const explicitlyDisabled =
+    !isNetlify &&
+    settings.cloudSyncConfig !== undefined &&
+    settings.cloudSyncConfig.enabled === false;
 
-  if (!isEnabled || !rawUrl || !token) return null;
+  if (explicitlyDisabled || !rawUrl || !token) return null;
 
   const baseHttps = rawUrl
     .replace(/^libsql:\/\//i, "https://")
@@ -149,8 +159,52 @@ export async function pullCatalogFromCloud(): Promise<boolean> {
   }
 }
 
+let inFlightPull: Promise<boolean> | null = null;
+let lastPullTime = 0;
+
 /**
- * Sipariş, rezervasyon, masa çağrısı veya WhatsApp üyelik verilerini bulutla eşitler.
+ * Sadece OKUMA (GET) isteklerinde kullanılır: Buluttaki yeni siparişleri, rezervasyonları,
+ * masa çağrılarını, OTP kodlarını ve WhatsApp loglarını yerel SQLite'a çeker (bulutu ezmez!).
+ */
+export async function pullActivityFromCloud(force = false): Promise<boolean> {
+  if (!force && Date.now() - lastPullTime < 1200) {
+    return true;
+  }
+  if (inFlightPull) {
+    return inFlightPull;
+  }
+
+  inFlightPull = (async () => {
+    try {
+      if (!resolveTursoCredentials()) return false;
+      const data = await executeTursoStatements([
+        {
+          sql: "SELECT v FROM restoran_cloud_store WHERE k = 'activity'",
+        },
+      ]);
+      const row = data?.results?.[0]?.response?.result?.rows?.[0];
+      const jsonStr = row?.[0]?.value;
+      if (jsonStr) {
+        const cloudActivity = JSON.parse(jsonStr);
+        mergeActivityFromCloud(cloudActivity);
+      }
+      lastPullTime = Date.now();
+      return true;
+    } catch (e) {
+      console.error("pullActivityFromCloud error:", e);
+      return false;
+    } finally {
+      inFlightPull = null;
+    }
+  })();
+
+  return inFlightPull;
+}
+
+/**
+ * YAZMA (POST / PATCH / DELETE) isteklerinde kullanılır:
+ * Önce buluttaki mevcut sipariş/rezervasyon/çağrı/OTP/WhatsApp verilerini çekip yerelle birleştirir,
+ * ardından birleşmiş güncel durumu buluta yazar.
  */
 export async function syncActivityWithCloud(): Promise<boolean> {
   try {
@@ -187,6 +241,7 @@ export async function syncActivityWithCloud(): Promise<boolean> {
         args: [mergedPayload, new Date().toISOString()],
       },
     ]);
+    lastPullTime = Date.now();
     return true;
   } catch (e) {
     console.error("syncActivityWithCloud error:", e);

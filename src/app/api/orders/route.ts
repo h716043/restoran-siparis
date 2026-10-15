@@ -6,7 +6,10 @@ import {
   getUserByPhone,
   upsertUserAfterOtp,
 } from "@/lib/db";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,7 +18,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
-    await syncActivityWithCloud();
+    await pullActivityFromCloud();
     const orders = getOrders();
     return NextResponse.json({ orders });
   } catch (error) {
@@ -26,7 +29,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     if (!body.items || body.items.length === 0) {
       return NextResponse.json({ error: "Sepet boş" }, { status: 400 });

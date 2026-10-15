@@ -4,11 +4,14 @@ import {
   getTableCalls,
   resolveTableCall,
 } from "@/lib/db";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function GET() {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud();
     const calls = getTableCalls();
     return NextResponse.json({ calls });
   } catch (error) {
@@ -19,7 +22,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     const tableNumber = String(body.tableNumber || "").trim();
     const type = body.type as "waiter" | "bill_cash" | "bill_card";
@@ -47,7 +50,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     if (!body.id) {
       return NextResponse.json({ error: "ID gerekli" }, { status: 400 });

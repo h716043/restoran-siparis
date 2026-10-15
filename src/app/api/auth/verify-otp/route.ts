@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { upsertUserAfterOtp, verifyOtpCode } from "@/lib/db";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function POST(req: NextRequest) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     const { phone, code, name, address } = body;
 

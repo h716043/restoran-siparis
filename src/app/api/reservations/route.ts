@@ -6,11 +6,14 @@ import {
   updateReservationStatus,
 } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function GET(req: NextRequest) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud();
     const { searchParams } = new URL(req.url);
     const phone = searchParams.get("phone");
 
@@ -37,7 +40,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     const customerName = String(body.customerName || "").trim();
     const customerPhone = String(body.customerPhone || "").trim();
@@ -87,7 +90,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     const id = String(body.id || "");
     const status = body.status as "confirmed" | "rejected";
@@ -118,8 +121,6 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    await syncActivityWithCloud();
-
     // Müşteriye otomatik WhatsApp rezervasyon bilgilendirme mesajı gönder
     const settings = getSettings();
     if (
@@ -139,6 +140,8 @@ export async function PATCH(req: NextRequest) {
         await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
       }
     }
+
+    await syncActivityWithCloud();
 
     return NextResponse.json({ reservation: updated });
   } catch (error) {

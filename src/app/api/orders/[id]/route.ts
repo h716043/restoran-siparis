@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrderById, getSettings, updateOrderStatus } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function GET(
   _req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud();
     const { id } = await context.params;
     const order = getOrderById(id);
     if (!order) {
@@ -31,7 +34,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const { id } = await context.params;
     const body = await req.json();
     const updated = updateOrderStatus(

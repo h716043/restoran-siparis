@@ -6,10 +6,13 @@ import {
   getWhatsAppLogs,
   updateUserAddresses,
 } from "@/lib/db";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function GET(req: NextRequest) {
-  await syncActivityWithCloud();
+  await pullActivityFromCloud();
   const { searchParams } = new URL(req.url);
   const phone = searchParams.get("phone");
   if (phone) {
@@ -32,7 +35,7 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    await syncActivityWithCloud();
+    await pullActivityFromCloud(true);
     const body = await req.json();
     const { phone, name, addresses } = body;
     if (!phone) {
