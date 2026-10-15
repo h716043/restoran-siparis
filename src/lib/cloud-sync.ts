@@ -7,6 +7,7 @@ import {
   getReservations,
   getSettings,
   getTableCalls,
+  getWhatsAppLogs,
   mergeActivityFromCloud,
   mergeCatalogFromCloud,
 } from "@/lib/db";
@@ -176,6 +177,7 @@ export async function syncActivityWithCloud(): Promise<boolean> {
       tableCalls: getTableCalls(),
       users: getAllUsers(),
       otpCodes: getActiveOtpCodes(),
+      whatsappLogs: getWhatsAppLogs(),
     });
 
     await executeTursoStatements([

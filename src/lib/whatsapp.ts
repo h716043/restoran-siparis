@@ -29,21 +29,20 @@ export async function sendWhatsAppMessage(
     process.env.NETLIFY === "true" ||
     process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
 
-  if (config.provider === "custom_gateway" && config.gatewayUrl) {
-    // Eğer Netlify bulut sunucusundaysak ve gateway localhost ise, yerel WhatsApp köprüsünün göndermesi için kuyruğa al
-    if (
-      isNetlifyCloud &&
-      (config.gatewayUrl.includes("localhost") ||
-        config.gatewayUrl.includes("127.0.0.1"))
-    ) {
-      logWhatsAppMessage(phone, message, type, "queued_for_local");
-      return {
-        success: true,
-        provider: "custom_gateway",
-        status: "sent",
-        previewMessage: message,
-      };
-    }
+  // Netlify bulut sunucusundaysak (ve Meta Cloud seçili değilse), yerel WhatsApp köprüsünün göndermesi için doğrudan bulut kuyruğuna al
+  if (isNetlifyCloud && config.provider !== "meta_cloud") {
+    logWhatsAppMessage(phone, message, type, "queued_for_local");
+    return {
+      success: true,
+      provider: "custom_gateway",
+      status: "sent",
+      previewMessage: message,
+    };
+  }
+
+  if (config.provider === "custom_gateway") {
+    const gatewayUrl =
+      config.gatewayUrl || "http://localhost:3001/send-message";
 
     try {
       const headers: Record<string, string> = {
@@ -54,7 +53,7 @@ export async function sendWhatsAppMessage(
         headers["x-api-key"] = config.gatewayApiKey;
       }
 
-      const res = await fetch(config.gatewayUrl, {
+      const res = await fetch(gatewayUrl, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -78,10 +77,19 @@ export async function sendWhatsAppMessage(
       }
     } catch (err) {
       console.warn(
-        "Yerel WhatsApp QR servisine ulaşılamadı, simülasyon moduna düşüldü:",
+        "Yerel WhatsApp QR servisine doğrudan ulaşılamadı, kuyruğa alındı:",
         err
       );
     }
+
+    // Doğrudan HTTP isteği anlık başarısız olursa test moduna düşmek yerine yerel köprü kuyruğuna al
+    logWhatsAppMessage(phone, message, type, "queued_for_local");
+    return {
+      success: true,
+      provider: "custom_gateway",
+      status: "sent",
+      previewMessage: message,
+    };
   }
 
   // 2. Resmi Meta WhatsApp Cloud API

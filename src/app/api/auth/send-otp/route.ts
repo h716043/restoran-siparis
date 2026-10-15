@@ -6,10 +6,14 @@ import {
   normalizePhone,
 } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
-import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  pullCatalogFromCloud,
+  syncActivityWithCloud,
+} from "@/lib/cloud-sync";
 
 export async function POST(req: NextRequest) {
   try {
+    await pullCatalogFromCloud();
     await syncActivityWithCloud();
     const body = await req.json();
     const rawPhone = String(body.phone || "").trim();
@@ -24,12 +28,14 @@ export async function POST(req: NextRequest) {
 
     const existingUser = getUserByPhone(normalized);
     const { code } = createOtpCode(normalized);
-    await syncActivityWithCloud();
     const settings = getSettings();
 
     const waMessage = `🔐 *${settings.name}*\n\nGiriş ve sipariş doğrulama kodunuz: *${code}*\n\nBu kod 5 dakika süreyle geçerlidir. Afiyet olsun!`;
 
     const waResult = await sendWhatsAppMessage(normalized, waMessage, "otp");
+
+    // Hem üretilen OTP kodunu hem de WhatsApp kuyruk kaydını (queued_for_local) buluta hemen aktar
+    await syncActivityWithCloud();
 
     return NextResponse.json({
       success: true,

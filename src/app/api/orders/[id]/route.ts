@@ -44,8 +44,6 @@ export async function PATCH(
       return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
     }
 
-    await syncActivityWithCloud();
-
     // Müşteriye otomatik WhatsApp sipariş durumu bildirimi gönder
     const settings = getSettings();
     const digits = (updated.customerPhone || "").replace(/\D/g, "");
@@ -70,6 +68,8 @@ export async function PATCH(
         await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
       }
     }
+
+    await syncActivityWithCloud();
 
     return NextResponse.json({ order: updated });
   } catch (error) {

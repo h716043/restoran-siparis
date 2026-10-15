@@ -1294,6 +1294,7 @@ export function mergeActivityFromCloud(payload: {
   tableCalls?: TableCall[];
   users?: CustomerUser[];
   otpCodes?: Array<{ phone: string; code: string; expiresAt: number }>;
+  whatsappLogs?: WhatsAppLog[];
 }) {
   const db = getDb();
 
@@ -1414,6 +1415,25 @@ export function mergeActivityFromCloud(payload: {
     `);
     for (const otp of payload.otpCodes) {
       upsertOtp.run(otp.phone, otp.code, otp.expiresAt);
+    }
+  }
+
+  if (payload.whatsappLogs) {
+    const upsertWaLog = db.prepare(`
+      INSERT INTO whatsapp_logs (id, phone, message, type, status, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = CASE WHEN whatsapp_logs.status = 'sent' OR excluded.status = 'sent' THEN 'sent' ELSE excluded.status END
+    `);
+    for (const log of payload.whatsappLogs) {
+      upsertWaLog.run(
+        log.id,
+        log.phone,
+        log.message,
+        log.type,
+        log.status,
+        log.createdAt
+      );
     }
   }
 }
