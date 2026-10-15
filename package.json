@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 5439",
     "build": "next build",
-    "start": "next start"
+    "start": "next start -p 5439",
+    "baslat": "node baslatici.mjs",
+    "whatsapp": "node whatsapp-bridge.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",

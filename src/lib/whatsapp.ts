@@ -25,7 +25,26 @@ export async function sendWhatsAppMessage(
   };
 
   // 1. Kendi QR WhatsApp Web Köprüsü (Ücretsiz Baileys / whatsapp-web.js / WAHA / Evolution)
+  const isNetlifyCloud =
+    process.env.NETLIFY === "true" ||
+    process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
+
   if (config.provider === "custom_gateway" && config.gatewayUrl) {
+    // Eğer Netlify bulut sunucusundaysak ve gateway localhost ise, yerel WhatsApp köprüsünün göndermesi için kuyruğa al
+    if (
+      isNetlifyCloud &&
+      (config.gatewayUrl.includes("localhost") ||
+        config.gatewayUrl.includes("127.0.0.1"))
+    ) {
+      logWhatsAppMessage(phone, message, type, "queued_for_local");
+      return {
+        success: true,
+        provider: "custom_gateway",
+        status: "sent",
+        previewMessage: message,
+      };
+    }
+
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",

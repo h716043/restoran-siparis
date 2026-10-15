@@ -1,24 +1,20 @@
 /**
  * ÜCRETSİZ KENDİ WHATSAPP NUMARANIZ İLE OTP & SİPARİŞ BİLDİRİM KÖPRÜSÜ (QR KODLU)
  * ---------------------------------------------------------------------------------
- * Bu servis, kendi WhatsApp numaranızı (WhatsApp Web -> Cihaz Bağla mantığıyla)
- * bağlayarak müşterilerinize tamamen ÜCRETSİZ 6 haneli doğrulama kodu (OTP) ve
- * sipariş onay mesajı göndermenizi sağlar.
- *
- * Kurulum (İlk seferde 1 kez çalıştırın):
- *   npm install @whiskeysockets/baileys qrcode-terminal pino
- *
- * Çalıştırma:
- *   node whatsapp-bridge.mjs
- *
- * Çalıştırdığınızda terminalde beliren QR kodu telefonunuzdaki WhatsApp
- * uygulamasından (Ayarlar -> Bağlı Cihazlar -> Cihaz Bağla) okutun.
- * Ardından /admin panelinden WhatsApp modunu "Kendi WhatsApp Numaram (QR Servisi)" yapın.
+ * Bu servis:
+ * 1. Yerel Admin / Mutfak panelinden (http://localhost:5439) gelen WhatsApp mesajlarını gönderir.
+ * 2. Netlify'daki canlı müşteri sayfasından oluşturulan OTP doğrulama kodlarını ve
+ *    sipariş bildirimlerini Turso Bulut veritabanından otomatik çekip kendi WhatsApp
+ *    numaranız üzerinden müşteriye anında gönderir!
  */
 
 import http from "node:http";
+import path from "node:path";
+import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 const PORT = 3001;
+const DB_PATH = path.join(process.cwd(), "data", "restaurant.sqlite");
 
 async function startBridge() {
   let sock = null;
@@ -69,7 +65,7 @@ async function startBridge() {
         } else if (connection === "open") {
           isConnected = true;
           console.log(
-            "\n✅ WHATSAPP BAĞLANTISI AKTİF! Artık siteden ücretsiz OTP ve sipariş mesajları gönderilebilir.\n"
+            "\n✅ WHATSAPP BAĞLANTISI AKTİF! Yerel (Port 5439) ve Netlify Bulut OTP/Sipariş mesajları otomatik gönderiliyor.\n"
           );
         }
       });
@@ -82,6 +78,113 @@ async function startBridge() {
     );
     console.log("   npm install @whiskeysockets/baileys qrcode-terminal pino\n");
   }
+
+  // Netlify / Turso Bulut Kuyruğundaki WhatsApp Mesajlarını Otomatik Gönderici
+  let isProcessingQueue = false;
+  setInterval(async () => {
+    if (!sock || !isConnected || isProcessingQueue) return;
+    if (!fs.existsSync(DB_PATH)) return;
+
+    isProcessingQueue = true;
+    try {
+      const db = new DatabaseSync(DB_PATH);
+      const row = db.prepare("SELECT data FROM settings WHERE id = 1").get();
+      if (!row || !row.data) {
+        db.close();
+        return;
+      }
+      const settings = JSON.parse(row.data);
+      const cloudCfg = settings?.cloudSyncConfig;
+
+      // 1. Eğer Turso Bulut aktifse, buluttaki 'queued_for_local' mesajlarını çek
+      if (cloudCfg?.enabled && cloudCfg?.tursoUrl && cloudCfg?.tursoAuthToken) {
+        const baseUrl = cloudCfg.tursoUrl
+          .trim()
+          .replace(/^libsql:\/\//i, "https://")
+          .replace(/^wss:\/\//i, "https://")
+          .replace(/\/+$/, "");
+
+        const res = await fetch(`${baseUrl}/v2/pipeline`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${cloudCfg.tursoAuthToken.trim()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                type: "execute",
+                stmt: {
+                  sql: "SELECT id, data FROM whatsapp_logs ORDER BY created_at DESC LIMIT 30",
+                },
+              },
+              { type: "close" },
+            ],
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          const rows = json?.results?.[0]?.response?.result?.rows || [];
+          for (const r of rows) {
+            const logDataStr = r?.[1]?.value;
+            if (!logDataStr) continue;
+            const logItem = JSON.parse(logDataStr);
+            if (logItem.status === "queued_for_local") {
+              const jid = `${String(logItem.phone).replace(/\D/g, "")}@s.whatsapp.net`;
+              try {
+                await sock.sendMessage(jid, { text: logItem.message });
+                logItem.status = "sent";
+                const updatedJson = JSON.stringify(logItem);
+
+                // Bulutta güncelle
+                await fetch(`${baseUrl}/v2/pipeline`, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${cloudCfg.tursoAuthToken.trim()}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    requests: [
+                      {
+                        type: "execute",
+                        stmt: {
+                          sql: "UPDATE whatsapp_logs SET data = ? WHERE id = ?",
+                          args: [
+                            { type: "text", value: updatedJson },
+                            { type: "text", value: String(logItem.id) },
+                          ],
+                        },
+                      },
+                      { type: "close" },
+                    ],
+                  }),
+                });
+
+                // Yerel veritabanında da kaydet
+                db.prepare(
+                  "INSERT OR REPLACE INTO whatsapp_logs (id, created_at, data) VALUES (?, ?, ?)"
+                ).run(logItem.id, logItem.createdAt, updatedJson);
+
+                console.log(
+                  `📤 [NETLIFY -> WHATSAPP] +${logItem.phone} numarasına mesaj gönderildi (${logItem.type})`
+                );
+              } catch (sendErr) {
+                console.warn("WhatsApp bulut kuyruk mesajı gönderilemedi:", sendErr);
+              }
+            }
+          }
+        }
+      }
+
+      db.close();
+    } catch {
+      // Sessizce geç (veritabanı kilitli veya internet anlık kopuk olabilir)
+    } finally {
+      isProcessingQueue = false;
+    }
+  }, 2500);
 
   const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/send-message") {

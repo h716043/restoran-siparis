@@ -241,7 +241,7 @@ export default function AdminDashboardPage() {
       ? settings.cloudSyncConfig.publicStorefrontUrl.trim().replace(/\/+$/, "")
       : typeof window !== "undefined"
       ? window.location.origin
-      : "http://localhost:3000";
+      : "http://localhost:5439";
 
   const waConfig = settings?.whatsappConfig || {
     provider: "simulation",
