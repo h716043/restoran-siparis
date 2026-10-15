@@ -36,6 +36,12 @@ import {
   Printer,
   Download,
   FileSpreadsheet,
+  Gift,
+  Star,
+  Send,
+  Upload,
+  Database,
+  Navigation,
 } from "lucide-react";
 import {
   Category,
@@ -49,11 +55,26 @@ import {
   WhatsAppLog,
 } from "@/types";
 
+interface CrmCustomerItem {
+  phone: string;
+  name: string;
+  userId: string | null;
+  loyaltyPoints: number;
+  orderCount: number;
+  totalSpent: number;
+  lastOrderAt: string | null;
+  daysSinceLastOrder: number | null;
+  address: string;
+  isVip: boolean;
+  isInactive15Days: boolean;
+}
+
 export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState<
     | "reports"
     | "menu"
     | "campaigns"
+    | "crm"
     | "whatsapp"
     | "qr"
     | "widget"
@@ -66,6 +87,16 @@ export default function AdminDashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<CustomerUser[]>([]);
   const [waLogs, setWaLogs] = useState<WhatsAppLog[]>([]);
+  const [crmCustomers, setCrmCustomers] = useState<CrmCustomerItem[]>([]);
+  const [crmSegment, setCrmSegment] = useState<"all" | "vip" | "inactive">(
+    "all"
+  );
+  const [selectedCrmPhones, setSelectedCrmPhones] = useState<string[]>([]);
+  const [campaignMessage, setCampaignMessage] = useState(
+    "Merhaba {isim} 👋 Bugün size özel sıcacık ızgara ve kebaplarımızda %15 indirim fırsatımız var! Hemen sipariş vermek için menümüze göz atabilirsiniz 🍽️🔥"
+  );
+  const [sendingCampaign, setSendingCampaign] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
   const [savingMsg, setSavingMsg] = useState("");
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<{
@@ -117,20 +148,23 @@ export default function AdminDashboardPage() {
   const [newZoneMinutes, setNewZoneMinutes] = useState("25-35 dk");
 
   const loadData = async () => {
-    const [menuRes, profRes, ordRes] = await Promise.all([
+    const [menuRes, profRes, ordRes, crmRes] = await Promise.all([
       fetch("/api/menu"),
       fetch("/api/auth/profile"),
       fetch("/api/orders"),
+      fetch("/api/customers"),
     ]);
     const data = await menuRes.json();
     const profData = await profRes.json();
     const ordData = await ordRes.json();
+    const crmData = crmRes.ok ? await crmRes.json() : { customers: [] };
     setSettings(data.settings);
     setCategories(data.categories || []);
     setItems(data.items || []);
     setUsers(profData.users || []);
     setWaLogs(profData.whatsappLogs || []);
     setOrders(ordData.orders || []);
+    setCrmCustomers(crmData.customers || []);
   };
 
   useEffect(() => {
@@ -455,6 +489,134 @@ export default function AdminDashboardPage() {
     showToast("Excel (CSV) satış raporu indirildi!");
   };
 
+  // CRM Segment Filtreleme
+  const filteredCrmCustomers = crmCustomers.filter((c) => {
+    if (crmSegment === "vip") return c.isVip;
+    if (crmSegment === "inactive") return c.isInactive15Days;
+    return true;
+  });
+
+  const handleSendBulkCampaign = async (targetList?: CrmCustomerItem[]) => {
+    const recipients = (
+      targetList ||
+      filteredCrmCustomers.filter((c) =>
+        selectedCrmPhones.length > 0
+          ? selectedCrmPhones.includes(c.phone)
+          : true
+      )
+    ).map((c) => ({ phone: c.phone, name: c.name }));
+
+    if (recipients.length === 0) {
+      alert("Gönderilecek müşteri bulunamadı.");
+      return;
+    }
+    if (!campaignMessage.trim()) {
+      alert("Lütfen kampanya mesajını yazın.");
+      return;
+    }
+
+    setSendingCampaign(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_campaign",
+          recipients,
+          messageTemplate: campaignMessage,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Kampanya mesajları gönderildi!");
+        loadData();
+      } else {
+        alert(data.error || "Kampanya gönderilemedi.");
+      }
+    } finally {
+      setSendingCampaign(false);
+    }
+  };
+
+  const handleAdjustCustomerPoints = async (
+    phone: string,
+    deltaPoints: number
+  ) => {
+    const res = await fetch("/api/customers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "adjust_points",
+        phone,
+        deltaPoints,
+      }),
+    });
+    if (res.ok) {
+      showToast(
+        `${deltaPoints > 0 ? `+${deltaPoints}` : deltaPoints} TL Para Puan güncellendi!`
+      );
+      loadData();
+    }
+  };
+
+  const handleDownloadFullBackup = async () => {
+    try {
+      const res = await fetch("/api/backup");
+      if (!res.ok) {
+        alert("Yedek alınırken hata oluştu.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `restoran-tam-yedek-${todayStr}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Tam veritabanı yedeği (.json) indirildi!");
+    } catch {
+      alert("Yedek indirilemedi.");
+    }
+  };
+
+  const handleRestoreFullBackup = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (
+      !confirm(
+        `"${file.name}" dosyasındaki yedek geri yüklenecek. Mevcut menü, ayarlar ve siparişler bu yedekle güncellenecektir. Onaylıyor musunuz?`
+      )
+    ) {
+      e.target.value = "";
+      return;
+    }
+
+    setRestoringBackup(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Yedek başarıyla geri yüklendi!");
+        loadData();
+      } else {
+        alert(data.error || "Geri yükleme başarısız oldu.");
+      }
+    } catch {
+      alert("Geçersiz JSON yedek dosyası.");
+    } finally {
+      setRestoringBackup(false);
+      e.target.value = "";
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Üst Yönetim Barı */}
@@ -472,7 +634,7 @@ export default function AdminDashboardPage() {
               Restoran Yönetim & Kurulum Paneli
             </h1>
             <p className="text-xs text-slate-400">
-              Ciro Raporları • Menü • Bölgeler & Kuponlar • WhatsApp OTP • QR
+              Ciro Raporları • Menü • Bölgeler & Kuponlar • Sadakat Cüzdanı • WhatsApp CRM • QR
             </p>
           </div>
         </div>
@@ -519,7 +681,16 @@ export default function AdminDashboardPage() {
             className="inline-flex items-center gap-1.5 text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-xl transition"
           >
             <Volume2 className="w-4 h-4" />
-            Canlı Mutfak Ekranı
+            Canlı Mutfak & POS
+          </Link>
+
+          <Link
+            href="/courier"
+            target="_blank"
+            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3.5 py-2 rounded-xl border border-slate-700 transition"
+          >
+            <Navigation className="w-3.5 h-3.5" />
+            🛵 Kurye Ekranı
           </Link>
 
           <button
@@ -580,7 +751,21 @@ export default function AdminDashboardPage() {
             }`}
           >
             <Tag className="w-4 h-4" />
-            Üst Bar, Bölgeler & Kuponlar
+            Kuponlar, Bölgeler & Sadakat
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab("crm");
+              loadData();
+            }}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition whitespace-nowrap ${
+              activeTab === "crm"
+                ? "bg-emerald-700 text-white"
+                : "text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            Müşteriler & WhatsApp Kampanya ({crmCustomers.length})
           </button>
           <button
             onClick={() => {
@@ -1013,6 +1198,71 @@ export default function AdminDashboardPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+
+            {/* ⭐ Müşteri Puanlama ve Yorumları Özeti */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Star className="w-5 h-5 text-amber-500 fill-amber-400" />
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      Müşteri Puanlama & Sipariş Yorumları (
+                      {orders.filter((o) => o.rating && o.rating > 0).length}{" "}
+                      Değerlendirme)
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Tamamlanan siparişlerden sonra müşterilerin verdiği yıldız
+                      puanları ve lezzet yorumları (4 ve 5 yıldızlı yorumlar
+                      vitrinde otomatik sergilenir)
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {orders.filter((o) => o.rating && o.rating > 0).length === 0 ? (
+                <p className="text-xs text-slate-500 py-4 text-center">
+                  Henüz değerlendirilmiş sipariş bulunmuyor. Müşteriler
+                  tamamlanan siparişlerine 1-5 yıldız ve yorum bırakabilir.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {orders
+                    .filter((o) => o.rating && o.rating > 0)
+                    .slice(0, 12)
+                    .map((ord) => (
+                      <div
+                        key={ord.id}
+                        className="p-3.5 rounded-xl bg-amber-50/40 border border-amber-200/80 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-slate-900">
+                            {ord.customerName} (#{ord.orderNumber})
+                          </span>
+                          <span className="text-xs font-black text-amber-600">
+                            {"★".repeat(ord.rating || 5)}
+                            {"☆".repeat(5 - (ord.rating || 5))}
+                          </span>
+                        </div>
+                        {ord.reviewText && (
+                          <p className="text-xs text-slate-700 italic">
+                            &ldquo;{ord.reviewText}&rdquo;
+                          </p>
+                        )}
+                        <div className="text-[10px] text-slate-400 flex justify-between pt-1">
+                          <span>
+                            {ord.items.map((i) => i.name).join(", ")}
+                          </span>
+                          <span>
+                            {new Date(
+                              ord.reviewedAt || ord.createdAt
+                            ).toLocaleDateString("tr-TR")}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                 </div>
               )}
             </div>
@@ -1754,6 +2004,399 @@ export default function AdminDashboardPage() {
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* 🎁 İSTEĞE BAĞLI MÜŞTERİ SADAKAT & PARA PUAN (CÜZDAN) SİSTEMİ */}
+            <div className="lg:col-span-12 bg-white p-6 rounded-2xl border border-amber-200 space-y-4 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                    <Gift className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-extrabold text-base text-slate-900">
+                        🎁 Müşteri Sadakat & Para Puan (Cüzdan) Sistemi
+                      </h2>
+                      <span className="text-[10px] font-black uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                        İsteğe Bağlı Modül
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      İsterseniz tek tıkla açıp kapatabilirsiniz. Açık olduğunda müşteriler her siparişte belirlediğiniz oranda (Örn: %5) TL Para Puan kazanır ve sonraki siparişlerinde isterlerse cüzdanlarından harcayabilirler.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = settings.loyaltyConfig || {
+                      enabled: false,
+                      earnPercent: 5,
+                      minRedeemPoints: 20,
+                    };
+                    persistSettings(
+                      {
+                        ...settings,
+                        loyaltyConfig: {
+                          ...current,
+                          enabled: !current.enabled,
+                        },
+                      },
+                      !current.enabled
+                        ? "🎁 Sadakat & Para Puan Sistemi AKTİF EDİLDİ!"
+                        : "Sadakat & Para Puan Sistemi KAPATILDI (Devre Dışı)"
+                    );
+                  }}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                    settings.loyaltyConfig?.enabled
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                      : "bg-slate-200 hover:bg-slate-300 text-slate-700"
+                  }`}
+                >
+                  {settings.loyaltyConfig?.enabled
+                    ? "🟢 Para Puan Sistemi: AÇIK (Aktif)"
+                    : "⚪ Para Puan Sistemi: KAPALI (İsteğe Bağlı Aç)"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Siparişten Kazanılacak Para Puan Oranı (%)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={settings.loyaltyConfig?.earnPercent ?? 5}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        loyaltyConfig: {
+                          enabled: Boolean(settings.loyaltyConfig?.enabled),
+                          earnPercent: Number(e.target.value),
+                          minRedeemPoints:
+                            settings.loyaltyConfig?.minRedeemPoints ?? 20,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm font-bold border border-slate-200 rounded-xl bg-white"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Örn: %5 seçilirse 400 TL siparişte müşterinin cüzdanına 20 TL Para Puan yüklenir.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Minimum Harcanabilir Puan Alt Limiti ({settings.currency})
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={settings.loyaltyConfig?.minRedeemPoints ?? 20}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        loyaltyConfig: {
+                          enabled: Boolean(settings.loyaltyConfig?.enabled),
+                          earnPercent:
+                            settings.loyaltyConfig?.earnPercent ?? 5,
+                          minRedeemPoints: Number(e.target.value),
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm font-bold border border-slate-200 rounded-xl bg-white"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Müşterinin biriken puanını sepette kullanabilmesi için gereken minimum bakiye.
+                  </p>
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      persistSettings(
+                        settings,
+                        "Sadakat & Para Puan ayarları kaydedildi!"
+                      )
+                    }
+                    className="w-full inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-5 py-3 rounded-xl transition cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    Para Puan Ayarlarını Kaydet
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 1.8. MÜŞTERİLER & WHATSAPP TOPLU KAMPANYA / GERİ KAZANIM (CRM) SEKMESİ */}
+        {activeTab === "crm" && settings && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Sol: Toplu WhatsApp Kampanya Gönderici */}
+            <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-slate-200 space-y-4 self-start">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-extrabold text-base text-slate-900">
+                    WhatsApp Toplu Kampanya & Geri Kazanım
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Kayıtlı müşterilerinize isme özel ({`{isim}`}) toplu veya tekil WhatsApp mesajı gönderin
+                  </p>
+                </div>
+              </div>
+
+              {/* Hazır Kampanya Şablonları */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold uppercase text-slate-500">
+                  Tek Tıkla Hazır Mesaj Şablonu Seç:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCampaignMessage(
+                        "Merhaba {isim} 👋 Sizi özledik! Bugün vereceğiniz siparişte geçerli %15 indirim kuponunuz: MERHABA50 🎁 Sıcak lezzetlerimiz için hemen sipariş verebilirsiniz!"
+                      )
+                    }
+                    className="text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  >
+                    💌 Özledik (%15 Kupon)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCampaignMessage(
+                        "Merhaba {isim} 🔥 Öğle & Akşam servisimiz başladı! Tüm ızgara ve kebap menülerimizde bugün ücretsiz Yayık Ayran ikramımız var. Afiyet olsun!"
+                      )
+                    }
+                    className="text-[11px] font-bold bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  >
+                    🔥 Günün Menüsü / İkram
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCampaignMessage(
+                        "Değerli müşterimiz {isim} 🌟 VIP müşterilerimize özel cüzdanınıza hediye Para Puan tanımlanmıştır. İlk siparişinizde keyifle kullanabilirsiniz!"
+                      )
+                    }
+                    className="text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  >
+                    🎁 VIP Para Puan Müjdesi
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Kampanya Mesajı ({`{isim}`} otomatik müşteri adıyla değişir)
+                </label>
+                <textarea
+                  rows={4}
+                  value={campaignMessage}
+                  onChange={(e) => setCampaignMessage(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs font-medium border border-slate-200 rounded-xl bg-slate-50"
+                />
+              </div>
+
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-1">
+                <div className="flex justify-between font-bold text-slate-700">
+                  <span>Seçili Hedef Kitle:</span>
+                  <span className="text-emerald-700">
+                    {selectedCrmPhones.length > 0
+                      ? `Özel Seçilen (${selectedCrmPhones.length} Kişi)`
+                      : crmSegment === "vip"
+                      ? `VIP Müşteriler (${filteredCrmCustomers.length} Kişi)`
+                      : crmSegment === "inactive"
+                      ? `15+ Gündür Sipariş Vermeyen (${filteredCrmCustomers.length} Kişi)`
+                      : `Tüm Müşteriler (${filteredCrmCustomers.length} Kişi)`}
+                  </span>
+                </div>
+                {selectedCrmPhones.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCrmPhones([])}
+                    className="text-[11px] text-rose-600 font-bold hover:underline cursor-pointer"
+                  >
+                    Seçimi Temizle (Tüm Segmente Dön)
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                disabled={sendingCampaign || filteredCrmCustomers.length === 0}
+                onClick={() => handleSendBulkCampaign()}
+                className="w-full inline-flex items-center justify-center gap-2 bg-[#075E54] hover:bg-[#064e46] disabled:opacity-50 text-white font-extrabold py-3 rounded-xl text-xs transition cursor-pointer shadow-sm"
+              >
+                <Send className="w-4 h-4" />
+                <span>
+                  {sendingCampaign
+                    ? "WhatsApp Mesajları Gönderiliyor..."
+                    : "Seçili Müşterilere WhatsApp Kampanyasını Gönder"}
+                </span>
+              </button>
+            </div>
+
+            {/* Sağ: Müşteri Segmentleri, Sipariş Özeti ve Cüzdan Puan Yönetimi */}
+            <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Müşteri Veritabanı & Sadakat Cüzdanı ({filteredCrmCustomers.length} Kişi)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Sipariş sıklığına göre filtreleyin, tek tıkla WhatsApp gönderin veya hediye Para Puan ekleyin
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCrmSegment("all")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      crmSegment === "all"
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    Tümü ({crmCustomers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCrmSegment("vip")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      crmSegment === "vip"
+                        ? "bg-amber-600 text-white"
+                        : "bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    ⭐ VIP ({crmCustomers.filter((c) => c.isVip).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCrmSegment("inactive")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      crmSegment === "inactive"
+                        ? "bg-rose-600 text-white"
+                        : "bg-rose-50 text-rose-800"
+                    }`}
+                  >
+                    ⏰ Özledik 15+ Gün (
+                    {crmCustomers.filter((c) => c.isInactive15Days).length})
+                  </button>
+                </div>
+              </div>
+
+              {filteredCrmCustomers.length === 0 ? (
+                <p className="text-xs text-slate-500 py-8 text-center">
+                  Bu segmentte müşteri bulunmuyor.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto pr-1">
+                  {filteredCrmCustomers.map((cust) => {
+                    const isChecked = selectedCrmPhones.includes(cust.phone);
+                    return (
+                      <div
+                        key={cust.phone}
+                        className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedCrmPhones([
+                                  ...selectedCrmPhones,
+                                  cust.phone,
+                                ]);
+                              } else {
+                                setSelectedCrmPhones(
+                                  selectedCrmPhones.filter(
+                                    (p) => p !== cust.phone
+                                  )
+                                );
+                              }
+                            }}
+                            className="mt-1 w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                          />
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-extrabold text-sm text-slate-900">
+                                {cust.name}
+                              </span>
+                              <span className="text-xs font-mono font-bold text-slate-500">
+                                +{cust.phone}
+                              </span>
+                              {cust.isVip && (
+                                <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                  ⭐ VIP
+                                </span>
+                              )}
+                              {cust.isInactive15Days && (
+                                <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                                  {cust.daysSinceLastOrder} gündür yok
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              Toplam{" "}
+                              <strong className="text-slate-800">
+                                {cust.orderCount} sipariş
+                              </strong>{" "}
+                              • Harcama:{" "}
+                              <strong className="text-emerald-700">
+                                {cust.totalSpent.toFixed(2)} {settings.currency}
+                              </strong>{" "}
+                              • Cüzdan Puanı:{" "}
+                              <strong className="text-amber-700">
+                                {cust.loyaltyPoints.toFixed(2)}{" "}
+                                {settings.currency}
+                              </strong>
+                            </div>
+                            {cust.address && (
+                              <div className="text-[11px] text-slate-400 truncate max-w-md">
+                                📍 {cust.address}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleAdjustCustomerPoints(cust.phone, 25)
+                            }
+                            className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
+                            title="Müşteriye +25 TL Hediye Para Puan Ekle"
+                          >
+                            +25₺ Puan
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSendBulkCampaign([cust])}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 cursor-pointer"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>Tekil Gönder</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2893,6 +3536,133 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl font-mono"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* 🎁 İsteğe Bağlı Müşteri Sadakat & Para Puan (Cüzdan) Sistemi Ayarı */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                  <Gift className="w-4 h-4 text-amber-600" />
+                  <span>
+                    🎁 Müşteri Sadakat & Para Puan (Cüzdan) Sistemi (İsteğe Bağlı)
+                  </span>
+                </div>
+                <label className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.loyaltyConfig?.enabled)}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        loyaltyConfig: {
+                          enabled: e.target.checked,
+                          earnPercent:
+                            settings.loyaltyConfig?.earnPercent ?? 5,
+                          minRedeemPoints:
+                            settings.loyaltyConfig?.minRedeemPoints ?? 20,
+                        },
+                      })
+                    }
+                    className="w-4 h-4 accent-amber-600 rounded"
+                  />
+                  <span className="text-xs font-extrabold text-amber-900">
+                    {settings.loyaltyConfig?.enabled
+                      ? "🟢 Para Puan Sistemi AÇIK"
+                      : "⚪ Para Puan Sistemi KAPALI"}
+                  </span>
+                </label>
+              </div>
+              <p className="text-xs text-slate-500">
+                Açık olduğunda müşteriler her siparişte belirlediğiniz yüzdede Para Puan kazanır ve ödeme adımında isterlerse cüzdan bakiyelerini harcayabilirler.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Siparişten Kazanılacak Para Puan Oranı (%)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={settings.loyaltyConfig?.earnPercent ?? 5}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        loyaltyConfig: {
+                          enabled: Boolean(settings.loyaltyConfig?.enabled),
+                          earnPercent: Number(e.target.value),
+                          minRedeemPoints:
+                            settings.loyaltyConfig?.minRedeemPoints ?? 20,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Minimum Harcanabilir Puan Alt Limiti ({settings.currency})
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={settings.loyaltyConfig?.minRedeemPoints ?? 20}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        loyaltyConfig: {
+                          enabled: Boolean(settings.loyaltyConfig?.enabled),
+                          earnPercent:
+                            settings.loyaltyConfig?.earnPercent ?? 5,
+                          minRedeemPoints: Number(e.target.value),
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 💾 Tek Tıkla Tam Veritabanı Yedeği İndir (.json) ve Geri Yükle (Restore) */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                <Database className="w-4 h-4 text-teal-600" />
+                <span>
+                  💾 Tam Veritabanı Yedeği İndir (.json) & Yedekten Geri Yükle
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Tüm menülerinizi, kategorilerinizi, ayarlarınızı, müşteri listesini ve sipariş geçmişinizi tek tıkla bilgisayarınıza yedekleyebilir veya başka bir bilgisayara aktarabilirsiniz.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleDownloadFullBackup}
+                  className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>📥 Tam Yedeği İndir (.json)</span>
+                </button>
+
+                <label className="inline-flex items-center gap-2 bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer">
+                  <Upload className="w-4 h-4 text-teal-700" />
+                  <span>
+                    {restoringBackup
+                      ? "Yedek Yükleniyor..."
+                      : "📤 Yedek Dosyasından Geri Yükle (.json)"}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleRestoreFullBackup}
+                    disabled={restoringBackup}
+                    className="hidden"
+                  />
+                </label>
               </div>
             </div>
 

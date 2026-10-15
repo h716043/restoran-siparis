@@ -10,7 +10,7 @@ export interface SendWhatsAppResult {
 export async function sendWhatsAppMessage(
   rawPhone: string,
   message: string,
-  type: "otp" | "order_status" = "otp"
+  type: "otp" | "order_status" | "campaign" = "otp"
 ): Promise<SendWhatsAppResult> {
   const phone = normalizePhone(rawPhone);
   const settings = getSettings();

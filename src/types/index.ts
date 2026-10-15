@@ -86,6 +86,11 @@ export interface Order {
   estimatedMinutes?: number;
   courierName?: string;
   rejectReason?: string;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsUsed?: number;
+  rating?: number; // 1-5 yıldız müşteri değerlendirmesi
+  reviewText?: string;
+  reviewedAt?: string;
   items: OrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -119,6 +124,7 @@ export interface CustomerUser {
   phone: string;
   name: string;
   addresses: SavedAddress[];
+  loyaltyPoints?: number; // Biriken Para Puan (TL karşılığı)
   createdAt: string;
   lastLoginAt: string;
 }
@@ -127,7 +133,7 @@ export interface WhatsAppLog {
   id: string;
   phone: string;
   message: string;
-  type: "otp" | "order_status";
+  type: "otp" | "order_status" | "campaign";
   status: "sent" | "simulated" | "failed" | "queued_for_local";
   createdAt: string;
 }
@@ -190,6 +196,12 @@ export interface AnnouncementBarConfig {
   theme: "dark" | "orange" | "emerald" | "indigo";
 }
 
+export interface LoyaltyConfig {
+  enabled: boolean; // İsteğe bağlı: Admin panelinden açılıp kapatılabilir
+  earnPercent: number; // Örn: %5 Para Puan kazanımı
+  minRedeemPoints: number; // Örn: En az 20 TL puan biriktiğinde kullanabilme
+}
+
 export interface RestaurantSettings {
   name: string;
   slogan: string;
@@ -206,6 +218,7 @@ export interface RestaurantSettings {
   currency: string;
   openingHours: string;
   firstOrderDiscountPercent?: number;
+  loyaltyConfig?: LoyaltyConfig;
   announcementBar?: AnnouncementBarConfig;
   deliveryZones?: DeliveryZone[];
   coupons?: Coupon[];
@@ -214,5 +227,6 @@ export interface RestaurantSettings {
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;
 }
+
 
 

@@ -27,11 +27,19 @@ import {
   CalendarDays,
   Clock,
   Users,
+  Plus,
+  Minus,
+  Trash2,
+  X,
+  Utensils,
 } from "lucide-react";
 import {
   Category,
   MenuItem,
   Order,
+  OrderItem,
+  OrderType,
+  PaymentMethod,
   RestaurantSettings,
   TableCall,
   TableReservation,
@@ -51,7 +59,7 @@ export default function KitchenTabletPage() {
   const [selectedOrderForPrint, setSelectedOrderForPrint] =
     useState<Order | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "active" | "stock" | "reservations" | "completed" | "rejected"
+    "active" | "tables" | "stock" | "reservations" | "completed" | "rejected"
   >("active");
   const [prepMinutesChoice, setPrepMinutesChoice] = useState<
     Record<string, number>
@@ -62,6 +70,25 @@ export default function KitchenTabletPage() {
   const [tableAssignmentChoice, setTableAssignmentChoice] = useState<
     Record<string, string>
   >({});
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  // Kasa POS / Telefon Siparişi Modalı State
+  const [posModalOpen, setPosModalOpen] = useState(false);
+  const [posOrderType, setPosOrderType] = useState<OrderType>("delivery");
+  const [posTableNumber, setPosTableNumber] = useState<string>("1");
+  const [posPhone, setPosPhone] = useState<string>("");
+  const [posName, setPosName] = useState<string>("");
+  const [posAddress, setPosAddress] = useState<string>("");
+  const [posNote, setPosNote] = useState<string>("");
+  const [posPaymentMethod, setPosPaymentMethod] =
+    useState<PaymentMethod>("cash");
+  const [posCategory, setPosCategory] = useState<string>("all");
+  const [posCart, setPosCart] = useState<OrderItem[]>([]);
+  const [posCustomerInfo, setPosCustomerInfo] = useState<{
+    orderCount: number;
+    loyaltyPoints: number;
+  } | null>(null);
+  const [posSubmitting, setPosSubmitting] = useState(false);
 
   const knownPendingIds = useRef<Set<string>>(new Set());
 
@@ -74,6 +101,8 @@ export default function KitchenTabletPage() {
     } catch {
       // ignore
     }
+    const clock = setInterval(() => setNowMs(Date.now()), 15000);
+    return () => clearInterval(clock);
   }, []);
 
   const fetchOrders = async () => {
@@ -189,6 +218,174 @@ export default function KitchenTabletPage() {
     } catch (e) {
       console.error("Durum güncellenemedi:", e);
     }
+  };
+
+  // Kasa POS Telefon Sorgulama (Müşteri numarası girildiğinde otomatik ad/adres doldurur)
+  const handlePosPhoneLookup = async (rawPhone: string) => {
+    setPosPhone(rawPhone);
+    const digits = rawPhone.replace(/\D/g, "");
+    if (digits.length < 10) {
+      setPosCustomerInfo(null);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/customers?phone=${encodeURIComponent(rawPhone)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          setPosName(data.user.name || "");
+          if (data.user.addresses && data.user.addresses.length > 0) {
+            setPosAddress(data.user.addresses[0].fullAddress);
+          }
+          setPosCustomerInfo({
+            orderCount: data.orderCount || 0,
+            loyaltyPoints: Number(data.user.loyaltyPoints || 0),
+          });
+        } else if (data.lastOrder) {
+          setPosName(data.lastOrder.customerName || "");
+          if (data.lastOrder.customerAddress) {
+            setPosAddress(data.lastOrder.customerAddress);
+          }
+          setPosCustomerInfo({
+            orderCount: data.orderCount || 1,
+            loyaltyPoints: 0,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handlePosAddItem = (item: MenuItem) => {
+    setPosCart((prev) => {
+      const existingIdx = prev.findIndex((c) => c.menuItemId === item.id);
+      if (existingIdx > -1) {
+        return prev.map((c, idx) =>
+          idx === existingIdx
+            ? {
+                ...c,
+                quantity: c.quantity + 1,
+                totalPrice: (c.quantity + 1) * c.unitPrice,
+              }
+            : c
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          menuItemId: item.id,
+          name: item.name,
+          quantity: 1,
+          basePrice: item.price,
+          unitPrice: item.price,
+          totalPrice: item.price,
+          selectedModifiers: [],
+        },
+      ];
+    });
+  };
+
+  const handlePosSubmitOrder = async (andPrint: boolean) => {
+    if (posCart.length === 0) return;
+    setPosSubmitting(true);
+    try {
+      const subtotal = posCart.reduce((s, i) => s + i.totalPrice, 0);
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isStaffPosOrder: true,
+          orderType: posOrderType,
+          tableNumber: posOrderType === "dine_in" ? posTableNumber : undefined,
+          customerName:
+            posName.trim() ||
+            (posOrderType === "dine_in"
+              ? `Masa ${posTableNumber}`
+              : "Kasa / Telefon Müşterisi"),
+          customerPhone: posPhone.trim() || "Kasa Siparişi",
+          customerAddress:
+            posOrderType === "delivery" ? posAddress.trim() : undefined,
+          orderNote: posNote.trim() || undefined,
+          paymentMethod:
+            posOrderType === "dine_in" ? "pos_at_table" : posPaymentMethod,
+          subtotal,
+          discountAmount: 0,
+          deliveryFee: 0,
+          totalAmount: subtotal,
+          items: posCart,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPosCart([]);
+        setPosNote("");
+        setPosModalOpen(false);
+        await fetchOrders();
+        if (andPrint && data.order) {
+          handlePrint(data.order);
+        }
+      }
+    } finally {
+      setPosSubmitting(false);
+    }
+  };
+
+  // Canlı Masa Adisyonu Tek Tıkla Hesap Kapatma
+  const handleCloseTableBill = async (tableNum: string, tableOrders: Order[]) => {
+    await Promise.all([
+      ...tableOrders.map((o) =>
+        fetch(`/api/orders/${o.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "completed" }),
+        })
+      ),
+      ...tableCalls
+        .filter((c) => c.tableNumber === tableNum && c.status === "pending")
+        .map((c) =>
+          fetch("/api/table-calls", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: c.id }),
+          })
+        ),
+    ]);
+    await fetchOrders();
+  };
+
+  // Masa Adisyonu Birleştirilmiş Fiş Yazdırma
+  const handlePrintCombinedTableBill = (
+    tableNum: string,
+    tableOrders: Order[]
+  ) => {
+    if (tableOrders.length === 0) return;
+    const combinedItems: OrderItem[] = [];
+    for (const ord of tableOrders) {
+      for (const item of ord.items) {
+        combinedItems.push(item);
+      }
+    }
+    const total = tableOrders.reduce((s, o) => s + o.totalAmount, 0);
+    const subtotal = tableOrders.reduce((s, o) => s + o.subtotal, 0);
+    const discount = tableOrders.reduce(
+      (s, o) => s + (o.discountAmount || 0),
+      0
+    );
+    const combinedOrder: Order = {
+      ...tableOrders[0],
+      orderNumber: tableOrders[0].orderNumber,
+      tableNumber: tableNum,
+      customerName: `Masa ${tableNum} Birleşik Adisyon (${tableOrders.length} Sipariş)`,
+      subtotal,
+      discountAmount: discount,
+      totalAmount: total,
+      items: combinedItems,
+    };
+    handlePrint(combinedOrder);
   };
 
   const handleToggleStock = async (item: MenuItem) => {
@@ -363,6 +560,28 @@ export default function KitchenTabletPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* KASA POS / TELEFON SİPARİŞİ OLUŞTUR */}
+          <button
+            onClick={() => {
+              setPosOrderType("delivery");
+              setPosModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-2 rounded-xl transition shadow-md cursor-pointer"
+          >
+            <PlusCircle className="w-4 h-4" />
+            ➕ Kasa POS / Telefon Siparişi
+          </button>
+
+          {/* Kurye Cep Ekranı Kısayolu */}
+          <Link
+            href="/courier"
+            target="_blank"
+            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-orange-300 border border-slate-700 px-3 py-2 rounded-xl transition"
+          >
+            <Truck className="w-4 h-4" />
+            Kurye Ekranı
+          </Link>
+
           {/* Simülasyon: Masa Rezervasyonu */}
           <button
             onClick={createTestReservation}
@@ -574,6 +793,17 @@ export default function KitchenTabletPage() {
             Aktif Siparişler ({pendingOrders.length + preparingOrders.length})
           </button>
           <button
+            onClick={() => setActiveTab("tables")}
+            className={`px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 whitespace-nowrap flex items-center gap-2 transition ${
+              activeTab === "tables"
+                ? "border-purple-500 text-purple-300 bg-slate-900"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <QrCode className="w-4 h-4" />
+            <span>🪑 Canlı Masalar (Dolu / Boş)</span>
+          </button>
+          <button
             onClick={() => setActiveTab("stock")}
             className={`px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 whitespace-nowrap flex items-center gap-2 transition ${
               activeTab === "stock"
@@ -670,6 +900,7 @@ export default function KitchenTabletPage() {
                               #{order.orderNumber}
                             </span>
                             {renderOrderTypeBadge(order)}
+                            {renderSlaTimerBadge(order.createdAt)}
                             {order.scheduledTime && (
                               <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-full">
                                 <Clock className="w-3.5 h-3.5" /> İLERİ SAAT:{" "}
@@ -875,11 +1106,22 @@ export default function KitchenTabletPage() {
                     courierChoice[order.id] ||
                     order.courierName ||
                     courierList[0];
+                  const elapsedMins = Math.max(
+                    0,
+                    Math.floor(
+                      (nowMs - new Date(order.createdAt).getTime()) / 60000
+                    )
+                  );
+                  const isLate = elapsedMins >= 25;
 
                   return (
                     <div
                       key={order.id}
-                      className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4"
+                      className={`bg-slate-900 rounded-2xl p-5 space-y-4 border ${
+                        isLate
+                          ? "border-2 border-red-500 shadow-lg shadow-red-950/30"
+                          : "border-slate-800"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
                         <div>
@@ -888,6 +1130,7 @@ export default function KitchenTabletPage() {
                               #{order.orderNumber}
                             </span>
                             {renderOrderTypeBadge(order)}
+                            {renderSlaTimerBadge(order.createdAt)}
                             {order.scheduledTime && (
                               <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-full">
                                 <Clock className="w-3.5 h-3.5" /> İLERİ SAAT:{" "}
@@ -1039,6 +1282,188 @@ export default function KitchenTabletPage() {
                   );
                 })
               )}
+            </div>
+          </div>
+        )}
+
+        {/* CANLI MASA HARİTASI & AÇIK MASA ADİSYON TAKİBİ SEKMESİ */}
+        {activeTab === "tables" && (
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-extrabold text-white">
+                  🪑 Canlı Masa Haritası & Açık Masa Adisyonları
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Dolu masaların tüm siparişlerini tek adisyonda görün, yeni ürün ekleyin, birleşik masa fişi yazdırın veya hesabı kapatın.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-xl">
+                  🟢 Boş Masa
+                </span>
+                <span className="bg-orange-500/20 text-orange-300 border border-orange-500/30 px-3 py-1.5 rounded-xl">
+                  🟠 Dolu / Açık Adisyon
+                </span>
+                <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 px-3 py-1.5 rounded-xl">
+                  🟣 Garson / Hesap Çağrısı
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {Array.from(
+                { length: settings?.tableCount || 15 },
+                (_, idx) => String(idx + 1)
+              ).map((tableNum) => {
+                const tableActiveOrders = orders.filter(
+                  (o) =>
+                    o.orderType === "dine_in" &&
+                    String(o.tableNumber).replace(/^masa[-_\s]*/i, "") ===
+                      tableNum &&
+                    ["pending", "accepted", "ready"].includes(o.status)
+                );
+                const activeCall = pendingTableCalls.find(
+                  (c) =>
+                    String(c.tableNumber).replace(/^masa[-_\s]*/i, "") ===
+                    tableNum
+                );
+                const totalTableBill = tableActiveOrders.reduce(
+                  (s, o) => s + o.totalAmount,
+                  0
+                );
+                const isOccupied = tableActiveOrders.length > 0;
+
+                return (
+                  <div
+                    key={tableNum}
+                    className={`rounded-2xl border-2 p-4 flex flex-col justify-between gap-3 transition ${
+                      activeCall
+                        ? "bg-purple-950/40 border-purple-400 shadow-lg shadow-purple-950/40 animate-pulse"
+                        : isOccupied
+                        ? "bg-slate-900 border-orange-500 shadow-lg"
+                        : "bg-slate-900/60 border-emerald-500/30 hover:border-emerald-500/60"
+                    }`}
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`font-black text-base px-3 py-1 rounded-xl ${
+                            activeCall
+                              ? "bg-purple-600 text-white"
+                              : isOccupied
+                              ? "bg-orange-600 text-white"
+                              : "bg-emerald-600/20 text-emerald-300"
+                          }`}
+                        >
+                          MASA {tableNum}
+                        </span>
+                        {isOccupied ? (
+                          <span className="text-lg font-black text-emerald-400">
+                            {totalTableBill.toFixed(2)} {settings?.currency}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-bold text-emerald-400">
+                            🟢 Boş
+                          </span>
+                        )}
+                      </div>
+
+                      {activeCall && (
+                        <div className="bg-purple-900/60 border border-purple-400/50 rounded-xl p-2 text-xs font-bold text-purple-100 flex items-center justify-between">
+                          <span>
+                            {activeCall.type === "waiter"
+                              ? "🔔 Garson Çağırıyor"
+                              : activeCall.type === "bill_cash"
+                              ? "💵 Nakit Hesap İstiyor"
+                              : "💳 POS Hesap İstiyor"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleResolveTableCall(activeCall.id)}
+                            className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px]"
+                          >
+                            Kapat
+                          </button>
+                        </div>
+                      )}
+
+                      {isOccupied ? (
+                        <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 space-y-1 max-h-40 overflow-y-auto text-xs">
+                          {tableActiveOrders.map((ord) =>
+                            ord.items.map((item) => (
+                              <div
+                                key={`${ord.id}-${item.id}`}
+                                className="flex justify-between text-slate-200"
+                              >
+                                <span>
+                                  <strong className="text-orange-400">
+                                    {item.quantity}x
+                                  </strong>{" "}
+                                  {item.name}
+                                </span>
+                                <span className="text-slate-400">
+                                  {item.totalPrice.toFixed(0)}{" "}
+                                  {settings?.currency}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 py-4 text-center">
+                          Bu masada açık sipariş bulunmuyor.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPosOrderType("dine_in");
+                            setPosTableNumber(tableNum);
+                            setPosName(`Masa ${tableNum}`);
+                            setPosModalOpen(true);
+                          }}
+                          className="flex-1 bg-slate-800 hover:bg-orange-600 text-slate-200 hover:text-white text-xs font-extrabold py-2 px-2.5 rounded-xl transition cursor-pointer"
+                        >
+                          + Ürün / Sipariş Ekle
+                        </button>
+                        {isOccupied && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handlePrintCombinedTableBill(
+                                tableNum,
+                                tableActiveOrders
+                              )
+                            }
+                            className="bg-slate-800 hover:bg-slate-700 text-orange-400 p-2 rounded-xl border border-slate-700 cursor-pointer"
+                            title="Birleşik Masa Adisyonu Yazdır"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {isOccupied && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCloseTableBill(tableNum, tableActiveOrders)
+                          }
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition cursor-pointer shadow"
+                        >
+                          ✅ Hesabı Kapat ({totalTableBill.toFixed(0)}{" "}
+                          {settings?.currency} Tahsil Edildi)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1323,6 +1748,348 @@ export default function KitchenTabletPage() {
         )}
       </main>
 
+      {/* KASA POS / TELEFON SİPARİŞİ MODALI */}
+      {posModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-5xl rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-orange-600 flex items-center justify-center text-white font-bold">
+                  <Utensils className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base text-white">
+                    Kasa POS & Telefon Siparişi Giriş Ekranı
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Telefon numarasını yazdığınızda kayıtlı müşteri adı ve adresi otomatik doldurulur
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPosModalOpen(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* Sol: Hızlı Ürün Seçim Grid */}
+              <div className="lg:col-span-7 space-y-3">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setPosCategory("all")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap ${
+                      posCategory === "all"
+                        ? "bg-orange-600 text-white"
+                        : "bg-slate-800 text-slate-300"
+                    }`}
+                  >
+                    Tümü ({menuItems.filter((m) => m.available).length})
+                  </button>
+                  {categories.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setPosCategory(c.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap ${
+                        posCategory === c.id
+                          ? "bg-orange-600 text-white"
+                          : "bg-slate-800 text-slate-300"
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[55vh] overflow-y-auto pr-1">
+                  {menuItems
+                    .filter(
+                      (m) =>
+                        m.available &&
+                        (posCategory === "all" || m.categoryId === posCategory)
+                    )
+                    .map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handlePosAddItem(item)}
+                        className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-orange-500 rounded-2xl p-3 text-left flex flex-col justify-between gap-2 transition cursor-pointer"
+                      >
+                        <div className="font-bold text-xs text-white line-clamp-2">
+                          {item.name}
+                        </div>
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-xs font-black text-orange-400">
+                            {item.price.toFixed(0)} {settings?.currency}
+                          </span>
+                          <span className="bg-orange-600/20 text-orange-300 text-[10px] font-bold px-2 py-0.5 rounded-lg">
+                            + Ekle
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* Sağ: Müşteri Bilgileri & Adisyon Sepeti */}
+              <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-4">
+                <div className="space-y-3">
+                  {/* Sipariş Tipi */}
+                  <div className="grid grid-cols-3 gap-1.5 bg-slate-900 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setPosOrderType("delivery")}
+                      className={`py-2 rounded-lg text-xs font-bold ${
+                        posOrderType === "delivery"
+                          ? "bg-orange-600 text-white"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      🛵 Paket
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPosOrderType("dine_in")}
+                      className={`py-2 rounded-lg text-xs font-bold ${
+                        posOrderType === "dine_in"
+                          ? "bg-purple-600 text-white"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      🪑 Masada
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPosOrderType("pickup")}
+                      className={`py-2 rounded-lg text-xs font-bold ${
+                        posOrderType === "pickup"
+                          ? "bg-blue-600 text-white"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      🛍️ Gel-Al
+                    </button>
+                  </div>
+
+                  {posOrderType === "dine_in" ? (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                        Masa Seçin
+                      </label>
+                      <select
+                        value={posTableNumber}
+                        onChange={(e) => setPosTableNumber(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                      >
+                        {Array.from(
+                          { length: settings?.tableCount || 15 },
+                          (_, i) => String(i + 1)
+                        ).map((n) => (
+                          <option key={n} value={n}>
+                            Masa {n}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          Müşteri Telefonu (Yazınca Ad/Adres Otomatik Gelir)
+                        </label>
+                        <input
+                          type="tel"
+                          placeholder="0532..."
+                          value={posPhone}
+                          onChange={(e) => handlePosPhoneLookup(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                        />
+                        {posCustomerInfo && (
+                          <div className="mt-1 text-[11px] text-emerald-400 font-bold">
+                            ✓ Kayıtlı Müşteri ({posCustomerInfo.orderCount} geçmiş
+                            sipariş • {posCustomerInfo.loyaltyPoints} ₺ Para Puan)
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          Müşteri Adı Soyadı
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ad Soyad"
+                          value={posName}
+                          onChange={(e) => setPosName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                        />
+                      </div>
+                      {posOrderType === "delivery" && (
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                            Teslimat Adresi
+                          </label>
+                          <textarea
+                            rows={2}
+                            placeholder="Mahalle, Sokak, Bina, Daire..."
+                            value={posAddress}
+                            onChange={(e) => setPosAddress(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          Ödeme Yöntemi
+                        </label>
+                        <select
+                          value={posPaymentMethod}
+                          onChange={(e) =>
+                            setPosPaymentMethod(e.target.value as PaymentMethod)
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                        >
+                          <option value="cash">Nakit</option>
+                          <option value="card_at_door">
+                            Kredi Kartı (POS)
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Adisyon Sepet Kalemleri */}
+                  <div className="border-t border-slate-800 pt-2 space-y-1.5 max-h-44 overflow-y-auto">
+                    {posCart.length === 0 ? (
+                      <p className="text-xs text-slate-500 text-center py-4">
+                        Soldaki ürünlere tıklayarak adisyona ekleyin.
+                      </p>
+                    ) : (
+                      posCart.map((c) => (
+                        <div
+                          key={c.id}
+                          className="flex items-center justify-between bg-slate-900 px-2.5 py-1.5 rounded-xl text-xs"
+                        >
+                          <span className="font-bold text-white truncate max-w-[160px]">
+                            {c.name}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPosCart((prev) =>
+                                  prev
+                                    .map((item) =>
+                                      item.id === c.id
+                                        ? {
+                                            ...item,
+                                            quantity: item.quantity - 1,
+                                            totalPrice:
+                                              (item.quantity - 1) *
+                                              item.unitPrice,
+                                          }
+                                        : item
+                                    )
+                                    .filter((item) => item.quantity > 0)
+                                )
+                              }
+                              className="p-1 bg-slate-800 rounded text-slate-300"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="font-black text-orange-400 w-5 text-center">
+                              {c.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPosCart((prev) =>
+                                  prev.map((item) =>
+                                    item.id === c.id
+                                      ? {
+                                          ...item,
+                                          quantity: item.quantity + 1,
+                                          totalPrice:
+                                            (item.quantity + 1) *
+                                            item.unitPrice,
+                                        }
+                                      : item
+                                  )
+                                )
+                              }
+                              className="p-1 bg-slate-800 rounded text-slate-300"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                            <span className="font-bold text-emerald-400 w-14 text-right">
+                              {c.totalPrice.toFixed(0)} {settings?.currency}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPosCart((prev) =>
+                                  prev.filter((item) => item.id !== c.id)
+                                )
+                              }
+                              className="text-slate-500 hover:text-red-400"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Sipariş Notu (Opsiyonel)"
+                    value={posNote}
+                    onChange={(e) => setPosNote(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                  />
+                </div>
+
+                <div className="space-y-2 border-t border-slate-800 pt-3">
+                  <div className="flex items-center justify-between font-black text-base text-white">
+                    <span>TOPLAM:</span>
+                    <span className="text-emerald-400">
+                      {posCart
+                        .reduce((s, i) => s + i.totalPrice, 0)
+                        .toFixed(2)}{" "}
+                      {settings?.currency}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={posSubmitting || posCart.length === 0}
+                      onClick={() => handlePosSubmitOrder(false)}
+                      className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl transition cursor-pointer"
+                    >
+                      ✅ Siparişi Kaydet
+                    </button>
+                    <button
+                      type="button"
+                      disabled={posSubmitting || posCart.length === 0}
+                      onClick={() => handlePosSubmitOrder(true)}
+                      className="bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4" />
+                      Kaydet + Fiş Yazdır
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 80mm Termal Yazıcı Fiş Şablonu */}
       {selectedOrderForPrint && (
         <div
@@ -1468,6 +2235,32 @@ export default function KitchenTabletPage() {
     </div>
   );
 
+  function renderSlaTimerBadge(createdAt: string) {
+    const mins = Math.max(
+      0,
+      Math.floor((nowMs - new Date(createdAt).getTime()) / 60000)
+    );
+    if (mins >= 25) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-black bg-red-600 text-white px-2.5 py-0.5 rounded-full animate-pulse">
+          🚨 {mins} dk (GECİKTİ!)
+        </span>
+      );
+    }
+    if (mins >= 15) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-amber-500/25 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full">
+          ⏳ {mins} dk
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+        ⏱️ {mins} dk
+      </span>
+    );
+  }
+
   function renderOrderTypeBadge(order: Order) {
     if (order.orderType === "dine_in") {
       return (
@@ -1490,3 +2283,4 @@ export default function KitchenTabletPage() {
     );
   }
 }
+

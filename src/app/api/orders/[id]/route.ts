@@ -29,14 +29,44 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const role = req.cookies.get("restoran_staff_role")?.value;
-    if (role !== "admin" && role !== "kitchen") {
-      return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
-    }
-
     await pullActivityFromCloud(true);
     const { id } = await context.params;
     const body = await req.json();
+
+    // Müşteri sipariş değerlendirmesi (1-5 Yıldız + Yorum)
+    if (body.action === "review") {
+      const { submitOrderReview } = await import("@/lib/db");
+      const reviewed = submitOrderReview(
+        id,
+        Number(body.rating || 5),
+        body.reviewText
+      );
+      if (!reviewed) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      await syncActivityWithCloud();
+      return NextResponse.json({ order: reviewed });
+    }
+
+    const settings = getSettings();
+    const role = req.cookies.get("restoran_staff_role")?.value;
+    const courierPin = req.headers.get("x-courier-pin");
+    const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
+    const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
+
+    const isAuthorized =
+      role === "admin" ||
+      role === "kitchen" ||
+      (courierPin &&
+        (courierPin === validKitchenPin || courierPin === validAdminPin));
+
+    if (!isAuthorized) {
+      return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
+    }
+
     const updated = updateOrderStatus(
       id,
       body.status,
@@ -49,7 +79,6 @@ export async function PATCH(
     }
 
     // Müşteriye otomatik WhatsApp sipariş durumu bildirimi gönder
-    const settings = getSettings();
     const digits = (updated.customerPhone || "").replace(/\D/g, "");
     if (
       settings.whatsappConfig?.sendOrderUpdates !== false &&
@@ -92,4 +121,5 @@ export async function PATCH(
     return NextResponse.json({ error: "Sipariş güncellenemedi" }, { status: 500 });
   }
 }
+
 

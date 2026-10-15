@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  adjustUserLoyaltyPoints,
   createOrder,
   getOrders,
   getSettings,
@@ -13,14 +14,25 @@ import {
 
 export async function GET(req: NextRequest) {
   try {
+    await pullActivityFromCloud();
+    const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
-    if (role !== "admin" && role !== "kitchen") {
+    const courierPin = req.headers.get("x-courier-pin");
+    const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
+    const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
+
+    const isAuthorized =
+      role === "admin" ||
+      role === "kitchen" ||
+      (courierPin &&
+        (courierPin === validKitchenPin || courierPin === validAdminPin));
+
+    if (!isAuthorized) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
-    await pullActivityFromCloud();
     const orders = getOrders();
-    return NextResponse.json({ orders });
+    return NextResponse.json({ orders, couriers: settings.couriers || [] });
   } catch (error) {
     console.error("GET /api/orders error:", error);
     return NextResponse.json({ error: "Siparişler alınamadı" }, { status: 500 });
@@ -36,10 +48,15 @@ export async function POST(req: NextRequest) {
     }
 
     const settings = getSettings();
+    const role = req.cookies.get("restoran_staff_role")?.value;
+    const isStaffPosOrder =
+      Boolean(body.isStaffPosOrder) && (role === "admin" || role === "kitchen");
+
     const requireAuth =
+      !isStaffPosOrder &&
       settings.whatsappConfig?.requireAuthForDeliveryAndPickup !== false;
 
-    // Paket Servis ve Gel-Al'da üyelik doğrulaması zorunluysa kontrol et
+    // Paket Servis ve Gel-Al'da üyelik doğrulaması zorunluysa kontrol et (Kasa POS siparişleri hariç)
     if (
       requireAuth &&
       (body.orderType === "delivery" || body.orderType === "pickup")
@@ -59,26 +76,60 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Kullanıcı kayıtlıysa ve yeni adres girdiyse adres defterine kaydet
+    // Kullanıcı telefon numarası varsa müşteri kaydını güncelle veya Kasa POS ise oluştur
+    let customerRecord =
+      body.customerPhone && body.customerPhone !== "Masadan Sipariş"
+        ? getUserByPhone(body.customerPhone)
+        : null;
+
     if (
       body.customerPhone &&
-      body.orderType === "delivery" &&
-      body.customerAddress
+      body.customerPhone !== "Masadan Sipariş" &&
+      (customerRecord || isStaffPosOrder)
     ) {
-      const u = getUserByPhone(body.customerPhone);
-      if (u) {
-        upsertUserAfterOtp(
-          body.customerPhone,
-          body.customerName,
-          body.customerAddress
+      customerRecord = upsertUserAfterOtp(
+        body.customerPhone,
+        body.customerName,
+        body.orderType === "delivery" ? body.customerAddress : undefined
+      );
+    }
+
+    // İsteğe Bağlı Müşteri Sadakat & Para Puan (Cüzdan) Hesaplaması
+    const loyaltyEnabled = settings.loyaltyConfig?.enabled === true;
+    const earnPercent = Number(settings.loyaltyConfig?.earnPercent || 0);
+    const minRedeem = Number(settings.loyaltyConfig?.minRedeemPoints || 0);
+
+    let loyaltyPointsUsed = 0;
+    let loyaltyPointsEarned = 0;
+
+    if (loyaltyEnabled && customerRecord) {
+      const requestedPoints = Number(body.loyaltyPointsUsed || 0);
+      const availablePoints = Number(customerRecord.loyaltyPoints || 0);
+      if (requestedPoints > 0 && availablePoints >= minRedeem) {
+        loyaltyPointsUsed = Math.min(
+          requestedPoints,
+          availablePoints,
+          Number(body.subtotal || 0)
         );
+      }
+      const netAmountForPoints = Math.max(
+        0,
+        Number(body.subtotal || 0) -
+          Number(body.discountAmount || 0)
+      );
+      if (earnPercent > 0 && netAmountForPoints > 0) {
+        loyaltyPointsEarned = Math.round((netAmountForPoints * earnPercent) / 100);
+      }
+      const netPointDelta = loyaltyPointsEarned - loyaltyPointsUsed;
+      if (netPointDelta !== 0) {
+        adjustUserLoyaltyPoints(customerRecord.phone, netPointDelta);
       }
     }
 
     const order = createOrder({
       orderType: body.orderType,
       tableNumber: body.tableNumber,
-      userId: body.userId,
+      userId: customerRecord?.id || body.userId,
       customerName: body.customerName || "Misafir",
       customerPhone: body.customerPhone || "-",
       customerAddress: body.customerAddress,
@@ -92,6 +143,12 @@ export async function POST(req: NextRequest) {
       couponCode: body.couponCode || undefined,
       deliveryFee: Number(body.deliveryFee || 0),
       totalAmount: Number(body.totalAmount),
+      estimatedMinutes: isStaffPosOrder
+        ? settings.estimatedPrepMinutes || 25
+        : undefined,
+      loyaltyPointsEarned,
+      loyaltyPointsUsed,
+      initialStatus: isStaffPosOrder ? "accepted" : "pending",
       items: body.items,
     });
     await syncActivityWithCloud();
@@ -104,4 +161,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
 

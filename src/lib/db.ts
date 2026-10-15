@@ -44,7 +44,7 @@ const DB_PATH = path.join(DATA_DIR, "restaurant.sqlite");
 
 const globalForDb = globalThis as unknown as {
   sqliteDb?: DatabaseSync;
-  schemaMigratedV7?: boolean;
+  schemaMigratedV8?: boolean;
 };
 
 export function getDb(): DatabaseSync {
@@ -53,10 +53,10 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     globalForDb.sqliteDb = db;
-    globalForDb.schemaMigratedV7 = true;
-  } else if (!globalForDb.schemaMigratedV7) {
+    globalForDb.schemaMigratedV8 = true;
+  } else if (!globalForDb.schemaMigratedV8) {
     initSchema(globalForDb.sqliteDb);
-    globalForDb.schemaMigratedV7 = true;
+    globalForDb.schemaMigratedV8 = true;
   }
   return globalForDb.sqliteDb;
 }
@@ -167,6 +167,11 @@ function initSchema(db: DatabaseSync) {
       estimatedMinutes INTEGER,
       courierName TEXT,
       rejectReason TEXT,
+      loyaltyPointsEarned REAL DEFAULT 0,
+      loyaltyPointsUsed REAL DEFAULT 0,
+      rating INTEGER,
+      reviewText TEXT,
+      reviewedAt TEXT,
       itemsJson TEXT NOT NULL,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
@@ -192,6 +197,7 @@ function initSchema(db: DatabaseSync) {
       phone TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
       addressesJson TEXT NOT NULL DEFAULT '[]',
+      loyaltyPoints REAL DEFAULT 0,
       createdAt TEXT NOT NULL,
       lastLoginAt TEXT NOT NULL
     );
@@ -220,7 +226,7 @@ function initSchema(db: DatabaseSync) {
     );
   `);
 
-  // Ensure new columns exist on orders table
+  // Ensure new columns exist on orders and users tables
   const alterCols = [
     "ALTER TABLE orders ADD COLUMN userId TEXT;",
     "ALTER TABLE orders ADD COLUMN deliveryZoneId TEXT;",
@@ -229,6 +235,12 @@ function initSchema(db: DatabaseSync) {
     "ALTER TABLE orders ADD COLUMN discountAmount REAL DEFAULT 0;",
     "ALTER TABLE orders ADD COLUMN couponCode TEXT;",
     "ALTER TABLE orders ADD COLUMN courierName TEXT;",
+    "ALTER TABLE orders ADD COLUMN loyaltyPointsEarned REAL DEFAULT 0;",
+    "ALTER TABLE orders ADD COLUMN loyaltyPointsUsed REAL DEFAULT 0;",
+    "ALTER TABLE orders ADD COLUMN rating INTEGER;",
+    "ALTER TABLE orders ADD COLUMN reviewText TEXT;",
+    "ALTER TABLE orders ADD COLUMN reviewedAt TEXT;",
+    "ALTER TABLE users ADD COLUMN loyaltyPoints REAL DEFAULT 0;",
   ];
   for (const sql of alterCols) {
     try {
@@ -285,6 +297,14 @@ function initSchema(db: DatabaseSync) {
       parsed.firstOrderDiscountPercent = 10;
       changed = true;
     }
+    if (!parsed.loyaltyConfig) {
+      parsed.loyaltyConfig = {
+        enabled: true,
+        earnPercent: 5,
+        minRedeemPoints: 20,
+      };
+      changed = true;
+    }
     if (!parsed.announcementBar) {
       parsed.announcementBar = {
         enabled: true,
@@ -317,6 +337,11 @@ function seedDatabase(db: DatabaseSync) {
     currency: "₺",
     openingHours: "11:00 - 23:30",
     firstOrderDiscountPercent: 10,
+    loyaltyConfig: {
+      enabled: true,
+      earnPercent: 5,
+      minRedeemPoints: 20,
+    },
     announcementBar: {
       enabled: true,
       badgeText: "🔥 GÜNÜN FIRSATI",
@@ -749,7 +774,7 @@ export function deleteMenuItem(id: string) {
 export function getOrders(): Order[] {
   const db = getDb();
   const rows = db
-    .prepare("SELECT * FROM orders ORDER BY createdAt DESC LIMIT 200")
+    .prepare("SELECT * FROM orders ORDER BY createdAt DESC LIMIT 300")
     .all() as Array<{
     id: string;
     orderNumber: number;
@@ -773,6 +798,11 @@ export function getOrders(): Order[] {
     estimatedMinutes: number | null;
     courierName: string | null;
     rejectReason: string | null;
+    loyaltyPointsEarned: number | null;
+    loyaltyPointsUsed: number | null;
+    rating: number | null;
+    reviewText: string | null;
+    reviewedAt: string | null;
     itemsJson: string;
     createdAt: string;
     updatedAt: string;
@@ -801,6 +831,11 @@ export function getOrders(): Order[] {
     estimatedMinutes: r.estimatedMinutes || undefined,
     courierName: r.courierName || undefined,
     rejectReason: r.rejectReason || undefined,
+    loyaltyPointsEarned: r.loyaltyPointsEarned || 0,
+    loyaltyPointsUsed: r.loyaltyPointsUsed || 0,
+    rating: r.rating || undefined,
+    reviewText: r.reviewText || undefined,
+    reviewedAt: r.reviewedAt || undefined,
     items: JSON.parse(r.itemsJson || "[]"),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -842,6 +877,11 @@ export function getOrderById(id: string): Order | null {
     estimatedMinutes: number | null;
     courierName: string | null;
     rejectReason: string | null;
+    loyaltyPointsEarned: number | null;
+    loyaltyPointsUsed: number | null;
+    rating: number | null;
+    reviewText: string | null;
+    reviewedAt: string | null;
     itemsJson: string;
     createdAt: string;
     updatedAt: string;
@@ -871,6 +911,11 @@ export function getOrderById(id: string): Order | null {
     estimatedMinutes: r.estimatedMinutes || undefined,
     courierName: r.courierName || undefined,
     rejectReason: r.rejectReason || undefined,
+    loyaltyPointsEarned: r.loyaltyPointsEarned || 0,
+    loyaltyPointsUsed: r.loyaltyPointsUsed || 0,
+    rating: r.rating || undefined,
+    reviewText: r.reviewText || undefined,
+    reviewedAt: r.reviewedAt || undefined,
     items: JSON.parse(r.itemsJson || "[]"),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -878,7 +923,9 @@ export function getOrderById(id: string): Order | null {
 }
 
 export function createOrder(
-  input: Omit<Order, "id" | "orderNumber" | "status" | "createdAt" | "updatedAt">
+  input: Omit<Order, "id" | "orderNumber" | "status" | "createdAt" | "updatedAt"> & {
+    initialStatus?: Order["status"];
+  }
 ): Order {
   const db = getDb();
   const maxRow = db
@@ -892,7 +939,7 @@ export function createOrder(
     ...input,
     id,
     orderNumber: nextOrderNumber,
-    status: "pending",
+    status: input.initialStatus || "pending",
     createdAt: now,
     updatedAt: now,
   };
@@ -902,9 +949,10 @@ export function createOrder(
       id, orderNumber, orderType, status, tableNumber, userId,
       customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
       scheduledTime, orderNote, paymentMethod, subtotal, discountAmount, couponCode,
-      deliveryFee, totalAmount, estimatedMinutes, rejectReason,
+      deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
+      loyaltyPointsEarned, loyaltyPointsUsed,
       itemsJson, createdAt, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     order.id,
     order.orderNumber,
@@ -926,13 +974,36 @@ export function createOrder(
     order.deliveryFee,
     order.totalAmount,
     order.estimatedMinutes || null,
+    order.courierName || null,
     order.rejectReason || null,
+    order.loyaltyPointsEarned || 0,
+    order.loyaltyPointsUsed || 0,
     JSON.stringify(order.items),
     order.createdAt,
     order.updatedAt
   );
 
   return order;
+}
+
+export function submitOrderReview(
+  orderId: string,
+  rating: number,
+  reviewText?: string
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  const cleanRating = Math.min(5, Math.max(1, Math.round(Number(rating) || 5)));
+
+  db.prepare(`
+    UPDATE orders
+    SET rating = ?, reviewText = ?, reviewedAt = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(cleanRating, reviewText?.trim() || null, now, now, orderId);
+
+  return getOrderById(orderId);
 }
 
 // --- Masa Rezervasyon Fonksiyonları ---
@@ -1108,6 +1179,7 @@ export function getUserByPhone(rawPhone: string): CustomerUser | null {
     phone: string;
     name: string;
     addressesJson: string;
+    loyaltyPoints: number | null;
     createdAt: string;
     lastLoginAt: string;
   } | undefined;
@@ -1118,9 +1190,29 @@ export function getUserByPhone(rawPhone: string): CustomerUser | null {
     phone: row.phone,
     name: row.name,
     addresses: JSON.parse(row.addressesJson || "[]"),
+    loyaltyPoints: Number(row.loyaltyPoints || 0),
     createdAt: row.createdAt,
     lastLoginAt: row.lastLoginAt,
   };
+}
+
+export function adjustUserLoyaltyPoints(
+  rawPhone: string,
+  delta: number
+): CustomerUser | null {
+  const db = getDb();
+  const phone = normalizePhone(rawPhone);
+  const user = getUserByPhone(phone);
+  if (!user) return null;
+  const nextPoints = Math.max(
+    0,
+    Math.round(((user.loyaltyPoints || 0) + delta) * 100) / 100
+  );
+  db.prepare("UPDATE users SET loyaltyPoints = ? WHERE phone = ?").run(
+    nextPoints,
+    phone
+  );
+  return getUserByPhone(phone);
 }
 
 export function upsertUserAfterOtp(
@@ -1167,8 +1259,8 @@ export function upsertUserAfterOtp(
       : [];
 
     db.prepare(`
-      INSERT INTO users (id, phone, name, addressesJson, createdAt, lastLoginAt)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, phone, name, addressesJson, loyaltyPoints, createdAt, lastLoginAt)
+      VALUES (?, ?, ?, ?, 0, ?, ?)
     `).run(
       id,
       phone,
@@ -1204,6 +1296,7 @@ export function getAllUsers(): CustomerUser[] {
     phone: string;
     name: string;
     addressesJson: string;
+    loyaltyPoints: number | null;
     createdAt: string;
     lastLoginAt: string;
   }>;
@@ -1213,6 +1306,7 @@ export function getAllUsers(): CustomerUser[] {
     phone: r.phone,
     name: r.name,
     addresses: JSON.parse(r.addressesJson || "[]"),
+    loyaltyPoints: Number(r.loyaltyPoints || 0),
     createdAt: r.createdAt,
     lastLoginAt: r.lastLoginAt,
   }));
@@ -1322,13 +1416,17 @@ export function mergeActivityFromCloud(payload: {
         customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
         scheduledTime, orderNote, paymentMethod, subtotal, discountAmount, couponCode,
         deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
+        loyaltyPointsEarned, loyaltyPointsUsed, rating, reviewText, reviewedAt,
         itemsJson, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.status ELSE orders.status END,
         estimatedMinutes = COALESCE(excluded.estimatedMinutes, orders.estimatedMinutes),
         courierName = COALESCE(excluded.courierName, orders.courierName),
         rejectReason = COALESCE(excluded.rejectReason, orders.rejectReason),
+        rating = COALESCE(excluded.rating, orders.rating),
+        reviewText = COALESCE(excluded.reviewText, orders.reviewText),
+        reviewedAt = COALESCE(excluded.reviewedAt, orders.reviewedAt),
         updatedAt = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.updatedAt ELSE orders.updatedAt END
     `);
     for (const o of payload.orders) {
@@ -1355,6 +1453,11 @@ export function mergeActivityFromCloud(payload: {
         o.estimatedMinutes || null,
         o.courierName || null,
         o.rejectReason || null,
+        o.loyaltyPointsEarned || 0,
+        o.loyaltyPointsUsed || 0,
+        o.rating || null,
+        o.reviewText || null,
+        o.reviewedAt || null,
         JSON.stringify(o.items || []),
         o.createdAt,
         o.updatedAt
@@ -1405,12 +1508,13 @@ export function mergeActivityFromCloud(payload: {
 
   if (payload.users) {
     const upsertUser = db.prepare(`
-      INSERT INTO users (id, phone, name, addressesJson, createdAt, lastLoginAt)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, phone, name, addressesJson, loyaltyPoints, createdAt, lastLoginAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(phone) DO UPDATE SET
         name = excluded.name,
         addressesJson = excluded.addressesJson,
-        lastLoginAt = excluded.lastLoginAt
+        loyaltyPoints = CASE WHEN excluded.lastLoginAt >= users.lastLoginAt THEN excluded.loyaltyPoints ELSE users.loyaltyPoints END,
+        lastLoginAt = CASE WHEN excluded.lastLoginAt >= users.lastLoginAt THEN excluded.lastLoginAt ELSE users.lastLoginAt END
     `);
     for (const u of payload.users) {
       upsertUser.run(
@@ -1418,6 +1522,7 @@ export function mergeActivityFromCloud(payload: {
         u.phone,
         u.name,
         JSON.stringify(u.addresses || []),
+        Number(u.loyaltyPoints || 0),
         u.createdAt,
         u.lastLoginAt
       );
@@ -1456,4 +1561,38 @@ export function mergeActivityFromCloud(payload: {
     }
   }
 }
+
+export function exportFullBackup() {
+  return {
+    version: "v8",
+    exportedAt: new Date().toISOString(),
+    settings: getSettings(),
+    categories: getCategories(),
+    menuItems: getMenuItems(),
+    orders: getOrders(),
+    reservations: getReservations(),
+    users: getAllUsers(),
+  };
+}
+
+export function importFullBackup(backup: {
+  settings?: RestaurantSettings;
+  categories?: Category[];
+  menuItems?: MenuItem[];
+  orders?: Order[];
+  reservations?: TableReservation[];
+  users?: CustomerUser[];
+}) {
+  mergeCatalogFromCloud({
+    settings: backup.settings,
+    categories: backup.categories,
+    menuItems: backup.menuItems,
+  });
+  mergeActivityFromCloud({
+    orders: backup.orders,
+    reservations: backup.reservations,
+    users: backup.users,
+  });
+}
+
 

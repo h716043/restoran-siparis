@@ -2,19 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getCategories,
   getMenuItems,
+  getOrders,
   getSettings,
   saveMenuItem,
   deleteMenuItem,
   createCategory,
   deleteCategory,
 } from "@/lib/db";
-import { pullCatalogFromCloud, pushCatalogToCloud } from "@/lib/cloud-sync";
+import {
+  pullActivityFromCloud,
+  pullCatalogFromCloud,
+  pushCatalogToCloud,
+} from "@/lib/cloud-sync";
 
 export async function GET(req: NextRequest) {
   try {
     const role = req.cookies.get("restoran_staff_role")?.value;
     if (role !== "admin") {
-      await pullCatalogFromCloud();
+      await Promise.all([pullCatalogFromCloud(), pullActivityFromCloud()]);
     }
     const rawSettings = getSettings();
     const settings =
@@ -28,7 +33,26 @@ export async function GET(req: NextRequest) {
 
     const categories = getCategories();
     const items = getMenuItems();
-    return NextResponse.json({ settings, categories, items });
+    const publicReviews = getOrders()
+      .filter((o) => (o.rating || 0) >= 4)
+      .slice(0, 12)
+      .map((o) => {
+        const parts = (o.customerName || "Müşteri").trim().split(/\s+/);
+        const maskedName =
+          parts.length > 1
+            ? `${parts[0]} ${parts[parts.length - 1][0]}.`
+            : parts[0];
+        return {
+          id: o.id,
+          customerName: maskedName,
+          rating: o.rating || 5,
+          reviewText: o.reviewText || "Çok lezzetli ve hızlı servis, teşekkürler!",
+          itemsSummary: o.items.map((i) => i.name).join(", "),
+          reviewedAt: o.reviewedAt || o.updatedAt,
+        };
+      });
+
+    return NextResponse.json({ settings, categories, items, publicReviews });
   } catch (error) {
     console.error("GET /api/menu error:", error);
     return NextResponse.json({ error: "Menü yüklenemedi" }, { status: 500 });

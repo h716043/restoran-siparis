@@ -45,6 +45,7 @@ import {
   Search,
   CalendarDays,
   Users,
+  Star,
 } from "lucide-react";
 import {
   Category,
@@ -61,6 +62,15 @@ import {
   SelectedModifier,
   TableReservation,
 } from "@/types";
+
+interface PublicReviewItem {
+  id: string;
+  customerName: string;
+  rating: number;
+  reviewText?: string;
+  reviewedAt: string;
+  itemsSummary: string;
+}
 
 const TIME_SLOTS = [
   "11:30",
@@ -100,6 +110,7 @@ function CustomerMenuContent() {
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
+  const [publicReviews, setPublicReviews] = useState<PublicReviewItem[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -154,8 +165,15 @@ function CustomerMenuContent() {
   const [customerAddress, setCustomerAddress] = useState("");
   const [orderNote, setOrderNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+
+  // Sipariş Sonrası Puanlama & Yorum State
+  const [reviewingOrderId, setReviewingOrderId] = useState<string | null>(null);
+  const [reviewRating, setReviewRating] = useState<number>(5);
+  const [reviewText, setReviewText] = useState<string>("");
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   // İleri Saatli Sipariş (Ön Sipariş) State
   const [deliveryTiming, setDeliveryTiming] = useState<"asap" | "scheduled">(
@@ -263,6 +281,7 @@ function CustomerMenuContent() {
         setSettings(data.settings);
         setCategories(data.categories || []);
         setItems(data.items || []);
+        setPublicReviews(data.publicReviews || []);
 
         const zones: DeliveryZone[] = (
           data.settings?.deliveryZones || []
@@ -778,7 +797,62 @@ function CustomerMenuContent() {
     settings?.firstOrderDiscountPercent,
   ]);
 
-  const totalAmount = Math.max(0, subtotal - discountAmount) + deliveryFee;
+  const baseTotalBeforeLoyalty =
+    Math.max(0, subtotal - discountAmount) + deliveryFee;
+
+  // İsteğe Bağlı Müşteri Sadakat & Para Puan Hesaplaması
+  const isLoyaltyEnabled = Boolean(settings?.loyaltyConfig?.enabled);
+  const availableUserPoints = Number(currentUser?.loyaltyPoints || 0);
+  const minRedeemPoints = Number(settings?.loyaltyConfig?.minRedeemPoints ?? 20);
+  const canRedeemPoints =
+    isLoyaltyEnabled &&
+    Boolean(currentUser) &&
+    availableUserPoints >= minRedeemPoints &&
+    baseTotalBeforeLoyalty > 0;
+
+  const loyaltyPointsToUse = useMemo(() => {
+    if (!canRedeemPoints || !useLoyaltyPoints) return 0;
+    return Math.min(availableUserPoints, baseTotalBeforeLoyalty);
+  }, [canRedeemPoints, useLoyaltyPoints, availableUserPoints, baseTotalBeforeLoyalty]);
+
+  const totalAmount = Math.max(0, baseTotalBeforeLoyalty - loyaltyPointsToUse);
+
+  const estimatedPointsToEarn = useMemo(() => {
+    if (!isLoyaltyEnabled) return 0;
+    const pct = Number(settings?.loyaltyConfig?.earnPercent || 0);
+    if (pct <= 0) return 0;
+    return Math.round(((totalAmount * pct) / 100) * 100) / 100;
+  }, [isLoyaltyEnabled, settings?.loyaltyConfig?.earnPercent, totalAmount]);
+
+  const handleSubmitOrderReview = async (orderId: string) => {
+    setSubmittingReview(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "review",
+          rating: reviewRating,
+          reviewText: reviewText.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        setReviewingOrderId(null);
+        setReviewText("");
+        if (currentUser?.phone) {
+          await fetchUserProfileAndOrders(currentUser.phone);
+        }
+        // Yeniden menü yorumlarını çek
+        const mRes = await fetch("/api/menu");
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          setPublicReviews(mData.publicReviews || []);
+        }
+      }
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   const handleApplyCouponCode = (codeToApply?: string) => {
     const raw = (codeToApply ?? couponInput).trim().toUpperCase();
@@ -951,8 +1025,9 @@ function CustomerMenuContent() {
             : isFirstOrderEligible
             ? `ILKSIPARIS%${settings?.firstOrderDiscountPercent}`
             : undefined,
+          useLoyaltyPoints: Boolean(useLoyaltyPoints && canRedeemPoints),
           deliveryFee,
-          totalAmount,
+          totalAmount: baseTotalBeforeLoyalty,
           items: cart,
         }),
       });
@@ -968,6 +1043,7 @@ function CustomerMenuContent() {
         setAppliedCoupon(null);
         setCouponInput("");
         setCouponMessage(null);
+        setUseLoyaltyPoints(false);
         setDeliveryTiming("asap");
         setCheckoutStep("cart");
         setMobileCartOpen(false);
@@ -1493,6 +1569,55 @@ function CustomerMenuContent() {
                 );
               })
           )}
+
+          {/* ⭐ VİTRİN MÜŞTERİ DEĞERLENDİRMELERİ & YORUMLARI */}
+          {publicReviews.length > 0 && (
+            <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3.5 shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Star className="w-5 h-5 text-amber-500 fill-amber-400" />
+                  <h2 className="font-extrabold text-base text-slate-900">
+                    Müşteri Değerlendirmeleri ({publicReviews.length})
+                  </h2>
+                </div>
+                <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                  ★ Doğrulanmış Sipariş Yorumları
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {publicReviews.slice(0, 6).map((rev) => (
+                  <div
+                    key={rev.id}
+                    className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-slate-900">
+                        {rev.customerName}
+                      </span>
+                      <span className="text-xs font-black text-amber-500">
+                        {"★".repeat(rev.rating)}
+                        {"☆".repeat(5 - rev.rating)}
+                      </span>
+                    </div>
+                    {rev.reviewText && (
+                      <p className="text-xs text-slate-700 italic">
+                        &ldquo;{rev.reviewText}&rdquo;
+                      </p>
+                    )}
+                    <div className="text-[10px] text-slate-400 flex items-center justify-between pt-0.5">
+                      <span className="truncate max-w-[200px]">
+                        🍽️ {rev.itemsSummary}
+                      </span>
+                      <span>
+                        {new Date(rev.reviewedAt).toLocaleDateString("tr-TR")}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
 
         {/* SAĞ SÜTUN: TESLİMAT BÖLGESİ, FIRSATLAR/KUPONLAR & SİPARİŞ SEPETİ */}
@@ -1898,9 +2023,17 @@ function CustomerMenuContent() {
                   <UserCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-base sm:text-lg">
-                    {currentUser.name}
-                  </h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-extrabold text-base sm:text-lg">
+                      {currentUser.name}
+                    </h3>
+                    {isLoyaltyEnabled && (
+                      <span className="inline-flex items-center gap-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-extrabold px-2.5 py-0.5 rounded-full">
+                        🎁 Cüzdan: {(currentUser.loyaltyPoints || 0).toFixed(2)}{" "}
+                        {settings?.currency}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-emerald-400 font-medium">
                     WhatsApp Onaylı Üye • +{currentUser.phone}
                   </p>
@@ -2069,6 +2202,13 @@ function CustomerMenuContent() {
                                 ? "Tamamlandı"
                                 : "İptal / Reddedildi"}
                             </span>
+                            {isLoyaltyEnabled &&
+                              (ord.loyaltyPointsEarned || 0) > 0 && (
+                                <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                  +{ord.loyaltyPointsEarned?.toFixed(2)}{" "}
+                                  {settings?.currency} Puan Kazanıldı
+                                </span>
+                              )}
                           </div>
                           <span className="font-extrabold text-sm text-slate-900">
                             {ord.totalAmount.toFixed(2)} {settings?.currency}
@@ -2091,6 +2231,95 @@ function CustomerMenuContent() {
                             </div>
                           ))}
                         </div>
+
+                        {/* ⭐ Sipariş Sonrası Puanlama & Yorum Alanı */}
+                        {ord.status === "completed" && (
+                          <div className="pt-1">
+                            {ord.rating && ord.rating > 0 ? (
+                              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-black text-amber-600">
+                                    {"★".repeat(ord.rating)}
+                                    {"☆".repeat(5 - ord.rating)}
+                                  </span>
+                                  {ord.reviewText && (
+                                    <span className="text-slate-700 italic">
+                                      &ldquo;{ord.reviewText}&rdquo;
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] font-bold text-emerald-700">
+                                  ✓ Değerlendirildi
+                                </span>
+                              </div>
+                            ) : reviewingOrderId === ord.id ? (
+                              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-slate-800">
+                                    Siparişinizi Puanlayın:
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    {[1, 2, 3, 4, 5].map((star) => (
+                                      <button
+                                        key={star}
+                                        type="button"
+                                        onClick={() => setReviewRating(star)}
+                                        className={`text-lg leading-none cursor-pointer ${
+                                          star <= reviewRating
+                                            ? "text-amber-500"
+                                            : "text-slate-300"
+                                        }`}
+                                      >
+                                        ★
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <input
+                                  type="text"
+                                  placeholder="Lezzet ve hız hakkında yorumunuz (İsteğe bağlı)..."
+                                  value={reviewText}
+                                  onChange={(e) => setReviewText(e.target.value)}
+                                  className="w-full px-3 py-1.5 text-xs bg-white border border-amber-200 rounded-lg"
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setReviewingOrderId(null)}
+                                    className="px-2.5 py-1 text-xs font-semibold text-slate-600"
+                                  >
+                                    Vazgeç
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={submittingReview}
+                                    onClick={() =>
+                                      handleSubmitOrderReview(ord.id)
+                                    }
+                                    className="px-3 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg"
+                                  >
+                                    {submittingReview
+                                      ? "Kaydediliyor..."
+                                      : "Puanı Gönder"}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReviewingOrderId(ord.id);
+                                  setReviewRating(5);
+                                  setReviewText("");
+                                }}
+                                className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-xl transition cursor-pointer"
+                              >
+                                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                                <span>Siparişi Puanla & Yorum Yaz</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-between pt-1">
                           <span className="text-xs text-slate-500 truncate max-w-xs">
@@ -2530,6 +2759,12 @@ function CustomerMenuContent() {
           <div className="text-left">
             <div className="text-xs font-bold text-slate-900 leading-none flex items-center gap-1.5">
               <span>{currentUser.name}</span>
+              {isLoyaltyEnabled && (
+                <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                  🎁 {(currentUser.loyaltyPoints || 0).toFixed(0)}{" "}
+                  {settings?.currency}
+                </span>
+              )}
               {activeUserOrders.length > 0 && (
                 <span className="bg-orange-600 text-white text-[10px] px-1.5 py-0.2 rounded-full">
                   {activeUserOrders.length} Aktif
@@ -2728,6 +2963,50 @@ function CustomerMenuContent() {
             )}
           </div>
 
+          {/* 🎁 İsteğe Bağlı Müşteri Sadakat & Para Puan Harcama Kutusu */}
+          {isLoyaltyEnabled && currentUser && (
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-amber-900 flex items-center gap-1">
+                  <Gift className="w-3.5 h-3.5 text-amber-600" />
+                  Para Puan Cüzdanınız:
+                </span>
+                <span className="font-black text-amber-800">
+                  {availableUserPoints.toFixed(2)} {settings?.currency}
+                </span>
+              </div>
+              {canRedeemPoints ? (
+                <label className="flex items-center gap-2 pt-1 cursor-pointer font-bold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={useLoyaltyPoints}
+                    onChange={(e) => setUseLoyaltyPoints(e.target.checked)}
+                    className="w-4 h-4 accent-amber-600 rounded"
+                  />
+                  <span>
+                    Biriken Para Puanımı Bu Siparişte Kullan (-
+                    {Math.min(
+                      availableUserPoints,
+                      baseTotalBeforeLoyalty
+                    ).toFixed(2)}{" "}
+                    {settings?.currency})
+                  </span>
+                </label>
+              ) : (
+                <p className="text-[11px] text-amber-700">
+                  Puanlarınızı harcayabilmek için en az {minRedeemPoints}{" "}
+                  {settings?.currency} puanınız olmalıdır.
+                </p>
+              )}
+              {estimatedPointsToEarn > 0 && (
+                <div className="text-[11px] font-bold text-emerald-700 pt-0.5">
+                  ✨ Bu siparişten +{estimatedPointsToEarn.toFixed(2)}{" "}
+                  {settings?.currency} Para Puan kazanacaksınız!
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Tutar Özeti */}
           <div className="border-t border-slate-200 pt-3 space-y-1.5 text-sm">
             <div className="flex justify-between text-slate-600">
@@ -2747,6 +3026,14 @@ function CustomerMenuContent() {
                 </span>
                 <span>
                   -{discountAmount.toFixed(2)} {settings?.currency}
+                </span>
+              </div>
+            )}
+            {loyaltyPointsToUse > 0 && (
+              <div className="flex justify-between text-amber-700 font-bold">
+                <span>🎁 Cüzdan Para Puan İndirimi</span>
+                <span>
+                  -{loyaltyPointsToUse.toFixed(2)} {settings?.currency}
                 </span>
               </div>
             )}
@@ -3035,11 +3322,45 @@ function CustomerMenuContent() {
           />
         </div>
 
-        <div className="pt-2 border-t border-slate-100 flex items-center justify-between font-extrabold text-base">
-          <span>Ödenecek Tutar</span>
-          <span className="text-orange-600">
-            {totalAmount.toFixed(2)} {settings?.currency}
-          </span>
+        {canRedeemPoints && (
+          <label className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-xl text-xs font-bold text-amber-900 cursor-pointer">
+            <span className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={useLoyaltyPoints}
+                onChange={(e) => setUseLoyaltyPoints(e.target.checked)}
+                className="w-4 h-4 accent-amber-600 rounded"
+              />
+              <span>🎁 Cüzdanımdaki Para Puanı Kullan</span>
+            </span>
+            <span className="font-black text-amber-800">
+              -{Math.min(availableUserPoints, baseTotalBeforeLoyalty).toFixed(2)}{" "}
+              {settings?.currency}
+            </span>
+          </label>
+        )}
+
+        <div className="pt-2 border-t border-slate-100 space-y-1">
+          {loyaltyPointsToUse > 0 && (
+            <div className="flex items-center justify-between text-xs font-bold text-amber-700">
+              <span>Kullanılan Para Puan:</span>
+              <span>
+                -{loyaltyPointsToUse.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center justify-between font-extrabold text-base">
+            <span>Ödenecek Tutar</span>
+            <span className="text-orange-600">
+              {totalAmount.toFixed(2)} {settings?.currency}
+            </span>
+          </div>
+          {isLoyaltyEnabled && estimatedPointsToEarn > 0 && (
+            <div className="text-[11px] font-bold text-emerald-700 text-right">
+              🎁 Bu siparişten +{estimatedPointsToEarn.toFixed(2)}{" "}
+              {settings?.currency} Para Puan kazanacaksınız
+            </div>
+          )}
         </div>
 
         <button
