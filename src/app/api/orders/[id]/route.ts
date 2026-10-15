@@ -41,7 +41,8 @@ export async function PATCH(
       id,
       body.status,
       body.estimatedMinutes,
-      body.rejectReason
+      body.rejectReason,
+      body.courierName
     );
     if (!updated) {
       return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
@@ -59,10 +60,21 @@ export async function PATCH(
         const msg = `✅ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz onaylandı ve hazırlanmaya başlandı!\n\n⏱️ Tahmini Süre: *${mins} dakika*`;
         await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
       } else if (updated.status === "ready") {
+        const payLabel =
+          updated.paymentMethod === "cash"
+            ? "Kapıda Nakit"
+            : updated.paymentMethod === "card_at_door"
+            ? "Kapıda Kredi Kartı (POS)"
+            : "Masada Ödeme";
+        const courierLine = updated.courierName
+          ? `\n🛵 Kurye: *${updated.courierName}*`
+          : "";
         const msg =
           updated.orderType === "delivery"
-            ? `🛵 *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazırlandı ve kuryemiz adresinize doğru yola çıktı! Afiyet olsun.`
-            : `🍽️ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazır!`;
+            ? `🛵 *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazırlandı ve kuryemize teslim edilerek adresinize doğru yola çıktı!${courierLine}\n💰 Tutar: *${updated.totalAmount.toFixed(
+                2
+              )} ${settings.currency}* (${payLabel})\n\nAfiyet olsun!`
+            : `🍽️ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazır! Afiyet olsun.`;
         await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
       } else if (updated.status === "rejected") {
         const msg = `⚠️ *${settings.name}*\n\nÜzgünüz *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz iptal edildi.\nSebep: ${

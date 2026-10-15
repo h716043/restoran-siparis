@@ -29,6 +29,8 @@ import {
   Users,
 } from "lucide-react";
 import {
+  Category,
+  MenuItem,
   Order,
   RestaurantSettings,
   TableCall,
@@ -40,33 +42,50 @@ export default function KitchenTabletPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [tableCalls, setTableCalls] = useState<TableCall[]>([]);
   const [reservations, setReservations] = useState<TableReservation[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [autoPrintOnAccept, setAutoPrintOnAccept] = useState(false);
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [selectedOrderForPrint, setSelectedOrderForPrint] =
     useState<Order | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "active" | "reservations" | "completed" | "rejected"
+    "active" | "stock" | "reservations" | "completed" | "rejected"
   >("active");
   const [prepMinutesChoice, setPrepMinutesChoice] = useState<
     Record<string, number>
   >({});
+  const [courierChoice, setCourierChoice] = useState<Record<string, string>>(
+    {}
+  );
   const [tableAssignmentChoice, setTableAssignmentChoice] = useState<
     Record<string, string>
   >({});
 
   const knownPendingIds = useRef<Set<string>>(new Set());
 
+  useEffect(() => {
+    try {
+      const savedAutoPrint = localStorage.getItem("restoran_auto_print_receipt");
+      if (savedAutoPrint === "1") {
+        setAutoPrintOnAccept(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const fetchOrders = async () => {
     try {
-      const [ordRes, setRes, callRes, resvRes] = await Promise.all([
+      const [ordRes, menuRes, callRes, resvRes] = await Promise.all([
         fetch("/api/orders"),
-        fetch("/api/settings"),
+        fetch("/api/menu"),
         fetch("/api/table-calls"),
         fetch("/api/reservations"),
       ]);
       const ordData = await ordRes.json();
-      const setData = await setRes.json();
+      const menuData = await menuRes.json();
       const callData = await callRes.json();
       const resvData = await resvRes.json();
 
@@ -75,7 +94,9 @@ export default function KitchenTabletPage() {
       const resvs: TableReservation[] = resvData.reservations || [];
 
       setOrders(list);
-      setSettings(setData);
+      if (menuData.settings) setSettings(menuData.settings);
+      if (menuData.items) setMenuItems(menuData.items);
+      if (menuData.categories) setCategories(menuData.categories);
       setTableCalls(calls);
       setReservations(resvs);
 
@@ -132,23 +153,58 @@ export default function KitchenTabletPage() {
     };
   }, []);
 
+  const handlePrint = (order: Order) => {
+    setSelectedOrderForPrint(order);
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
   const handleStatusChange = async (
     orderId: string,
     status: Order["status"],
     estimatedMinutes?: number,
-    rejectReason?: string
+    rejectReason?: string,
+    courierName?: string,
+    orderToAutoPrint?: Order
   ) => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, estimatedMinutes, rejectReason }),
+        body: JSON.stringify({
+          status,
+          estimatedMinutes,
+          rejectReason,
+          courierName,
+        }),
       });
       if (res.ok) {
-        fetchOrders();
+        const data = await res.json();
+        await fetchOrders();
+        if (status === "accepted" && autoPrintOnAccept) {
+          handlePrint(data.order || orderToAutoPrint);
+        }
       }
     } catch (e) {
       console.error("Durum güncellenemedi:", e);
+    }
+  };
+
+  const handleToggleStock = async (item: MenuItem) => {
+    try {
+      const updated = { ...item, available: !item.available };
+      setMenuItems((prev) =>
+        prev.map((m) => (m.id === item.id ? updated : m))
+      );
+      await fetch("/api/menu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item: updated }),
+      });
+      fetchOrders();
+    } catch (e) {
+      console.error("Stok güncellenemedi:", e);
     }
   };
 
@@ -181,13 +237,6 @@ export default function KitchenTabletPage() {
     } catch (e) {
       console.error("Rezervasyon güncellenemedi:", e);
     }
-  };
-
-  const handlePrint = (order: Order) => {
-    setSelectedOrderForPrint(order);
-    setTimeout(() => {
-      window.print();
-    }, 150);
   };
 
   const createTestOrder = async () => {
@@ -339,6 +388,31 @@ export default function KitchenTabletPage() {
           >
             <PlusCircle className="w-4 h-4" />
             Test: Sipariş Gönder
+          </button>
+
+          {/* Onayda Otomatik Termal Fiş Yazdır Aç/Kapat */}
+          <button
+            onClick={() => {
+              const next = !autoPrintOnAccept;
+              setAutoPrintOnAccept(next);
+              try {
+                localStorage.setItem(
+                  "restoran_auto_print_receipt",
+                  next ? "1" : "0"
+                );
+              } catch {
+                // ignore
+              }
+            }}
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl transition cursor-pointer ${
+              autoPrintOnAccept
+                ? "bg-orange-600/20 text-orange-300 border border-orange-500/40"
+                : "bg-slate-800 text-slate-400 border border-slate-700"
+            }`}
+            title="Açık olduğunda, yeni siparişi kabul ettiğiniz anda 80mm adisyon fişi otomatik yazdırılır"
+          >
+            <Printer className="w-4 h-4" />
+            {autoPrintOnAccept ? "Oto-Fiş: AÇIK" : "Oto-Fiş: KAPALI"}
           </button>
 
           {/* Ses Aç/Kapat */}
@@ -498,6 +572,21 @@ export default function KitchenTabletPage() {
             }`}
           >
             Aktif Siparişler ({pendingOrders.length + preparingOrders.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("stock")}
+            className={`px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 whitespace-nowrap flex items-center gap-2 transition ${
+              activeTab === "stock"
+                ? "border-rose-500 text-rose-400 bg-slate-900"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <span>🍲 Hızlı Stok / Tükendi</span>
+            {menuItems.filter((m) => !m.available).length > 0 && (
+              <span className="bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-black px-2 py-0.5 rounded-full">
+                {menuItems.filter((m) => !m.available).length} Tükendi
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab("reservations")}
@@ -706,16 +795,34 @@ export default function KitchenTabletPage() {
                         </div>
                       </div>
 
-                      {/* Onayla veya Reddet Butonları */}
-                      <div className="flex items-center gap-3 pt-1">
+                      {/* Onayla, Fiş Yazdır veya Reddet Butonları */}
+                      <div className="flex items-center gap-2.5 pt-1">
                         <button
                           onClick={() =>
-                            handleStatusChange(order.id, "accepted", chosenMins)
+                            handleStatusChange(
+                              order.id,
+                              "accepted",
+                              chosenMins,
+                              undefined,
+                              undefined,
+                              order
+                            )
                           }
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition cursor-pointer"
                         >
                           <CheckCircle2 className="w-5 h-5" />
-                          <span>SİPARİŞİ KABUL ET ({chosenMins} dk)</span>
+                          <span>
+                            SİPARİŞİ KABUL ET ({chosenMins} dk)
+                            {autoPrintOnAccept ? " + FİŞ" : ""}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrint(order)}
+                          className="bg-slate-800 hover:bg-slate-700 text-orange-400 border border-slate-700 font-bold py-3.5 px-3.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                          title="80mm Termal Adisyon Yazdır"
+                        >
+                          <Printer className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => {
@@ -731,7 +838,7 @@ export default function KitchenTabletPage() {
                               reason
                             );
                           }}
-                          className="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 font-bold py-3.5 px-4 rounded-xl flex items-center gap-1.5 transition"
+                          className="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 font-bold py-3.5 px-4 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
                         >
                           <XCircle className="w-5 h-5" />
                           <span>Reddet</span>
@@ -756,131 +863,248 @@ export default function KitchenTabletPage() {
                   </p>
                 </div>
               ) : (
-                preparingOrders.map((order) => (
-                  <div
-                    key={order.id}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4"
-                  >
-                    <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-lg font-black text-white">
-                            #{order.orderNumber}
-                          </span>
-                          {renderOrderTypeBadge(order)}
-                          {order.scheduledTime && (
-                            <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-full">
-                              <Clock className="w-3.5 h-3.5" /> İLERİ SAAT:{" "}
-                              {order.scheduledTime}
+                preparingOrders.map((order) => {
+                  const courierList = settings?.couriers?.length
+                    ? settings.couriers
+                    : [
+                        "Kurye 1 (Motorlu)",
+                        "Kurye 2 (Motorlu)",
+                        "Hızlı Kurye",
+                      ];
+                  const chosenCourier =
+                    courierChoice[order.id] ||
+                    order.courierName ||
+                    courierList[0];
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4"
+                    >
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-lg font-black text-white">
+                              #{order.orderNumber}
                             </span>
-                          )}
-                          <span
-                            className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                              order.status === "accepted"
-                                ? "bg-emerald-500/20 text-emerald-400"
-                                : "bg-blue-500/20 text-blue-400"
-                            }`}
-                          >
-                            {order.status === "accepted"
-                              ? `Hazırlanıyor (${order.estimatedMinutes || 25} dk)`
-                              : "Hazır / Yolda"}
-                          </span>
-                        </div>
-                        <div className="font-bold text-base mt-1">
-                          {order.customerName}
-                        </div>
-                        {order.customerAddress && (
-                          <div className="text-xs text-slate-400 mt-0.5">
-                            📍{" "}
-                            {order.deliveryZoneName
-                              ? `[${order.deliveryZoneName}] `
-                              : ""}
-                            {order.customerAddress}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handlePrint(order)}
-                          className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl border border-slate-700"
-                        >
-                          <Printer className="w-4 h-4 text-orange-400" />
-                          Adisyon Yazdır
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5 text-sm">
-                      {order.items.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex justify-between text-slate-200"
-                        >
-                          <span>
-                            <strong className="text-orange-400">
-                              {item.quantity}x
-                            </strong>{" "}
-                            {item.name}
-                            {item.selectedModifiers.length > 0 && (
-                              <span className="text-xs text-slate-400 ml-1">
-                                (
-                                {item.selectedModifiers
-                                  .map((m) => m.optionName)
-                                  .join(", ")}
-                                )
+                            {renderOrderTypeBadge(order)}
+                            {order.scheduledTime && (
+                              <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-full">
+                                <Clock className="w-3.5 h-3.5" /> İLERİ SAAT:{" "}
+                                {order.scheduledTime}
                               </span>
                             )}
-                          </span>
-                          <span className="font-semibold">
-                            {item.totalPrice.toFixed(2)} {settings?.currency}
-                          </span>
+                            <span
+                              className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                                order.status === "accepted"
+                                  ? "bg-emerald-500/20 text-emerald-400"
+                                  : "bg-blue-500/20 text-blue-400"
+                              }`}
+                            >
+                              {order.status === "accepted"
+                                ? `Hazırlanıyor (${order.estimatedMinutes || 25} dk)`
+                                : order.courierName
+                                ? `🛵 Yolda (${order.courierName})`
+                                : "Hazır / Yolda"}
+                            </span>
+                          </div>
+                          <div className="font-bold text-base mt-1">
+                            {order.customerName}
+                          </div>
+                          {order.customerAddress && (
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              📍{" "}
+                              {order.deliveryZoneName
+                                ? `[${order.deliveryZoneName}] `
+                                : ""}
+                              {order.customerAddress}
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
 
-                    <div className="flex items-center justify-between pt-3 border-t border-slate-800 gap-3">
-                      <div>
-                        <span className="font-extrabold text-emerald-400">
-                          Toplam: {order.totalAmount.toFixed(2)}{" "}
-                          {settings?.currency}
-                        </span>
-                        {order.discountAmount && order.discountAmount > 0 ? (
-                          <span className="ml-2 text-xs text-emerald-300">
-                            (İndirim: -{order.discountAmount.toFixed(2)}{" "}
-                            {settings?.currency})
-                          </span>
-                        ) : null}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handlePrint(order)}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer"
+                          >
+                            <Printer className="w-4 h-4 text-orange-400" />
+                            80mm Fiş Yazdır
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        {order.status === "accepted" && (
+                      <div className="space-y-1.5 text-sm">
+                        {order.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex justify-between text-slate-200"
+                          >
+                            <span>
+                              <strong className="text-orange-400">
+                                {item.quantity}x
+                              </strong>{" "}
+                              {item.name}
+                              {item.selectedModifiers.length > 0 && (
+                                <span className="text-xs text-slate-400 ml-1">
+                                  (
+                                  {item.selectedModifiers
+                                    .map((m) => m.optionName)
+                                    .join(", ")}
+                                  )
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-semibold">
+                              {item.totalPrice.toFixed(2)} {settings?.currency}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Paket Servis İçin Kurye Atama Seçicisi */}
+                      {order.orderType === "delivery" &&
+                        order.status === "accepted" && (
+                          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <span className="text-xs font-bold text-orange-300 flex items-center gap-1.5">
+                              <Truck className="w-4 h-4" />
+                              Kurye Ata:
+                            </span>
+                            <select
+                              value={chosenCourier}
+                              onChange={(e) =>
+                                setCourierChoice((prev) => ({
+                                  ...prev,
+                                  [order.id]: e.target.value,
+                                }))
+                              }
+                              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+                            >
+                              {courierList.map((c) => (
+                                <option key={c} value={c}>
+                                  🛵 {c}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                      <div className="flex flex-wrap items-center justify-between pt-3 border-t border-slate-800 gap-3">
+                        <div>
+                          <span className="font-extrabold text-emerald-400">
+                            Toplam: {order.totalAmount.toFixed(2)}{" "}
+                            {settings?.currency}
+                          </span>
+                          {order.discountAmount && order.discountAmount > 0 ? (
+                            <span className="ml-2 text-xs text-emerald-300">
+                              (İndirim: -{order.discountAmount.toFixed(2)}{" "}
+                              {settings?.currency})
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {order.status === "accepted" && (
+                            <button
+                              onClick={() =>
+                                handleStatusChange(
+                                  order.id,
+                                  "ready",
+                                  undefined,
+                                  undefined,
+                                  order.orderType === "delivery"
+                                    ? chosenCourier
+                                    : undefined
+                                )
+                              }
+                              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-md"
+                            >
+                              {order.orderType === "delivery"
+                                ? `🛵 Kuryeye Ver & WhatsApp Gönder`
+                                : order.orderType === "dine_in"
+                                ? "🍽️ Masaya Servis Edildi"
+                                : "🛍️ Teslime Hazır (WhatsApp Gönder)"}
+                            </button>
+                          )}
                           <button
                             onClick={() =>
-                              handleStatusChange(order.id, "ready")
+                              handleStatusChange(order.id, "completed")
                             }
-                            className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition"
+                            className="bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 transition cursor-pointer"
                           >
-                            {order.orderType === "delivery"
-                              ? "Kuryeye Verildi (Yolda)"
-                              : order.orderType === "dine_in"
-                              ? "Masaya Servis Edildi"
-                              : "Teslime Hazır"}
+                            Tamamlandı ✓
                           </button>
-                        )}
-                        <button
-                          onClick={() =>
-                            handleStatusChange(order.id, "completed")
-                          }
-                          className="bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 transition"
-                        >
-                          Tamamlandı İşaretle
-                        </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
+            </div>
+          </div>
+        )}
+
+        {/* HIZLI STOK & TÜKENDİ YÖNETİM SEKMESİ */}
+        {activeTab === "stock" && (
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-extrabold text-white">
+                  🍲 Mutfak Hızlı Stok & &ldquo;Tükendi&rdquo; Kontrolü
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Biten bir yemeği tek dokunuşla &ldquo;Tükendi&rdquo; olarak işaretleyin; müşteri ekranında (Netlify dahil) anında kapanır ve sipariş alınamaz.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold">
+                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-xl">
+                  Stokta: {menuItems.filter((m) => m.available).length} Ürün
+                </span>
+                <span className="bg-rose-500/20 text-rose-300 border border-rose-500/30 px-3 py-1.5 rounded-xl">
+                  Tükendi: {menuItems.filter((m) => !m.available).length} Ürün
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {menuItems.map((item) => {
+                const catName =
+                  categories.find((c) => c.id === item.categoryId)?.name ||
+                  "Menü";
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-4 rounded-2xl border flex items-center justify-between gap-3 transition ${
+                      item.available
+                        ? "bg-slate-900 border-slate-800"
+                        : "bg-rose-950/30 border-rose-500/40"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-bold uppercase text-orange-400">
+                        {catName}
+                      </span>
+                      <h3 className="font-bold text-sm text-white truncate">
+                        {item.name}
+                      </h3>
+                      <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                        {item.price.toFixed(2)} {settings?.currency}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStock(item)}
+                      className={`px-4 py-2.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
+                        item.available
+                          ? "bg-emerald-600 hover:bg-rose-600 text-white"
+                          : "bg-rose-600 hover:bg-emerald-600 text-white"
+                      }`}
+                    >
+                      {item.available ? "🟢 Stokta (Kapat)" : "🔴 TÜKENDİ (Aç)"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1103,79 +1327,141 @@ export default function KitchenTabletPage() {
       {selectedOrderForPrint && (
         <div
           id="printable-receipt"
-          className="hidden print:block text-xs font-mono"
+          className="hidden print:block text-xs font-mono leading-snug"
         >
-          <div className="text-center border-b border-black pb-2 mb-2">
-            <h2 className="font-bold text-base">{settings?.name}</h2>
-            <p>{settings?.phone}</p>
-            <p className="mt-1 font-bold">
+          <div className="text-center border-b-2 border-dashed border-black pb-2 mb-2">
+            <h2 className="font-bold text-base uppercase">{settings?.name}</h2>
+            <p className="text-[11px]">{settings?.address}</p>
+            <p className="text-[11px]">Tel: {settings?.phone}</p>
+            <div className="mt-1.5 py-1 border border-black font-black text-sm">
               SİPARİŞ NO: #{selectedOrderForPrint.orderNumber}
-            </p>
-            <p>
+            </div>
+            <p className="mt-1 font-bold text-xs">
               {selectedOrderForPrint.orderType === "dine_in"
-                ? `MASA: ${selectedOrderForPrint.tableNumber}`
+                ? `🍽️ MASA SİPARİŞİ — MASA ${selectedOrderForPrint.tableNumber}`
                 : selectedOrderForPrint.orderType === "pickup"
-                ? "GEL-AL SİPARİŞ"
-                : "PAKET SERVİS"}
+                ? "🛍️ GEL-AL (RESTORANDAN TESLİM)"
+                : "🛵 ADRESE PAKET SERVİS"}
+            </p>
+            <p className="text-[10px]">
+              Tarih:{" "}
+              {new Date(selectedOrderForPrint.createdAt).toLocaleString(
+                "tr-TR"
+              )}
             </p>
             {selectedOrderForPrint.scheduledTime && (
-              <p className="font-bold">
-                TESLİM ZAMANI: {selectedOrderForPrint.scheduledTime}
+              <p className="font-bold mt-0.5">
+                ⏰ TESLİM ZAMANI: {selectedOrderForPrint.scheduledTime}
               </p>
             )}
           </div>
-          <div className="mb-2">
-            <p>Müşteri: {selectedOrderForPrint.customerName}</p>
-            <p>Tel: {selectedOrderForPrint.customerPhone}</p>
+
+          <div className="mb-2 space-y-0.5 text-[11px]">
+            <p>
+              <strong>Müşteri:</strong> {selectedOrderForPrint.customerName}
+            </p>
+            <p>
+              <strong>Telefon:</strong> {selectedOrderForPrint.customerPhone}
+            </p>
             {selectedOrderForPrint.deliveryZoneName && (
-              <p>Bölge: {selectedOrderForPrint.deliveryZoneName}</p>
+              <p>
+                <strong>Bölge:</strong> {selectedOrderForPrint.deliveryZoneName}
+              </p>
             )}
             {selectedOrderForPrint.customerAddress && (
-              <p>Adres: {selectedOrderForPrint.customerAddress}</p>
+              <p>
+                <strong>Adres:</strong> {selectedOrderForPrint.customerAddress}
+              </p>
+            )}
+            {selectedOrderForPrint.courierName && (
+              <p>
+                <strong>Kurye:</strong> {selectedOrderForPrint.courierName}
+              </p>
             )}
           </div>
-          <div className="border-t border-b border-black py-2 space-y-1">
+
+          <div className="border-t-2 border-b-2 border-dashed border-black py-2 space-y-1.5">
             {selectedOrderForPrint.items.map((item) => (
               <div key={item.id}>
                 <div className="flex justify-between font-bold">
                   <span>
                     {item.quantity}x {item.name}
                   </span>
-                  <span>{item.totalPrice.toFixed(2)}</span>
+                  <span>
+                    {item.totalPrice.toFixed(2)} {settings?.currency}
+                  </span>
                 </div>
                 {item.selectedModifiers.map((m, i) => (
-                  <div key={i} className="pl-2">
-                    + {m.optionName}
+                  <div key={i} className="pl-2 text-[11px]">
+                    + {m.groupName}: {m.optionName}
                   </div>
                 ))}
-                {item.itemNote && <div className="pl-2">Not: {item.itemNote}</div>}
+                {item.itemNote && (
+                  <div className="pl-2 text-[11px] font-bold">
+                    * Not: {item.itemNote}
+                  </div>
+                )}
               </div>
             ))}
           </div>
-          {selectedOrderForPrint.discountAmount &&
-          selectedOrderForPrint.discountAmount > 0 ? (
-            <div className="pt-1 flex justify-between text-xs">
-              <span>İNDİRİM ({selectedOrderForPrint.couponCode || "Kampanya"}):</span>
-              <span>
-                -{selectedOrderForPrint.discountAmount.toFixed(2)}{" "}
-                {settings?.currency}
-              </span>
-            </div>
-          ) : null}
-          {selectedOrderForPrint.deliveryFee > 0 && (
-            <div className="pt-1 flex justify-between text-xs">
-              <span>GETİRME ÜCRETİ:</span>
-              <span>
-                {selectedOrderForPrint.deliveryFee.toFixed(2)}{" "}
-                {settings?.currency}
-              </span>
+
+          {selectedOrderForPrint.orderNote && (
+            <div className="border-b border-dashed border-black py-1.5 text-[11px] font-bold">
+              📌 SİPARİŞ NOTU: {selectedOrderForPrint.orderNote}
             </div>
           )}
-          <div className="pt-2 font-bold flex justify-between text-sm">
-            <span>TOPLAM:</span>
+
+          <div className="pt-1.5 space-y-0.5 text-[11px]">
+            <div className="flex justify-between">
+              <span>ARA TOPLAM:</span>
+              <span>
+                {selectedOrderForPrint.subtotal.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+            {selectedOrderForPrint.discountAmount &&
+            selectedOrderForPrint.discountAmount > 0 ? (
+              <div className="flex justify-between">
+                <span>
+                  İNDİRİM ({selectedOrderForPrint.couponCode || "Kampanya"}):
+                </span>
+                <span>
+                  -{selectedOrderForPrint.discountAmount.toFixed(2)}{" "}
+                  {settings?.currency}
+                </span>
+              </div>
+            ) : null}
+            {selectedOrderForPrint.deliveryFee > 0 && (
+              <div className="flex justify-between">
+                <span>GETİRME ÜCRETİ:</span>
+                <span>
+                  {selectedOrderForPrint.deliveryFee.toFixed(2)}{" "}
+                  {settings?.currency}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-1.5 pt-1.5 border-t-2 border-black font-black flex justify-between text-sm">
+            <span>GENEL TOPLAM:</span>
             <span>
-              {selectedOrderForPrint.totalAmount.toFixed(2)} {settings?.currency}
+              {selectedOrderForPrint.totalAmount.toFixed(2)}{" "}
+              {settings?.currency}
             </span>
+          </div>
+
+          <div className="mt-1 text-[11px] font-bold flex justify-between border-b border-dashed border-black pb-2">
+            <span>ÖDEME YÖNTEMİ:</span>
+            <span>
+              {selectedOrderForPrint.paymentMethod === "cash"
+                ? "KAPIDA / KASADA NAKİT"
+                : selectedOrderForPrint.paymentMethod === "card_at_door"
+                ? "KAPIDA KREDİ KARTI (POS)"
+                : "MASADA ÖDEME"}
+            </span>
+          </div>
+
+          <div className="text-center pt-2 text-[10px]">
+            <p className="font-bold">Afiyet Olsun! Teşekkür Ederiz.</p>
           </div>
         </div>
       )}

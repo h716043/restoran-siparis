@@ -91,7 +91,10 @@ const TIME_SLOTS = [
 
 function CustomerMenuContent() {
   const searchParams = useSearchParams();
-  const tableParam = searchParams.get("table");
+  const rawTableParam = searchParams.get("masa") || searchParams.get("table");
+  const tableParam = rawTableParam
+    ? rawTableParam.replace(/^masa[-_\s]*/i, "").trim()
+    : null;
   const isEmbed = searchParams.get("embed") === "1";
 
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
@@ -1341,7 +1344,11 @@ function CustomerMenuContent() {
                   } dk)`}
                 {bannerActiveOrder.status === "ready" &&
                   (bannerActiveOrder.orderType === "delivery"
-                    ? "Siparişiniz yola çıktı! Kuryemiz geliyor."
+                    ? `Siparişiniz yola çıktı! ${
+                        bannerActiveOrder.courierName
+                          ? `Kurye (${bannerActiveOrder.courierName}) geliyor.`
+                          : "Kuryemiz geliyor."
+                      }`
                     : "Siparişiniz servise / teslime hazır!")}
               </span>
             </div>
@@ -1409,25 +1416,31 @@ function CustomerMenuContent() {
                         <div
                           key={item.id}
                           onClick={() => openItemModal(item)}
-                          className={`group bg-white rounded-2xl border border-slate-200/80 p-3.5 flex gap-3.5 transition shadow-sm ${
+                          className={`group bg-white rounded-2xl border p-3.5 flex gap-3.5 transition shadow-sm ${
                             item.available
-                              ? "hover:border-orange-400 hover:shadow-md cursor-pointer"
-                              : "opacity-60 cursor-not-allowed"
+                              ? "border-slate-200/80 hover:border-orange-400 hover:shadow-md cursor-pointer"
+                              : "border-red-200 bg-slate-50/80 opacity-65 cursor-not-allowed"
                           }`}
                         >
                           <div className="flex-1 flex flex-col justify-between min-w-0">
                             <div>
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
                                 {item.popular && (
                                   <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
                                     <Flame className="w-3 h-3" /> Popüler
                                   </span>
                                 )}
                                 {!item.available && (
-                                  <span className="inline-flex text-[10px] font-bold uppercase bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">
+                                  <span className="inline-flex text-[10px] font-extrabold uppercase bg-red-600 text-white px-2 py-0.5 rounded">
                                     Tükendi
                                   </span>
                                 )}
+                                {item.modifierGroups &&
+                                  item.modifierGroups.length > 0 && (
+                                    <span className="inline-flex text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                      Seçenekli ({item.modifierGroups.length})
+                                    </span>
+                                  )}
                               </div>
                               <h3 className="font-bold text-slate-900 group-hover:text-orange-600 transition text-sm sm:text-base mt-0.5 truncate">
                                 {item.name}
@@ -1441,19 +1454,36 @@ function CustomerMenuContent() {
                               <span className="font-extrabold text-slate-900 text-base">
                                 {item.price.toFixed(2)} {settings?.currency}
                               </span>
-                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white px-2.5 py-1 rounded-lg transition">
-                                <Plus className="w-3.5 h-3.5" /> Ekle
-                              </span>
+                              {item.available ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white px-2.5 py-1 rounded-lg transition">
+                                  <Plus className="w-3.5 h-3.5" /> Ekle
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center text-[11px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">
+                                  Stokta Yok
+                                </span>
+                              )}
                             </div>
                           </div>
 
                           {item.imageUrl && (
-                            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                            <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
                               <img
                                 src={item.imageUrl}
                                 alt={item.name}
-                                className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                className={`w-full h-full object-cover transition duration-300 ${
+                                  item.available
+                                    ? "group-hover:scale-105"
+                                    : "grayscale"
+                                }`}
                               />
+                              {!item.available && (
+                                <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
+                                  <span className="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow">
+                                    TÜKENDİ
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1980,7 +2010,9 @@ function CustomerMenuContent() {
                             } dk)`}
                           {ord.status === "ready" &&
                             (ord.orderType === "delivery"
-                              ? "🛵 Kuryemiz yola çıktı, adresinize geliyor!"
+                              ? `🛵 Kuryemiz${
+                                  ord.courierName ? ` (${ord.courierName})` : ""
+                                } yola çıktı, adresinize geliyor!`
                               : "🍽️ Siparişiniz servise / teslime hazır!")}
                         </div>
 

@@ -84,6 +84,7 @@ export interface Order {
   deliveryFee: number;
   totalAmount: number;
   estimatedMinutes?: number;
+  courierName?: string;
   rejectReason?: string;
   items: OrderItem[];
   createdAt: string;
@@ -208,6 +209,7 @@ export interface RestaurantSettings {
   announcementBar?: AnnouncementBarConfig;
   deliveryZones?: DeliveryZone[];
   coupons?: Coupon[];
+  couriers?: string[];
   whatsappConfig?: WhatsAppConfig;
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;

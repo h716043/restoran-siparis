@@ -44,7 +44,7 @@ const DB_PATH = path.join(DATA_DIR, "restaurant.sqlite");
 
 const globalForDb = globalThis as unknown as {
   sqliteDb?: DatabaseSync;
-  schemaMigratedV6?: boolean;
+  schemaMigratedV7?: boolean;
 };
 
 export function getDb(): DatabaseSync {
@@ -53,10 +53,10 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     globalForDb.sqliteDb = db;
-    globalForDb.schemaMigratedV6 = true;
-  } else if (!globalForDb.schemaMigratedV6) {
+    globalForDb.schemaMigratedV7 = true;
+  } else if (!globalForDb.schemaMigratedV7) {
     initSchema(globalForDb.sqliteDb);
-    globalForDb.schemaMigratedV6 = true;
+    globalForDb.schemaMigratedV7 = true;
   }
   return globalForDb.sqliteDb;
 }
@@ -165,6 +165,7 @@ function initSchema(db: DatabaseSync) {
       deliveryFee REAL NOT NULL,
       totalAmount REAL NOT NULL,
       estimatedMinutes INTEGER,
+      courierName TEXT,
       rejectReason TEXT,
       itemsJson TEXT NOT NULL,
       createdAt TEXT NOT NULL,
@@ -227,6 +228,7 @@ function initSchema(db: DatabaseSync) {
     "ALTER TABLE orders ADD COLUMN scheduledTime TEXT;",
     "ALTER TABLE orders ADD COLUMN discountAmount REAL DEFAULT 0;",
     "ALTER TABLE orders ADD COLUMN couponCode TEXT;",
+    "ALTER TABLE orders ADD COLUMN courierName TEXT;",
   ];
   for (const sql of alterCols) {
     try {
@@ -269,6 +271,14 @@ function initSchema(db: DatabaseSync) {
     }
     if (!parsed.coupons) {
       parsed.coupons = DEFAULT_COUPONS;
+      changed = true;
+    }
+    if (!parsed.couriers || parsed.couriers.length === 0) {
+      parsed.couriers = [
+        "Kurye 1 (Motorlu)",
+        "Kurye 2 (Motorlu)",
+        "Hızlı Kurye",
+      ];
       changed = true;
     }
     if (parsed.firstOrderDiscountPercent === undefined) {
@@ -316,6 +326,7 @@ function seedDatabase(db: DatabaseSync) {
     },
     deliveryZones: DEFAULT_ZONES,
     coupons: DEFAULT_COUPONS,
+    couriers: ["Kurye 1 (Motorlu)", "Kurye 2 (Motorlu)", "Hızlı Kurye"],
     whatsappConfig: {
       provider: "simulation",
       gatewayUrl: "http://localhost:3001/send-message",
@@ -760,6 +771,7 @@ export function getOrders(): Order[] {
     deliveryFee: number;
     totalAmount: number;
     estimatedMinutes: number | null;
+    courierName: string | null;
     rejectReason: string | null;
     itemsJson: string;
     createdAt: string;
@@ -787,6 +799,7 @@ export function getOrders(): Order[] {
     deliveryFee: r.deliveryFee,
     totalAmount: r.totalAmount,
     estimatedMinutes: r.estimatedMinutes || undefined,
+    courierName: r.courierName || undefined,
     rejectReason: r.rejectReason || undefined,
     items: JSON.parse(r.itemsJson || "[]"),
     createdAt: r.createdAt,
@@ -827,6 +840,7 @@ export function getOrderById(id: string): Order | null {
     deliveryFee: number;
     totalAmount: number;
     estimatedMinutes: number | null;
+    courierName: string | null;
     rejectReason: string | null;
     itemsJson: string;
     createdAt: string;
@@ -855,6 +869,7 @@ export function getOrderById(id: string): Order | null {
     deliveryFee: r.deliveryFee,
     totalAmount: r.totalAmount,
     estimatedMinutes: r.estimatedMinutes || undefined,
+    courierName: r.courierName || undefined,
     rejectReason: r.rejectReason || undefined,
     items: JSON.parse(r.itemsJson || "[]"),
     createdAt: r.createdAt,
@@ -1026,7 +1041,8 @@ export function updateOrderStatus(
   id: string,
   status: Order["status"],
   estimatedMinutes?: number,
-  rejectReason?: string
+  rejectReason?: string,
+  courierName?: string
 ): Order | null {
   const db = getDb();
   const existing = getOrderById(id);
@@ -1035,12 +1051,13 @@ export function updateOrderStatus(
   const updatedAt = new Date().toISOString();
   const est = estimatedMinutes !== undefined ? estimatedMinutes : existing.estimatedMinutes;
   const rej = rejectReason !== undefined ? rejectReason : existing.rejectReason;
+  const cou = courierName !== undefined ? courierName : existing.courierName;
 
   db.prepare(`
     UPDATE orders
-    SET status = ?, estimatedMinutes = ?, rejectReason = ?, updatedAt = ?
+    SET status = ?, estimatedMinutes = ?, courierName = ?, rejectReason = ?, updatedAt = ?
     WHERE id = ?
-  `).run(status, est || null, rej || null, updatedAt, id);
+  `).run(status, est || null, cou || null, rej || null, updatedAt, id);
 
   return getOrderById(id);
 }
@@ -1304,12 +1321,13 @@ export function mergeActivityFromCloud(payload: {
         id, orderNumber, orderType, status, tableNumber, userId,
         customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
         scheduledTime, orderNote, paymentMethod, subtotal, discountAmount, couponCode,
-        deliveryFee, totalAmount, estimatedMinutes, rejectReason,
+        deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
         itemsJson, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.status ELSE orders.status END,
         estimatedMinutes = COALESCE(excluded.estimatedMinutes, orders.estimatedMinutes),
+        courierName = COALESCE(excluded.courierName, orders.courierName),
         rejectReason = COALESCE(excluded.rejectReason, orders.rejectReason),
         updatedAt = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.updatedAt ELSE orders.updatedAt END
     `);
@@ -1335,6 +1353,7 @@ export function mergeActivityFromCloud(payload: {
         o.deliveryFee,
         o.totalAmount,
         o.estimatedMinutes || null,
+        o.courierName || null,
         o.rejectReason || null,
         JSON.stringify(o.items || []),
         o.createdAt,

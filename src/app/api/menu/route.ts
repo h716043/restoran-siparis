@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const role = req.cookies.get("restoran_staff_role")?.value;
-    if (role !== "admin") {
+    if (role !== "admin" && role !== "kitchen") {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 403 });
     }
 

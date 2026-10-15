@@ -33,6 +33,9 @@ import {
   RefreshCw,
   Globe,
   Copy,
+  Printer,
+  Download,
+  FileSpreadsheet,
 } from "lucide-react";
 import {
   Category,
@@ -69,6 +72,28 @@ export default function AdminDashboardPage() {
     ok?: boolean;
     message?: string;
   } | null>(null);
+
+  // Rapor ve Z Raporu Filtreleri
+  const [reportPeriod, setReportPeriod] = useState<
+    "today" | "yesterday" | "week" | "month" | "all" | "custom"
+  >("all");
+  const [customStartDate, setCustomStartDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [customEndDate, setCustomEndDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [selectedOrderForPrint, setSelectedOrderForPrint] =
+    useState<Order | null>(null);
+  const [printingZReport, setPrintingZReport] = useState(false);
+
+  // Menü Stok Filtresi
+  const [menuStockFilter, setMenuStockFilter] = useState<
+    "all" | "available" | "sold_out"
+  >("all");
+
+  // Yeni Kurye Adı
+  const [newCourierName, setNewCourierName] = useState("");
 
   // Yeni Kategori Formu
   const [newCatName, setNewCatName] = useState("");
@@ -253,11 +278,38 @@ export default function AdminDashboardPage() {
     requireAuthForDeliveryAndPickup: true,
   };
 
-  // Ciro & İstatistik Hesaplamaları
-  const validOrders = orders.filter((o) => o.status !== "rejected");
+  // Tarih Aralığına Göre Sipariş Filtreleme (Z Raporu ve İstatistikler)
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayOrders = validOrders.filter((o) =>
-    o.createdAt.startsWith(todayStr)
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = yesterdayDate.toISOString().slice(0, 10);
+
+  const weekAgoDate = new Date();
+  weekAgoDate.setDate(weekAgoDate.getDate() - 7);
+  const weekAgoStr = weekAgoDate.toISOString().slice(0, 10);
+
+  const monthPrefix = todayStr.slice(0, 7); // YYYY-MM
+
+  const periodFilteredAllOrders = orders.filter((o) => {
+    const dStr = o.createdAt.slice(0, 10);
+    if (reportPeriod === "today") return dStr === todayStr;
+    if (reportPeriod === "yesterday") return dStr === yesterdayStr;
+    if (reportPeriod === "week") return dStr >= weekAgoStr;
+    if (reportPeriod === "month") return dStr.startsWith(monthPrefix);
+    if (reportPeriod === "custom") {
+      return dStr >= customStartDate && dStr <= customEndDate;
+    }
+    return true;
+  });
+
+  const validOrders = periodFilteredAllOrders.filter(
+    (o) => o.status !== "rejected"
+  );
+  const rejectedPeriodOrders = periodFilteredAllOrders.filter(
+    (o) => o.status === "rejected"
+  );
+  const todayOrders = orders.filter(
+    (o) => o.status !== "rejected" && o.createdAt.startsWith(todayStr)
   );
 
   const totalRevenue = validOrders.reduce((acc, o) => acc + o.totalAmount, 0);
@@ -289,7 +341,7 @@ export default function AdminDashboardPage() {
     .filter((o) => o.paymentMethod === "pos_at_table")
     .reduce((s, o) => s + o.totalAmount, 0);
 
-  // En Çok Satan Ürünler
+  // En Çok Satan Ürünler (Seçili Dönem)
   const productSalesMap: Record<
     string,
     { name: string; qty: number; revenue: number }
@@ -306,6 +358,102 @@ export default function AdminDashboardPage() {
   const topSellingProducts = Object.values(productSalesMap).sort(
     (a, b) => b.qty - a.qty
   );
+
+  const reportPeriodLabel =
+    reportPeriod === "today"
+      ? `Bugün (${todayStr}) — Gün Sonu Z Raporu`
+      : reportPeriod === "yesterday"
+      ? `Dün (${yesterdayStr})`
+      : reportPeriod === "week"
+      ? "Son 7 Gün"
+      : reportPeriod === "month"
+      ? `Bu Ay (${monthPrefix})`
+      : reportPeriod === "custom"
+      ? `${customStartDate} / ${customEndDate}`
+      : "Tüm Zamanlar";
+
+  const handlePrintZReport = () => {
+    setSelectedOrderForPrint(null);
+    setPrintingZReport(true);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => setPrintingZReport(false), 500);
+    }, 150);
+  };
+
+  const handlePrintOrderFromAdmin = (order: Order) => {
+    setPrintingZReport(false);
+    setSelectedOrderForPrint(order);
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  const handleExportExcelCsv = () => {
+    const headers = [
+      "Siparis No",
+      "Tarih Saat",
+      "Kanal",
+      "Masa / Bolge",
+      "Musteri Adi",
+      "Telefon",
+      "Odeme Yontemi",
+      "Kurye",
+      "Durum",
+      "Urunler",
+      "Indirim",
+      "Getirme Ucreti",
+      "Toplam Tutar",
+    ];
+    const rows = periodFilteredAllOrders.map((o) => {
+      const channel =
+        o.orderType === "delivery"
+          ? "Paket Servis"
+          : o.orderType === "pickup"
+          ? "Gel-Al"
+          : "Masa QR";
+      const loc =
+        o.orderType === "dine_in"
+          ? `Masa ${o.tableNumber || "-"}`
+          : o.deliveryZoneName || "-";
+      const pay =
+        o.paymentMethod === "cash"
+          ? "Nakit"
+          : o.paymentMethod === "card_at_door"
+          ? "Kapida Kart"
+          : "Masada Odeme";
+      const itemsSummary = o.items
+        .map((i) => `${i.quantity}x ${i.name}`)
+        .join(" | ");
+      return [
+        `#${o.orderNumber}`,
+        new Date(o.createdAt).toLocaleString("tr-TR"),
+        channel,
+        loc,
+        o.customerName,
+        o.customerPhone,
+        pay,
+        o.courierName || "-",
+        o.status,
+        itemsSummary,
+        (o.discountAmount || 0).toFixed(2),
+        o.deliveryFee.toFixed(2),
+        o.totalAmount.toFixed(2),
+      ].map((cell) => `"${String(cell).replace(/"/g, '""')}"`);
+    });
+
+    const csvContent =
+      "\uFEFF" +
+      [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Z-Raporu-Satislar-${todayStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Excel (CSV) satış raporu indirildi!");
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -497,9 +645,91 @@ export default function AdminDashboardPage() {
 
       {/* İçerik */}
       <main className="max-w-7xl w-full mx-auto p-6 flex-1">
-        {/* 0. CİRO & SATIŞ RAPORLARI SEKMESİ */}
+        {/* 0. CİRO & SATIŞ RAPORLARI (GÜN SONU Z RAPORU) SEKMESİ */}
         {activeTab === "reports" && (
           <div className="space-y-6">
+            {/* Üst Tarih Filtresi & Z Raporu / Excel Çıktı Barı */}
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-orange-600" />
+                  <h2 className="font-extrabold text-base text-slate-900">
+                    Gün Sonu (Z Raporu) & Tarih Aralıklı Ciro Analizi
+                  </h2>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { id: "today", label: "Bugün (Z Raporu)" },
+                    { id: "yesterday", label: "Dün" },
+                    { id: "week", label: "Son 7 Gün" },
+                    { id: "month", label: "Bu Ay" },
+                    { id: "all", label: "Tüm Zamanlar" },
+                    { id: "custom", label: "Özel Tarih" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        setReportPeriod(
+                          p.id as
+                            | "today"
+                            | "yesterday"
+                            | "week"
+                            | "month"
+                            | "all"
+                            | "custom"
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                        reportPeriod === p.id
+                          ? "bg-slate-900 text-white"
+                          : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                {reportPeriod === "custom" && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="px-2.5 py-1.5 text-xs font-bold border border-slate-200 rounded-lg"
+                    />
+                    <span className="text-xs text-slate-400 font-bold">—</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="px-2.5 py-1.5 text-xs font-bold border border-slate-200 rounded-lg"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handlePrintZReport}
+                  className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  <Printer className="w-4 h-4 text-orange-400" />
+                  <span>🧾 Z Raporu Yazdır (80mm / PDF)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportExcelCsv}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>📊 Excel (CSV) İndir</span>
+                </button>
+              </div>
+            </div>
+
             {/* Üst Özet Kartları */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
@@ -515,16 +745,17 @@ export default function AdminDashboardPage() {
                 </p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-                <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-500">
-                  <span>Toplam Ciro</span>
+              <div className="bg-white p-5 rounded-2xl border border-orange-200 bg-orange-50/20 shadow-xs space-y-1">
+                <div className="flex items-center justify-between text-xs font-bold uppercase text-orange-700">
+                  <span>Seçili Dönem Cirosu</span>
                   <BarChart3 className="w-4 h-4 text-orange-600" />
                 </div>
                 <div className="text-2xl font-black text-slate-900">
                   {totalRevenue.toFixed(2)} {settings?.currency || "₺"}
                 </div>
                 <p className="text-xs text-slate-500">
-                  Toplam {validOrders.length} sipariş üzerinden
+                  {validOrders.length} başarılı • {rejectedPeriodOrders.length}{" "}
+                  iptal ({reportPeriodLabel})
                 </p>
               </div>
 
@@ -633,7 +864,7 @@ export default function AdminDashboardPage() {
                   <div className="flex items-center gap-2">
                     <Award className="w-5 h-5 text-orange-600" />
                     <h3 className="font-bold text-base text-slate-900">
-                      En Çok Satan Ürünler
+                      En Çok Satan Ürünler ({reportPeriodLabel})
                     </h3>
                   </div>
                   <span className="text-xs text-slate-400">
@@ -643,13 +874,11 @@ export default function AdminDashboardPage() {
 
                 {topSellingProducts.length === 0 ? (
                   <p className="text-xs text-slate-500 py-8 text-center">
-                    Henüz sipariş verisi bulunmuyor. Müşteri ekranından veya
-                    mutfak ekranından örnek sipariş oluşturduğunuzda burada
-                    listelenecektir.
+                    Seçili tarih aralığında sipariş verisi bulunmuyor.
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {topSellingProducts.slice(0, 8).map((prod, idx) => (
+                    {topSellingProducts.slice(0, 10).map((prod, idx) => (
                       <div
                         key={prod.name}
                         className="py-3 flex items-center justify-between text-sm"
@@ -675,6 +904,117 @@ export default function AdminDashboardPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Alt Tablo: Seçili Dönem Sipariş Geçmişi & Tek Tık 80mm Fiş Yazdır */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">
+                    Sipariş Detay Listesi & Tek Tıkla Adisyon Fişi ({periodFilteredAllOrders.length} Sipariş)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Geçmiş veya aktif herhangi bir siparişin 80mm kasa/kurye fişini buradan tekrar yazdırabilirsiniz.
+                  </p>
+                </div>
+              </div>
+
+              {periodFilteredAllOrders.length === 0 ? (
+                <p className="text-xs text-slate-500 py-6 text-center">
+                  Bu dönemde kayıtlı sipariş bulunamadı.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 uppercase">
+                        <th className="py-2.5 px-3">Sipariş</th>
+                        <th className="py-2.5 px-3">Tarih / Saat</th>
+                        <th className="py-2.5 px-3">Kanal / Konum</th>
+                        <th className="py-2.5 px-3">Müşteri</th>
+                        <th className="py-2.5 px-3">Ürünler</th>
+                        <th className="py-2.5 px-3">Kurye / Durum</th>
+                        <th className="py-2.5 px-3 text-right">Tutar</th>
+                        <th className="py-2.5 px-3 text-right">Fiş</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {periodFilteredAllOrders.slice(0, 40).map((ord) => (
+                        <tr key={ord.id} className="hover:bg-slate-50">
+                          <td className="py-2.5 px-3 font-black text-slate-900">
+                            #{ord.orderNumber}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">
+                            {new Date(ord.createdAt).toLocaleString("tr-TR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold">
+                            {ord.orderType === "dine_in"
+                              ? `🍽️ Masa ${ord.tableNumber}`
+                              : ord.orderType === "pickup"
+                              ? "🛍️ Gel-Al"
+                              : `🛵 Paket (${ord.deliveryZoneName || "Genel"})`}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-800">
+                              {ord.customerName}
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              {ord.customerPhone}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 max-w-xs truncate text-slate-600">
+                            {ord.items
+                              .map((i) => `${i.quantity}x ${i.name}`)
+                              .join(", ")}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                ord.status === "rejected"
+                                  ? "bg-red-100 text-red-700"
+                                  : ord.status === "completed"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-orange-100 text-orange-800"
+                              }`}
+                            >
+                              {ord.status === "rejected"
+                                ? "İptal"
+                                : ord.status === "completed"
+                                ? "Tamamlandı"
+                                : ord.status === "ready"
+                                ? "Yolda / Hazır"
+                                : "Hazırlanıyor"}
+                            </span>
+                            {ord.courierName && (
+                              <div className="text-[10px] font-bold text-slate-500 mt-0.5">
+                                🛵 {ord.courierName}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-extrabold text-slate-900 whitespace-nowrap">
+                            {ord.totalAmount.toFixed(2)} {settings?.currency}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handlePrintOrderFromAdmin(ord)}
+                              className="inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-orange-600" />
+                              <span>Yazdır</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -723,15 +1063,46 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="lg:col-span-8 space-y-4">
-              <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+                <div className="space-y-1.5">
                   <h2 className="font-bold text-base text-slate-900">
                     Ürünler ({items.length})
                   </h2>
-                  <p className="text-xs text-slate-500">
-                    Ürün ekleyebilir, fiyat değiştirebilir veya tek tıkla
-                    &ldquo;Tükendi&rdquo; olarak işaretleyebilirsiniz.
-                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setMenuStockFilter("all")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        menuStockFilter === "all"
+                          ? "bg-slate-900 text-white"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      Tümü ({items.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMenuStockFilter("available")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        menuStockFilter === "available"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      Stokta ({items.filter((i) => i.available).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMenuStockFilter("sold_out")}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        menuStockFilter === "sold_out"
+                          ? "bg-rose-600 text-white"
+                          : "bg-rose-50 text-rose-700"
+                      }`}
+                    >
+                      Tükenenler ({items.filter((i) => !i.available).length})
+                    </button>
+                  </div>
                 </div>
                 <button
                   onClick={() =>
@@ -748,76 +1119,91 @@ export default function AdminDashboardPage() {
                       modifierGroups: [],
                     })
                   }
-                  className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition"
+                  className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition cursor-pointer"
                 >
                   <Plus className="w-4 h-4" /> Yeni Ürün Ekle
                 </button>
               </div>
 
               <div className="space-y-3">
-                {items.map((item) => {
-                  const catName =
-                    categories.find((c) => c.id === item.categoryId)?.name ||
-                    "Kategori";
-                  return (
-                    <div
-                      key={item.id}
-                      className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-center gap-3.5">
-                        {item.imageUrl && (
-                          <img
-                            src={item.imageUrl}
-                            alt={item.name}
-                            className="w-16 h-16 rounded-xl object-cover bg-slate-100"
-                          />
-                        )}
-                        <div>
-                          <span className="text-[11px] font-bold uppercase text-orange-600">
-                            {catName}
-                          </span>
-                          <h3 className="font-bold text-slate-900">
-                            {item.name}
-                          </h3>
-                          <p className="text-xs text-slate-500 line-clamp-1">
-                            {item.description}
-                          </p>
-                          <div className="text-sm font-extrabold text-slate-900 mt-1">
-                            {item.price.toFixed(2)} {settings?.currency} •{" "}
-                            <span className="text-xs font-normal text-slate-500">
-                              {item.modifierGroups.length} Opsiyon Grubu
+                {items
+                  .filter((it) =>
+                    menuStockFilter === "available"
+                      ? it.available
+                      : menuStockFilter === "sold_out"
+                      ? !it.available
+                      : true
+                  )
+                  .map((item) => {
+                    const catName =
+                      categories.find((c) => c.id === item.categoryId)?.name ||
+                      "Kategori";
+                    return (
+                      <div
+                        key={item.id}
+                        className={`bg-white p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                          item.available
+                            ? "border-slate-200"
+                            : "border-rose-300 bg-rose-50/20"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3.5">
+                          {item.imageUrl && (
+                            <img
+                              src={item.imageUrl}
+                              alt={item.name}
+                              className="w-16 h-16 rounded-xl object-cover bg-slate-100"
+                            />
+                          )}
+                          <div>
+                            <span className="text-[11px] font-bold uppercase text-orange-600">
+                              {catName}
                             </span>
+                            <h3 className="font-bold text-slate-900">
+                              {item.name}
+                            </h3>
+                            <p className="text-xs text-slate-500 line-clamp-1">
+                              {item.description}
+                            </p>
+                            <div className="text-sm font-extrabold text-slate-900 mt-1">
+                              {item.price.toFixed(2)} {settings?.currency} •{" "}
+                              <span className="text-xs font-normal text-slate-500">
+                                {item.modifierGroups.length} Opsiyon Grubu
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="flex items-center gap-2 self-end sm:self-center">
-                        <button
-                          onClick={() => handleToggleItemAvailability(item)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-                            item.available
-                              ? "bg-emerald-100 text-emerald-800"
-                              : "bg-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {item.available ? "Stokta (Aktif)" : "Tükendi"}
-                        </button>
-                        <button
-                          onClick={() => setEditingItem(item)}
-                          className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteItem(item.id)}
-                          className="p-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-2 self-end sm:self-center">
+                          <button
+                            onClick={() => handleToggleItemAvailability(item)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                              item.available
+                                ? "bg-emerald-100 hover:bg-rose-100 text-emerald-800 hover:text-rose-800"
+                                : "bg-rose-600 hover:bg-emerald-600 text-white"
+                            }`}
+                          >
+                            {item.available
+                              ? "🟢 Stokta (Aktif)"
+                              : "🔴 TÜKENDİ (Aç)"}
+                          </button>
+                          <button
+                            onClick={() => setEditingItem(item)}
+                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                            title="Düzenle & Porsiyon/Opsiyon Ekle"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteItem(item.id)}
+                            className="p-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
             </div>
           </div>
@@ -1676,7 +2062,7 @@ export default function AdminDashboardPage() {
             <div className="bg-white p-6 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">
-                  Masadan Sipariş & Garson Çağrı QR Kodları
+                  Masadan Sipariş & Garson Çağrı QR Kodları (?masa=1, ?masa=2...)
                 </h2>
                 <p className="text-sm text-slate-500">
                   Müşteriler telefon kamerasıyla bu QR kodları okuttuğunda masa
@@ -1685,19 +2071,27 @@ export default function AdminDashboardPage() {
                 </p>
               </div>
               <button
-                onClick={() => window.print()}
-                className="bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold px-4 py-2.5 rounded-xl"
+                onClick={() => {
+                  setPrintingZReport(false);
+                  setSelectedOrderForPrint(null);
+                  setTimeout(() => window.print(), 100);
+                }}
+                className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer"
               >
+                <Printer className="w-4 h-4 text-orange-400" />
                 Tüm QR Kartlarını Yazdır
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div
+              id="printable-qr-grid"
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
+            >
               {Array.from(
                 { length: settings?.tableCount || 15 },
                 (_, i) => i + 1
               ).map((tableNum) => {
-                const tableUrl = `${originUrl}/?table=${tableNum}`;
+                const tableUrl = `${originUrl}/?masa=${tableNum}`;
                 const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
                   tableUrl
                 )}`;
@@ -1717,13 +2111,16 @@ export default function AdminDashboardPage() {
                         className="w-full h-full object-contain"
                       />
                     </div>
+                    <p className="text-[10px] font-mono text-slate-400 truncate">
+                      ?masa={tableNum}
+                    </p>
                     <p className="text-[11px] text-slate-500">
                       Sipariş Ver • Garson Çağır • Hesap İste
                     </p>
                     <Link
-                      href={`/?table=${tableNum}`}
+                      href={`/?masa=${tableNum}`}
                       target="_blank"
-                      className="inline-flex items-center justify-center gap-1 text-xs font-bold text-orange-600 hover:underline"
+                      className="inline-flex items-center justify-center gap-1 text-xs font-bold text-orange-600 hover:underline print:hidden"
                     >
                       <span>Simüle Et</span>
                       <ExternalLink className="w-3 h-3" />
@@ -2372,6 +2769,76 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
+            {/* Kurye Listesi Yönetimi */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                <Truck className="w-4 h-4 text-orange-600" />
+                <span>Paket Servis Kurye Listesi (WhatsApp Bildirimi İçin)</span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Mutfak/Kasa ekranında paket siparişi yola çıkarırken seçebileceğiniz kurye isimlerini buradan tanımlayabilirsiniz.
+              </p>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Örn: Ahmet (Motorlu Kurye)"
+                  value={newCourierName}
+                  onChange={(e) => setNewCourierName(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newCourierName.trim()) return;
+                    const list = settings.couriers || [
+                      "Kurye 1 (Motorlu)",
+                      "Kurye 2 (Motorlu)",
+                      "Hızlı Kurye",
+                    ];
+                    setSettings({
+                      ...settings,
+                      couriers: [...list, newCourierName.trim()],
+                    });
+                    setNewCourierName("");
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
+                >
+                  + Kurye Ekle
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(
+                  settings.couriers || [
+                    "Kurye 1 (Motorlu)",
+                    "Kurye 2 (Motorlu)",
+                    "Hızlı Kurye",
+                  ]
+                ).map((cName, idx) => (
+                  <span
+                    key={`${cName}-${idx}`}
+                    className="inline-flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl"
+                  >
+                    <span>🛵 {cName}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const list = settings.couriers || [];
+                        setSettings({
+                          ...settings,
+                          couriers: list.filter((_, i) => i !== idx),
+                        });
+                      }}
+                      className="text-red-500 hover:text-red-700 font-black cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
             {/* Yönetici & Mutfak Giriş Şifreleri */}
             <div className="border-t border-slate-200 pt-4 space-y-3">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
@@ -2431,7 +2898,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
 
             <button
               type="submit"
-              className="inline-flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-6 py-3 rounded-xl transition"
+              className="inline-flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-6 py-3 rounded-xl transition cursor-pointer"
             >
               <Save className="w-4 h-4" />
               Ayarları Kaydet
@@ -2543,11 +3010,43 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
-            {/* Opsiyon Grupları */}
+            {/* Popüler & Stokta Durumu */}
+            <div className="flex flex-wrap items-center gap-4 pt-1">
+              <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(editingItem.popular)}
+                  onChange={(e) =>
+                    setEditingItem({
+                      ...editingItem,
+                      popular: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-orange-600"
+                />
+                <span>🔥 Popüler Ürün Olarak İşaretle</span>
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(editingItem.available)}
+                  onChange={(e) =>
+                    setEditingItem({
+                      ...editingItem,
+                      available: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-emerald-600"
+                />
+                <span>🟢 Stokta Mevcut (Satışa Açık)</span>
+              </label>
+            </div>
+
+            {/* Opsiyon Grupları & Hazır Şablonlar */}
             <div className="border-t border-slate-200 pt-3 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-xs font-bold uppercase text-slate-600">
-                  Opsiyon & Ekstra Grupları ({editingItem.modifierGroups.length})
+                  Porsiyon, Opsiyon & Ekstra Malzeme Grupları ({editingItem.modifierGroups.length})
                 </label>
                 <button
                   type="button"
@@ -2569,9 +3068,109 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       ],
                     });
                   }}
-                  className="text-xs font-bold text-orange-600 hover:underline"
+                  className="text-xs font-bold text-orange-600 hover:underline cursor-pointer"
                 >
-                  + Opsiyon Grubu Ekle
+                  + Boş Opsiyon Grubu Ekle
+                </button>
+              </div>
+
+              {/* Tek Tıkla Hazır Şablon Butonları */}
+              <div className="flex flex-wrap items-center gap-1.5 bg-orange-50/70 p-2.5 rounded-xl border border-orange-100">
+                <span className="text-[11px] font-bold text-orange-800 mr-1">
+                  Hazır Şablon Ekle:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tpl: ModifierGroup = {
+                      id: `mod-por-${Date.now()}`,
+                      name: "Porsiyon Seçimi",
+                      required: true,
+                      multiSelect: false,
+                      options: [
+                        { id: `o-${Date.now()}-1`, name: "1 Porsiyon (Standart)", price: 0 },
+                        { id: `o-${Date.now()}-2`, name: "1.5 Porsiyon (Doyuran)", price: Math.round(editingItem.price * 0.45) },
+                        { id: `o-${Date.now()}-3`, name: "Duble Porsiyon", price: Math.round(editingItem.price * 0.85) },
+                      ],
+                    };
+                    setEditingItem({
+                      ...editingItem,
+                      modifierGroups: [...editingItem.modifierGroups, tpl],
+                    });
+                  }}
+                  className="text-[11px] font-bold bg-white hover:bg-orange-600 hover:text-white text-slate-800 border border-orange-200 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                >
+                  + Porsiyon Seçimi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tpl: ModifierGroup = {
+                      id: `mod-aci-${Date.now()}`,
+                      name: "Acı / Pişirme Tercihi",
+                      required: true,
+                      multiSelect: false,
+                      options: [
+                        { id: `o-${Date.now()}-1`, name: "Acısız", price: 0 },
+                        { id: `o-${Date.now()}-2`, name: "Az Acılı", price: 0 },
+                        { id: `o-${Date.now()}-3`, name: "Bol Acılı", price: 0 },
+                      ],
+                    };
+                    setEditingItem({
+                      ...editingItem,
+                      modifierGroups: [...editingItem.modifierGroups, tpl],
+                    });
+                  }}
+                  className="text-[11px] font-bold bg-white hover:bg-orange-600 hover:text-white text-slate-800 border border-orange-200 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                >
+                  + Acı Tercihi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tpl: ModifierGroup = {
+                      id: `mod-cikar-${Date.now()}`,
+                      name: "Çıkarılacak Malzemeler",
+                      required: false,
+                      multiSelect: true,
+                      options: [
+                        { id: `o-${Date.now()}-1`, name: "Soğansız Olsun", price: 0 },
+                        { id: `o-${Date.now()}-2`, name: "Domatessiz Olsun", price: 0 },
+                        { id: `o-${Date.now()}-3`, name: "Maydanozsuz Olsun", price: 0 },
+                        { id: `o-${Date.now()}-4`, name: "Baharatsız Olsun", price: 0 },
+                      ],
+                    };
+                    setEditingItem({
+                      ...editingItem,
+                      modifierGroups: [...editingItem.modifierGroups, tpl],
+                    });
+                  }}
+                  className="text-[11px] font-bold bg-white hover:bg-orange-600 hover:text-white text-slate-800 border border-orange-200 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                >
+                  + Çıkarılacak Malzeme
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tpl: ModifierGroup = {
+                      id: `mod-ekstra-${Date.now()}`,
+                      name: "Ekstra Yan Lezzetler",
+                      required: false,
+                      multiSelect: true,
+                      options: [
+                        { id: `o-${Date.now()}-1`, name: "Ekstra Sıcak Lavaş", price: 20 },
+                        { id: `o-${Date.now()}-2`, name: "Közlenmiş Biber & Domates", price: 35 },
+                        { id: `o-${Date.now()}-3`, name: "Ekstra Kaşar / Sos", price: 30 },
+                      ],
+                    };
+                    setEditingItem({
+                      ...editingItem,
+                      modifierGroups: [...editingItem.modifierGroups, tpl],
+                    });
+                  }}
+                  className="text-[11px] font-bold bg-white hover:bg-orange-600 hover:text-white text-slate-800 border border-orange-200 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                >
+                  + Ekstra Malzemeler
                 </button>
               </div>
 
@@ -2641,9 +3240,9 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                           modifierGroups: updated,
                         });
                       }}
-                      className="text-red-500 text-xs"
+                      className="text-red-500 text-xs font-bold cursor-pointer"
                     >
-                      Sil
+                      Grubu Sil
                     </button>
                   </div>
 
@@ -2685,6 +3284,24 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                           }}
                           className="w-20 px-2 py-1 text-xs border border-slate-200 rounded bg-white"
                         />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...editingItem.modifierGroups];
+                            const opts = group.options.filter(
+                              (_, idx) => idx !== oIdx
+                            );
+                            updated[gIdx] = { ...group, options: opts };
+                            setEditingItem({
+                              ...editingItem,
+                              modifierGroups: updated,
+                            });
+                          }}
+                          className="text-red-500 hover:text-red-700 font-black px-1.5 cursor-pointer"
+                          title="Seçeneği Sil"
+                        >
+                          ×
+                        </button>
                       </div>
                     ))}
                     <button
@@ -2707,7 +3324,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                           modifierGroups: updated,
                         });
                       }}
-                      className="text-[11px] font-semibold text-orange-600 hover:underline"
+                      className="text-[11px] font-semibold text-orange-600 hover:underline cursor-pointer"
                     >
                       + Seçenek Ekle
                     </button>
@@ -2720,18 +3337,181 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               <button
                 type="button"
                 onClick={() => setEditingItem(null)}
-                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100"
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 İptal
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-orange-600 hover:bg-orange-700 text-white"
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-orange-600 hover:bg-orange-700 text-white cursor-pointer"
               >
                 Kaydet
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* 80mm GÜN SONU Z RAPORU YAZDIRMA ŞABLONU */}
+      {printingZReport && (
+        <div
+          id="printable-z-report"
+          className="hidden print:block text-xs font-mono leading-snug"
+        >
+          <div className="text-center border-b-2 border-dashed border-black pb-2 mb-2">
+            <h2 className="font-bold text-base uppercase">{settings?.name}</h2>
+            <p className="text-[11px]">{settings?.phone}</p>
+            <div className="mt-1.5 py-1 border border-black font-black text-sm">
+              GÜN SONU (Z RAPORU)
+            </div>
+            <p className="mt-1 text-[11px] font-bold">
+              Dönem: {reportPeriodLabel}
+            </p>
+            <p className="text-[10px]">
+              Rapor Tarihi: {new Date().toLocaleString("tr-TR")}
+            </p>
+          </div>
+
+          <div className="space-y-1 border-b border-dashed border-black pb-2 mb-2 text-[11px]">
+            <div className="flex justify-between font-bold">
+              <span>BAŞARILI SİPARİŞ:</span>
+              <span>{validOrders.length} Adet</span>
+            </div>
+            <div className="flex justify-between">
+              <span>İPTAL / RED SİPARİŞ:</span>
+              <span>{rejectedPeriodOrders.length} Adet</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Adrese Paket Servis:</span>
+              <span>{deliveryCount} Adet</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Gel-Al Sipariş:</span>
+              <span>{pickupCount} Adet</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Masada QR Sipariş:</span>
+              <span>{dineInCount} Adet</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 border-b border-dashed border-black pb-2 mb-2 text-[11px]">
+            <p className="font-bold underline">ÖDEME YÖNTEMİ KIRILIMI:</p>
+            <div className="flex justify-between">
+              <span>Nakit Tahsilat:</span>
+              <span>
+                {cashTotal.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Kapıda Kredi Kartı (POS):</span>
+              <span>
+                {cardTotal.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Masada Ödeme (Nakit/POS):</span>
+              <span>
+                {tablePosTotal.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Toplam Kupon İndirimi:</span>
+              <span>
+                -{totalDiscountGiven.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          </div>
+
+          {topSellingProducts.length > 0 && (
+            <div className="space-y-1 border-b border-dashed border-black pb-2 mb-2 text-[11px]">
+              <p className="font-bold underline">ÜRÜN SATIŞ ADETLERİ:</p>
+              {topSellingProducts.slice(0, 15).map((p) => (
+                <div key={p.name} className="flex justify-between">
+                  <span>
+                    {p.qty}x {p.name}
+                  </span>
+                  <span>
+                    {p.revenue.toFixed(2)} {settings?.currency}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="pt-1 font-black flex justify-between text-sm">
+            <span>NET GENEL CİRO:</span>
+            <span>
+              {totalRevenue.toFixed(2)} {settings?.currency}
+            </span>
+          </div>
+          <div className="text-center pt-3 text-[10px]">
+            <p>*** Z RAPORU SONU ***</p>
+          </div>
+        </div>
+      )}
+
+      {/* 80mm SİPARİŞ ADİSYON FİŞİ YAZDIRMA ŞABLONU (ADMIN) */}
+      {selectedOrderForPrint && !printingZReport && (
+        <div
+          id="printable-receipt"
+          className="hidden print:block text-xs font-mono leading-snug"
+        >
+          <div className="text-center border-b-2 border-dashed border-black pb-2 mb-2">
+            <h2 className="font-bold text-base uppercase">{settings?.name}</h2>
+            <p className="text-[11px]">Tel: {settings?.phone}</p>
+            <div className="mt-1 py-1 border border-black font-black text-sm">
+              SİPARİŞ NO: #{selectedOrderForPrint.orderNumber}
+            </div>
+            <p className="mt-1 font-bold">
+              {selectedOrderForPrint.orderType === "dine_in"
+                ? `MASA: ${selectedOrderForPrint.tableNumber}`
+                : selectedOrderForPrint.orderType === "pickup"
+                ? "GEL-AL SİPARİŞ"
+                : "PAKET SERVİS"}
+            </p>
+            <p className="text-[10px]">
+              {new Date(selectedOrderForPrint.createdAt).toLocaleString(
+                "tr-TR"
+              )}
+            </p>
+          </div>
+          <div className="mb-2 text-[11px]">
+            <p>Müşteri: {selectedOrderForPrint.customerName}</p>
+            <p>Tel: {selectedOrderForPrint.customerPhone}</p>
+            {selectedOrderForPrint.customerAddress && (
+              <p>Adres: {selectedOrderForPrint.customerAddress}</p>
+            )}
+            {selectedOrderForPrint.courierName && (
+              <p>Kurye: {selectedOrderForPrint.courierName}</p>
+            )}
+          </div>
+          <div className="border-t border-b border-dashed border-black py-2 space-y-1">
+            {selectedOrderForPrint.items.map((item) => (
+              <div key={item.id}>
+                <div className="flex justify-between font-bold">
+                  <span>
+                    {item.quantity}x {item.name}
+                  </span>
+                  <span>
+                    {item.totalPrice.toFixed(2)} {settings?.currency}
+                  </span>
+                </div>
+                {item.selectedModifiers.map((m, i) => (
+                  <div key={i} className="pl-2 text-[11px]">
+                    + {m.optionName}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="pt-2 font-black flex justify-between text-sm">
+            <span>TOPLAM:</span>
+            <span>
+              {selectedOrderForPrint.totalAmount.toFixed(2)}{" "}
+              {settings?.currency}
+            </span>
+          </div>
         </div>
       )}
     </div>

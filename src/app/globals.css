@@ -22,23 +22,41 @@ body {
   scrollbar-width: none;
 }
 
-/* 80mm Termal Yazıcı Fiş Görünümü */
+/* 80mm Termal Yazıcı Fiş, Z Raporu ve QR Kart Görünümü */
 @media print {
+  @page {
+    margin: 2mm;
+  }
   body * {
     visibility: hidden;
   }
   #printable-receipt,
-  #printable-receipt * {
+  #printable-receipt *,
+  #printable-z-report,
+  #printable-z-report *,
+  #printable-qr-grid,
+  #printable-qr-grid * {
     visibility: visible;
   }
-  #printable-receipt {
+  #printable-receipt,
+  #printable-z-report {
     position: absolute;
     left: 0;
     top: 0;
-    width: 80mm;
-    padding: 4mm;
-    background: white;
-    color: black;
+    width: 78mm;
+    padding: 3mm;
+    background: white !important;
+    color: black !important;
     box-shadow: none !important;
+    font-family: "Courier New", Courier, monospace !important;
+  }
+  #printable-qr-grid {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 6mm;
+    background: white !important;
+    color: black !important;
   }
 }
