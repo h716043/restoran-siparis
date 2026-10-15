@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Restoran POS & Online Sipariş Sistemi — Tam Kurulum ve Kullanım Rehberi</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #e2e8f0;
+      --primary: #ea580c;
+      --primary-dark: #c2410c;
+      --teal: #0d9488;
+      --teal-light: #f0fdfa;
+      --whatsapp: #128c7e;
+      --dark: #0f172a;
+      --code-bg: #0f172a;
+      --code-text: #34d399;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    /* Üst Başlık (Hero) */
+    .hero {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0f766e 100%);
+      color: #ffffff;
+      padding: 3rem 1.5rem;
+      border-bottom: 4px solid var(--primary);
+    }
+
+    .hero-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(234, 88, 12, 0.25);
+      border: 1px solid rgba(251, 146, 60, 0.5);
+      color: #fdba74;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.35rem 0.85rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+
+    .hero h1 {
+      font-size: 2.2rem;
+      font-weight: 900;
+      margin-bottom: 0.75rem;
+      line-height: 1.2;
+    }
+
+    .hero p {
+      color: #cbd5e1;
+      font-size: 1.05rem;
+      max-width: 850px;
+    }
+
+    .quick-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.75rem;
+    }
+
+    .quick-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 255, 255, 0.1);
+      hover: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      text-decoration: none;
+      padding: 0.6rem 1.1rem;
+      border-radius: 0.75rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      transition: all 0.2s;
+    }
+
+    .quick-link:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+      transform: translateY(-1px);
+    }
+
+    /* Ana Düzen */
+    .layout {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 1.25rem;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 2rem;
+      align-items: start;
+    }
+
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: static !important;
+      }
+    }
+
+    /* Sol Menü */
+    .sidebar {
+      position: sticky;
+      top: 1.5rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+    }
+
+    .sidebar h3 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .nav-list a {
+      display: block;
+      text-decoration: none;
+      color: var(--text);
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 0.55rem 0.75rem;
+      border-radius: 0.6rem;
+      transition: all 0.15s;
+    }
+
+    .nav-list a:hover {
+      background: #fff7ed;
+      color: var(--primary);
+    }
+
+    /* İçerik Kartları */
+    .content {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .section-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.25rem;
+      padding: 2rem;
+      box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+      scroll-margin-top: 1.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #f1f5f9;
+    }
+
+    .step-num {
+      width: 2.4rem;
+      height: 2.4rem;
+      border-radius: 0.75rem;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 900;
+      font-size: 1.05rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .section-header h2 {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--dark);
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 800;
+      margin: 1.5rem 0 0.6rem 0;
+      color: #1e293b;
+    }
+
+    p {
+      color: #334155;
+      margin-bottom: 0.85rem;
+      font-size: 0.95rem;
+    }
+
+    ul, ol {
+      margin: 0.5rem 0 1.25rem 1.4rem;
+      color: #334155;
+      font-size: 0.95rem;
+    }
+
+    li {
+      margin-bottom: 0.5rem;
+    }
+
+    /* Mimari Şema Kutuları */
+    .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin: 1.25rem 0;
+    }
+
+    @media (max-width: 768px) {
+      .arch-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .arch-box {
+      border: 2px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      background: #f8fafc;
+    }
+
+    .arch-box.netlify {
+      border-color: #2dd4bf;
+      background: #f0fdfa;
+    }
+
+    .arch-box.turso {
+      border-color: #818cf8;
+      background: #eef2ff;
+    }
+
+    .arch-box.local {
+      border-color: #fb923c;
+      background: #fff7ed;
+    }
+
+    .arch-box h4 {
+      font-size: 1rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+    }
+
+    .arch-box p {
+      font-size: 0.85rem;
+      margin-bottom: 0;
+    }
+
+    /* Uyarı ve Bilgi Kutuları */
+    .alert {
+      border-radius: 0.9rem;
+      padding: 1rem 1.25rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+      border-left: 5px solid;
+    }
+
+    .alert-info {
+      background: #f0fdfa;
+      border-color: #0d9488;
+      color: #115e59;
+    }
+
+    .alert-warn {
+      background: #fffbeb;
+      border-color: #f59e0b;
+      color: #92400e;
+    }
+
+    .alert-success {
+      background: #ecfdf5;
+      border-color: #10b981;
+      color: #065f46;
+    }
+
+    /* Kod Blokları ve Kopyala Butonu */
+    .code-wrapper {
+      position: relative;
+      margin: 0.85rem 0 1.25rem 0;
+    }
+
+    pre {
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 1.1rem 1.25rem;
+      border-radius: 0.85rem;
+      overflow-x: auto;
+      font-family: "Consolas", "Monaco", "Courier New", monospace;
+      font-size: 0.86rem;
+      line-height: 1.6;
+    }
+
+    code.inline {
+      background: #f1f5f9;
+      color: #be123c;
+      padding: 0.15rem 0.45rem;
+      border-radius: 0.35rem;
+      font-family: "Consolas", monospace;
+      font-size: 0.85em;
+      font-weight: 700;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0.65rem;
+      right: 0.65rem;
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.5rem;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .copy-btn:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    /* Tablo */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.75rem 1rem;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+      font-weight: 800;
+      color: var(--dark);
+    }
+
+    /* Adım Kartları */
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .step-item {
+      border: 1px solid var(--border);
+      border-radius: 0.9rem;
+      padding: 1.15rem 1.25rem;
+      background: #fafafa;
+    }
+
+    .step-item strong.title {
+      display: block;
+      font-size: 1rem;
+      color: var(--primary-dark);
+      margin-bottom: 0.35rem;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      margin-top: 3rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ÜST HERO ALANI -->
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="badge">📘 TAM KURULUM &amp; BAYİ DAĞITIM KILAVUZU</div>
+      <h1>Restoran Online Sipariş, Mutfak POS &amp; WhatsApp Sistemi</h1>
+      <p>
+        Müşteri vitrin sayfasının <strong>Netlify</strong> üzerinde 7/24 kesintisiz çalıştığı,
+        <strong>Admin Paneli (Port 5439)</strong>, <strong>Mutfak Ekranı (Port 5439)</strong> ve
+        <strong>WhatsApp QR Servisinin (Port 3001)</strong> ise dükkandaki yerel bilgisayarda çalıştığı
+        hibrit bulut mimarisinin A'dan Z'ye tüm kurulum ve kullanım kılavuzu.
+      </p>
+      <div class="quick-links">
+        <a href="http://localhost:5439/admin" target="_blank" class="quick-link">⚙️ Yerel Admin Paneli (Port 5439)</a>
+        <a href="http://localhost:5439/kitchen" target="_blank" class="quick-link">👨‍🍳 Canlı Mutfak Ekranı (Port 5439)</a>
+        <a href="http://localhost:5439" target="_blank" class="quick-link">🍔 Yerel Müşteri Menüsü</a>
+        <a href="https://yildizhanpos.netlify.app" target="_blank" class="quick-link">🌐 Canlı Netlify Müşteri Sitesi</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ANA DÜZEN -->
+  <div class="layout">
+
+    <!-- SOL MENÜ -->
+    <aside class="sidebar">
+      <h3>İçindekiler</h3>
+      <ul class="nav-list">
+        <li><a href="#mimari">1. Sistem Nasıl Çalışır? (Mimari)</a></li>
+        <li><a href="#gunluk-kullanim">2. Günlük Kullanım &amp; Tek Tıkla Başlatma</a></li>
+        <li><a href="#yeni-firma">3. Başka Firmaya / Yeni PC'ye Kurulum</a></li>
+        <li><a href="#turso-kurulum">4. Turso Bulut Veritabanı Açma</a></li>
+        <li><a href="#netlify-kurulum">5. Netlify Müşteri Sitesi Yayınlama</a></li>
+        <li><a href="#whatsapp-qr">6. WhatsApp QR Bağlantısı &amp; OTP</a></li>
+        <li><a href="#admin-ozellikler">7. Admin &amp; Mutfak Özellikleri</a></li>
+        <li><a href="#sorun-giderme">8. Sorun Giderme (SSS)</a></li>
+      </ul>
+    </aside>
+
+    <!-- SAĞ İÇERİK -->
+    <main class="content">
+
+      <!-- 1. MİMARİ -->
+      <section id="mimari" class="section-card">
+        <div class="section-header">
+          <div class="step-num">1</div>
+          <h2>Sistem Nasıl Çalışır? (Hibrit Bulut + Yerel Mimari)</h2>
+        </div>
+        <p>
+          Bu sistem, restoranların en büyük iki ihtiyacını aynı anda çözer:
+          <strong>Müşteri menüsü internette 7/24 açık kalır</strong> (dükkan bilgisayarı kapansa bile müşteriler menüyü görebilir),
+          ancak <strong>Yönetim (Admin), Mutfak ve WhatsApp doğrulama servisi</strong> tamamen dükkandaki kendi bilgisayarınızda güvende çalışır.
+        </p>
+
+        <div class="arch-grid">
+          <div class="arch-box netlify">
+            <h4>🌐 1. Müşteri Vitrini (Netlify)</h4>
+            <p>
+              Müşterilerin sipariş verdiği, masa QR kodlarını okuttuğu ve rezervasyon yaptığı adrestir.
+              Burada <code class="inline">/admin</code> ve <code class="inline">/kitchen</code> sayfaları <strong>tamamen kilitli ve gizlidir</strong>. Dışarıdan kimse yönetim paneline giremez.
+            </p>
+          </div>
+          <div class="arch-box turso">
+            <h4>☁️ 2. Bulut Köprüsü (Turso SQLite)</h4>
+            <p>
+              Netlify ile dükkandaki bilgisayarınız arasındaki <strong>ücretsiz ve anlık veri köprüsüdür</strong>.
+              Menü değişikliklerini yerelden Netlify'a, yeni siparişleri ve WhatsApp OTP taleplerini ise Netlify'dan yerel bilgisayarınıza taşır.
+            </p>
+          </div>
+          <div class="arch-box local">
+            <h4>💻 3. Yerel Kasa PC (Port 5439 &amp; 3001)</h4>
+            <p>
+              Dükkandaki bilgisayarda <code class="inline">BASLAT.bat</code> ile çalışır.
+              <strong>Port 5439</strong>'da Admin ve Mutfak ekranını açar; <strong>Port 3001</strong>'de ise kendi WhatsApp numaranızdan ücretsiz mesaj gönderir.
+            </p>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Bileşen / Ekran</th>
+              <th>Çalıştığı Yer</th>
+              <th>Erişim Adresi</th>
+              <th>Varsayılan Şifre</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Canlı Müşteri Sipariş Sayfası</strong></td>
+              <td>Netlify (Bulut - 7/24)</td>
+              <td><code class="inline">https://yildizhanpos.netlify.app</code></td>
+              <td>Şifresiz (Müşterilere Açık)</td>
+            </tr>
+            <tr>
+              <td><strong>Yönetici (Admin) Paneli</strong></td>
+              <td>Yerel Bilgisayar</td>
+              <td><code class="inline">http://localhost:5439/admin</code></td>
+              <td><code class="inline">admin1234</code></td>
+            </tr>
+            <tr>
+              <td><strong>Canlı Mutfak &amp; Kasa Ekranı</strong></td>
+              <td>Yerel Bilgisayar</td>
+              <td><code class="inline">http://localhost:5439/kitchen</code></td>
+              <td><code class="inline">1234</code></td>
+            </tr>
+            <tr>
+              <td><strong>WhatsApp QR Köprü Servisi</strong></td>
+              <td>Yerel Bilgisayar</td>
+              <td><code class="inline">http://localhost:3001/send-message</code></td>
+              <td>Arka Planda Otomatik Çalışır</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 2. GÜNLÜK KULLANIM -->
+      <section id="gunluk-kullanim" class="section-card">
+        <div class="section-header">
+          <div class="step-num">2</div>
+          <h2>Günlük Kullanım &amp; Tek Tıkla Başlatma (BASLAT.bat)</h2>
+        </div>
+        <p>
+          Sabah dükkanı açtığınızda tek yapmanız gereken proje klasöründeki
+          <code class="inline">BASLAT.bat</code> dosyasına çift tıklamaktır.
+        </p>
+
+        <div class="alert alert-success">
+          <strong>💡 Masaüstü Kısayolu Önerisi:</strong>
+          Proje klasöründeki <code class="inline">BASLAT.bat</code> dosyasına sağ tıklayıp
+          <strong>Gönder &rarr; Masaüstü (kısayol oluştur)</strong> seçeneğine tıklayın.
+          Böylece kasiyer veya mutfak personeli her sabah masaüstündeki simgeye çift tıklayarak tüm sistemi başlatabilir.
+        </div>
+
+        <h3>BASLAT.bat Çift Tıklandığında Otomatik Olarak Neler Olur?</h3>
+        <ol>
+          <li><strong>WhatsApp Servisi (Port 3001)</strong> başlar ve daha önce QR okuttuysanız 2 saniye içinde otomatik olarak WhatsApp'ınıza bağlanır.</li>
+          <li><strong>Admin &amp; Mutfak Sunucusu (Port 5439)</strong> başlar ve Turso Bulut veritabanı ile senkronize olur.</li>
+          <li>Varsayılan internet tarayıcınızda otomatik olarak <code class="inline">http://localhost:5439/admin</code> sayfası açılır.</li>
+          <li>Siyah komut penceresi açık kaldığı sürece hem Netlify'dan gelen siparişler mutfak ekranına düşer hem de WhatsApp doğrulama/sipariş mesajları müşterilere otomatik gider.</li>
+        </ol>
+
+        <p>Eğer terminal üzerinden manuel başlatmak isterseniz:</p>
+        <div class="code-wrapper">
+          <button class="copy-btn" onclick="copyCode(this)">Kopyala</button>
+          <pre>npm run baslat</pre>
+        </div>
+      </section>
+
+      <!-- 3. BAŞKA FİRMAYA / YENİ PC'YE KURULUM -->
+      <section id="yeni-firma" class="section-card">
+        <div class="section-header">
+          <div class="step-num">3</div>
+          <h2>Başka Bir Firmaya / Yeni Bilgisayara Kurulum Rehberi</h2>
+        </div>
+        <p>
+          Bu sistemi başka bir restorana/firmaya satmak veya başka bir bilgisayara kurmak istediğinizde,
+          her firmanın <strong>menüsü, siparişleri, WhatsApp numarası ve Netlify müşteri sitesi</strong> birbirinden tamamen bağımsız olmalıdır.
+          Aşağıdaki 4 adımı takip ederek <strong>5-10 dakika içinde</strong> yeni bir firmaya kurulum yapabilirsiniz:
+        </p>
+
+        <div class="step-list">
+          <div class="step-item">
+            <strong class="title">ADIM 1: Yeni Firmanın Bilgisayarına Node.js Kurun</strong>
+            <p>
+              Yeni firmanın kasa/mutfak bilgisayarına <a href="https://nodejs.org" target="_blank">https://nodejs.org</a> adresinden
+              <strong>Node.js v22 LTS</strong> sürümünü indirip kurun (İleri &rarr; İleri &rarr; Son).
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">ADIM 2: Proje Klasörünü Yeni Bilgisayara İndirin veya Kopyalayın</strong>
+            <p>
+              Proje klasörünü USB bellek ile yeni bilgisayara kopyalayın (<strong>Önemli:</strong> Eski firmanın verilerinin karışmaması için klasörün içindeki <code class="inline">data</code> klasörünü silin!)
+              veya GitHub'dan şu komutla çekin:
+            </p>
+            <div class="code-wrapper">
+              <button class="copy-btn" onclick="copyCode(this)">Kopyala</button>
+              <pre>git clone https://github.com/h716043/restoran-siparis.git
+cd restoran-siparis</pre>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">ADIM 3: "KURULUM-YENI-PC.bat" Dosyasına Çift Tıklayın</strong>
+            <p>
+              Klasörün içindeki <code class="inline">KURULUM-YENI-PC.bat</code> dosyasına çift tıklayın.
+              Bu sihirbaz bilgisayarda Node.js olup olmadığını kontrol eder, gerekli tüm paketleri (<code class="inline">npm install</code>) kurar ve temiz <code class="inline">data</code> klasörünü hazırlar.
+              <em>(Bu işlem sadece ilk kurulumda 1 kez yapılır).</em>
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">ADIM 4: Yeni Firma İçin Turso Veritabanı ve Netlify Sitesi Açıp Eşleştirin</strong>
+            <p>
+              Aşağıdaki <strong>4. Bölüm (Turso)</strong> ve <strong>5. Bölüm (Netlify)</strong> adımlarını uygulayarak yeni firma için ayrı bir Turso veritabanı ve ayrı bir Netlify sitesi açın.
+              Son olarak yeni bilgisayarda <code class="inline">BASLAT.bat</code> dosyasını çalıştırıp <code class="inline">http://localhost:5439/admin</code> &rarr; <strong>Netlify &amp; Bulut Senkronizasyon</strong> sekmesine yeni firmanın Turso URL ve Token bilgilerini yapıştırıp kaydedin!
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. TURSO KURULUMU -->
+      <section id="turso-kurulum" class="section-card">
+        <div class="section-header">
+          <div class="step-num">4</div>
+          <h2>Turso (Ücretsiz Bulut Veritabanı) Oluşturma</h2>
+        </div>
+        <p>
+          Her yeni restoran/firma için kendi Turso hesabınızın içinde ayrı bir veritabanı oluşturabilirsiniz (Ücretsiz planda yüzlerce veritabanı açılabilir):
+        </p>
+        <ol>
+          <li><a href="https://turso.tech" target="_blank">https://turso.tech</a> adresine girip GitHub hesabınızla oturum açın.</li>
+          <li><strong>Create Database</strong> butonuna tıklayın ve veritabanına firmanın adını verin (Örn: <code class="inline">kebapci-ahmet-db</code>).</li>
+          <li>Oluşturulan veritabanının üzerine tıklayın:
+            <ul>
+              <li><code class="inline">libsql://...</code> ile başlayan adresi kopyalayın (Bu sizin <strong>TURSO_DATABASE_URL</strong> değerinizdir).</li>
+              <li><strong>Generate Token</strong> (Read &amp; Write) butonuna tıklayıp oluşan uzun şifreyi kopyalayın (Bu sizin <strong>TURSO_AUTH_TOKEN</strong> değerinizdir).</li>
+            </ul>
+          </li>
+          <li>Yerel bilgisayarda <code class="inline">http://localhost:5439/admin</code> &rarr; <strong>Netlify &amp; Bulut Senkronizasyon</strong> sekmesini açın:
+            <ul>
+              <li><strong>"Bulut Senkronizasyonu Etkinleştir"</strong> kutucuğunu işaretleyin.</li>
+              <li>Kopyaladığınız <strong>TURSO_DATABASE_URL</strong> ve <strong>TURSO_AUTH_TOKEN</strong> değerlerini ilgili kutulara yapıştırın.</li>
+              <li><strong>"Kaydet &amp; Şimdi Bulutla Senkronize Et"</strong> butonuna tıklayın.</li>
+            </ul>
+          </li>
+        </ol>
+      </section>
+
+      <!-- 5. NETLIFY KURULUMU -->
+      <section id="netlify-kurulum" class="section-card">
+        <div class="section-header">
+          <div class="step-num">5</div>
+          <h2>Netlify Üzerinde Müşteri Sipariş Sitesini Yayınlama</h2>
+        </div>
+        <p>
+          Aynı GitHub deponuzu (<code class="inline">h716043/restoran-siparis</code>) istediğiniz kadar Netlify sitesine bağlayabilirsiniz. Yeni bir firma için tekrar GitHub'a kod yüklemenize gerek yoktur:
+        </p>
+        <ol>
+          <li><a href="https://app.netlify.com" target="_blank">https://app.netlify.com</a> adresine giriş yapın.</li>
+          <li><strong>Add new site &rarr; Import an existing project &rarr; GitHub</strong> seçeneğine tıklayın.</li>
+          <li>Listeden <strong><code class="inline">h716043/restoran-siparis</code></strong> deponuzu seçin.</li>
+          <li><strong>Site name</strong> kısmına firmanın adını yazın (Örn: <code class="inline">kebapci-ahmet</code> &rarr; <code class="inline">https://kebapci-ahmet.netlify.app</code> olur).</li>
+          <li><strong>Environment variables (Ortam Değişkenleri)</strong> bölümünde <strong>New variable</strong> butonuna basarak şu 3 değişkeni ekleyin:</li>
+        </ol>
+
+        <div class="code-wrapper">
+          <button class="copy-btn" onclick="copyCode(this)">Kopyala</button>
+          <pre>NEXT_PUBLIC_CUSTOMER_ONLY=true
+TURSO_DATABASE_URL=libsql://VERITABANI-ADINIZ.aws-eu-west-1.turso.io
+TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...</pre>
+        </div>
+
+        <div class="alert alert-info">
+          <strong>📌 Önemli İpucu:</strong> Netlify'da siteniz yayınlandıktan sonra oluşan canlı adresi (Örn: <code class="inline">https://yildizhanpos.netlify.app</code>)
+          yerel Admin panelinizdeki (<code class="inline">http://localhost:5439/admin</code>) <strong>Netlify &amp; Bulut Senkronizasyon</strong> sekmesinde bulunan
+          <em>"Canlı Müşteri Sipariş Adresi (Netlify URL)"</em> kutusuna yapıştırıp kaydedin.
+          Böylece <strong>Masa QR Kodları</strong> ve <strong>Web Sitesi Iframe Widget</strong> kodları otomatik olarak bu canlı adresi kullanır!
+        </div>
+      </section>
+
+      <!-- 6. WHATSAPP QR & OTP -->
+      <section id="whatsapp-qr" class="section-card">
+        <div class="section-header">
+          <div class="step-num">6</div>
+          <h2>WhatsApp QR Bağlantısı &amp; Otomatik Mesaj Gönderimi</h2>
+        </div>
+        <p>
+          Sistem, herhangi bir aylık SMS veya WhatsApp API ücreti ödemeden restoranın kendi WhatsApp numarasını (veya WhatsApp Business hattını) kullanarak:
+        </p>
+        <ul>
+          <li>Müşteri üye olurken / giriş yaparken <strong>6 Haneli Doğrulama Kodu (OTP)</strong> gönderir.</li>
+          <li>Mutfak ekranından sipariş <strong>Onaylandığında</strong> (tahmini süre ile birlikte), <strong>Yola Çıktığında / Hazır Olduğunda</strong> veya <strong>İptal Edildiğinde</strong> müşteriye otomatik WhatsApp mesajı gönderir.</li>
+          <li>Masa rezervasyonu <strong>Onaylandığında</strong> (ayrılan masa numarasıyla birlikte) veya <strong>Reddedildiğinde</strong> müşteriye otomatik WhatsApp mesajı gönderir.</li>
+        </ul>
+
+        <h3>İlk Kez WhatsApp QR Okutma veya Numara Değiştirme:</h3>
+        <ol>
+          <li><code class="inline">BASLAT.bat</code> dosyasını çalıştırdığınızda siyah terminal penceresinde bir <strong>QR Kod</strong> belirir.</li>
+          <li>Restoranın telefonundan <strong>WhatsApp &rarr; Ayarlar &rarr; Bağlı Cihazlar &rarr; Cihaz Bağla</strong> menüsüne girip ekrandaki QR kodu okutun.</li>
+          <li>Ekranda <code class="inline">✅ WHATSAPP BAĞLANTISI AKTİF!</code> yazısını gördüğünüzde bağlantı tamamlanmıştır.</li>
+          <li>Admin Panelinde (<code class="inline">http://localhost:5439/admin</code>) &rarr; <strong>WhatsApp OTP &amp; Üyeler</strong> sekmesinde gönderim modunun <strong>"Kendi WhatsApp Numaram (QR Servisi)"</strong> seçili olduğundan emin olun.</li>
+        </ol>
+
+        <div class="alert alert-warn">
+          <strong>🔄 WhatsApp Numarasını Değiştirmek İsterseniz:</strong>
+          Farklı bir telefon numarası bağlamak istediğinizde, çalışan siyah pencereyi kapatın, proje klasörünün içindeki
+          <code class="inline">data\whatsapp_auth</code> klasörünü silin ve <code class="inline">BASLAT.bat</code>'ı tekrar çalıştırın. Yeni telefonla okutabileceğiniz yeni bir QR kod çıkacaktır.
+        </div>
+      </section>
+
+      <!-- 7. ADMİN VE MUTFAK ÖZELLİKLERİ -->
+      <section id="admin-ozellikler" class="section-card">
+        <div class="section-header">
+          <div class="step-num">7</div>
+          <h2>Admin Paneli ve Mutfak Ekranı Özellikleri Özeti</h2>
+        </div>
+        <ul>
+          <li><strong>Dükkan Açık / Kapalı &amp; Saat Girişi:</strong> Admin panelinin sağ üst köşesinden veya <em>Dükkan Saatleri &amp; Genel Ayarlar</em> sekmesinden dükkanı tek tıkla Açık/Kapalı yapabilir, açılış-kapanış saatlerini (<code class="inline">11:00 - 23:30</code>) belirleyebilir ve mesai saatleri dışında otomatik kapanmasını sağlayabilirsiniz.</li>
+          <li><strong>Dinamik Üst Duyuru / Kampanya Barı:</strong> <em>Üst Bar, Bölgeler &amp; Kuponlar</em> sekmesinden sayfanın en üstündeki kampanya çubuğunun metnini, rengini ve tek tıkla uygulanacak kupon kodunu yönetebilirsiniz.</li>
+          <li><strong>Mahalle / Bölge Bazlı Minimum Sepet &amp; Teslimat Ücreti:</strong> Her mahalle için ayrı minimum paket tutarı ve getirme ücreti tanımlayabilirsiniz.</li>
+          <li><strong>İleri Saatli Sipariş &amp; Online Masa Rezervasyonu:</strong> Müşteriler "Hemen Gelsin" dışında ileri bir saat seçebilir veya masa rezervasyonu yapabilir. Mutfak ekranında masa numarası atayarak onaylayabilirsiniz.</li>
+          <li><strong>Masadan QR Sipariş &amp; Garson/Hesap Çağrısı:</strong> <em>Masa QR Kodları</em> sekmesinden her masa için özel QR kod yazdırabilirsiniz.</li>
+        </ul>
+      </section>
+
+      <!-- 8. SORUN GİDERME -->
+      <section id="sorun-giderme" class="section-card">
+        <div class="section-header">
+          <div class="step-num">8</div>
+          <h2>Sıkça Sorulan Sorular ve Sorun Giderme</h2>
+        </div>
+
+        <div class="step-list">
+          <div class="step-item">
+            <strong class="title">Soru 1: Netlify'dan verilen sipariş veya WhatsApp kodu yerel bilgisayara gelmiyor, ne yapmalıyım?</strong>
+            <p>
+              1. Yerel bilgisayarda <code class="inline">BASLAT.bat</code> penceresinin açık olduğundan ve internet bağlantınızın olduğundan emin olun.<br />
+              2. <code class="inline">http://localhost:5439/admin</code> &rarr; <strong>Netlify &amp; Bulut Senkronizasyon</strong> sekmesinde <em>"Bulut Senkronizasyonu Etkinleştir"</em> kutusunun işaretli olduğunu ve <strong>Kaydet &amp; Şimdi Bulutla Senkronize Et</strong> butonuna bastığınızda yeşil onay mesajı aldığınızı kontrol edin.<br />
+              3. Netlify'daki <em>Environment Variables</em> kısmındaki <code class="inline">TURSO_DATABASE_URL</code> ve <code class="inline">TURSO_AUTH_TOKEN</code> değerlerinin yerel Admin panelindeki değerlerle birebir aynı olduğundan emin olun.
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">Soru 2: Admin panelinde ürün fiyatı veya dükkan saati değiştirdim, Netlify'da ne zaman görünür?</strong>
+            <p>
+              Yerel Admin panelinde kaydettiğiniz anda otomatik olarak Turso Bulut veritabanına gönderilir. Müşteri Netlify sayfasını yenilediği anda (1 saniye içinde) yeni fiyatları ve dükkan durumunu görür; Netlify'da yeniden deploy beklemenize gerek yoktur!
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">Soru 3: Mutfak ekranında sesli bildirim (zil) çalmıyor, neden?</strong>
+            <p>
+              Modern tarayıcılar (Chrome/Edge) güvenlik gereği kullanıcı sayfaya en az bir kez tıklamadan otomatik ses çalmayı engeller. Mutfak ekranını (<code class="inline">http://localhost:5439/kitchen</code>) açtığınızda sağ üstteki <strong>"Zil Sesini Test Et"</strong> butonuna bir kez tıklamanız yeterlidir.
+            </p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="footer">
+    Restoran Sipariş &amp; Yönetim Sistemi • Yerel Port: <strong>5439</strong> • WhatsApp Köprü Portu: <strong>3001</strong>
+  </footer>
+
+  <script>
+    function copyCode(btn) {
+      const pre = btn.parentElement.querySelector("pre");
+      if (!pre) return;
+      navigator.clipboard.writeText(pre.innerText.trim()).then(() => {
+        const original = btn.innerText;
+        btn.innerText = "✓ Kopyalandı!";
+        btn.style.background = "#10b981";
+        setTimeout(() => {
+          btn.innerText = original;
+          btn.style.background = "";
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>
