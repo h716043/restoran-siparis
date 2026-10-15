@@ -1,0 +1,80 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getOrderById, getSettings, updateOrderStatus } from "@/lib/db";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { syncActivityWithCloud } from "@/lib/cloud-sync";
+
+export async function GET(
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    await syncActivityWithCloud();
+    const { id } = await context.params;
+    const order = getOrderById(id);
+    if (!order) {
+      return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+    }
+    return NextResponse.json({ order });
+  } catch (error) {
+    console.error("GET /api/orders/[id] error:", error);
+    return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const role = req.cookies.get("restoran_staff_role")?.value;
+    if (role !== "admin" && role !== "kitchen") {
+      return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
+    }
+
+    await syncActivityWithCloud();
+    const { id } = await context.params;
+    const body = await req.json();
+    const updated = updateOrderStatus(
+      id,
+      body.status,
+      body.estimatedMinutes,
+      body.rejectReason
+    );
+    if (!updated) {
+      return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+    }
+
+    await syncActivityWithCloud();
+
+    // Müşteriye otomatik WhatsApp sipariş durumu bildirimi gönder
+    const settings = getSettings();
+    const digits = (updated.customerPhone || "").replace(/\D/g, "");
+    if (
+      settings.whatsappConfig?.sendOrderUpdates !== false &&
+      digits.length >= 10
+    ) {
+      if (updated.status === "accepted") {
+        const mins = updated.estimatedMinutes || settings.estimatedPrepMinutes;
+        const msg = `✅ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz onaylandı ve hazırlanmaya başlandı!\n\n⏱️ Tahmini Süre: *${mins} dakika*`;
+        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
+      } else if (updated.status === "ready") {
+        const msg =
+          updated.orderType === "delivery"
+            ? `🛵 *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazırlandı ve kuryemiz adresinize doğru yola çıktı! Afiyet olsun.`
+            : `🍽️ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazır!`;
+        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
+      } else if (updated.status === "rejected") {
+        const msg = `⚠️ *${settings.name}*\n\nÜzgünüz *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz iptal edildi.\nSebep: ${
+          updated.rejectReason || "Yoğunluk"
+        }`;
+        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
+      }
+    }
+
+    return NextResponse.json({ order: updated });
+  } catch (error) {
+    console.error("PATCH /api/orders/[id] error:", error);
+    return NextResponse.json({ error: "Sipariş güncellenemedi" }, { status: 500 });
+  }
+}
+
