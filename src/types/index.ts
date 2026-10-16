@@ -202,6 +202,14 @@ export interface LoyaltyConfig {
   minRedeemPoints: number; // Örn: En az 20 TL puan biriktiğinde kullanabilme
 }
 
+export type StorefrontThemeId =
+  | "light-classic"
+  | "light-emerald"
+  | "light-royal"
+  | "dark-obsidian"
+  | "dark-luxury"
+  | "dark-neon";
+
 export interface RestaurantSettings {
   name: string;
   slogan: string;
@@ -218,6 +226,8 @@ export interface RestaurantSettings {
   currency: string;
   openingHours: string;
   firstOrderDiscountPercent?: number;
+  storefrontTheme?: StorefrontThemeId; // 3 Açık + 3 Koyu tema seçimi
+  allowCustomerThemeSwitch?: boolean; // Müşteri vitrinde kendi temasını değiştirebilsin mi?
   loyaltyConfig?: LoyaltyConfig;
   announcementBar?: AnnouncementBarConfig;
   deliveryZones?: DeliveryZone[];

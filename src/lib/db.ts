@@ -305,6 +305,14 @@ function initSchema(db: DatabaseSync) {
       };
       changed = true;
     }
+    if (!parsed.storefrontTheme) {
+      parsed.storefrontTheme = "light-classic";
+      changed = true;
+    }
+    if (parsed.allowCustomerThemeSwitch === undefined) {
+      parsed.allowCustomerThemeSwitch = true;
+      changed = true;
+    }
     if (!parsed.announcementBar) {
       parsed.announcementBar = {
         enabled: true,
@@ -337,6 +345,8 @@ function seedDatabase(db: DatabaseSync) {
     currency: "₺",
     openingHours: "11:00 - 23:30",
     firstOrderDiscountPercent: 10,
+    storefrontTheme: "light-classic",
+    allowCustomerThemeSwitch: true,
     loyaltyConfig: {
       enabled: true,
       earnPercent: 5,

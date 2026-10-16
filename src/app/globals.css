@@ -2,15 +2,280 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+[data-theme="light-classic"] {
   --foreground-rgb: 15, 23, 42;
   --background-rgb: 248, 250, 252;
+  --theme-bg: #f8fafc;
+  --theme-card: #ffffff;
+  --theme-muted: #f1f5f9;
+  --theme-input: #ffffff;
+  --theme-border: #e2e8f0;
+  --theme-border-subtle: #f1f5f9;
+  --theme-text: #0f172a;
+  --theme-text-sec: #334155;
+  --theme-text-muted: #64748b;
+  --brand-50: #fff7ed;
+  --brand-100: #ffedd5;
+  --brand-200: #fed7aa;
+  --brand-500: #f97316;
+  --brand-600: #ea580c;
+  --brand-700: #c2410c;
+  --brand-text-dark: #9a3412;
+  --brand-grad-to: #dc2626;
+}
+
+/* 🌿 AÇIK TEMA 2: Doğal Zeytin & Zümrüt */
+[data-theme="light-emerald"] {
+  --foreground-rgb: 6, 78, 59;
+  --background-rgb: 242, 249, 245;
+  --theme-bg: #f2f9f5;
+  --theme-card: #ffffff;
+  --theme-muted: #e6f4ec;
+  --theme-input: #ffffff;
+  --theme-border: #cce8d8;
+  --theme-border-subtle: #e2f2e9;
+  --theme-text: #06392a;
+  --theme-text-sec: #1e4d3b;
+  --theme-text-muted: #4b7a67;
+  --brand-50: #ecfdf5;
+  --brand-100: #d1fae5;
+  --brand-200: #a7f3d0;
+  --brand-500: #10b981;
+  --brand-600: #059669;
+  --brand-700: #047857;
+  --brand-text-dark: #065f46;
+  --brand-grad-to: #0d9488;
+}
+
+/* 👑 AÇIK TEMA 3: Saray & Gurme Bordo-Krem */
+[data-theme="light-royal"] {
+  --foreground-rgb: 39, 18, 23;
+  --background-rgb: 252, 248, 242;
+  --theme-bg: #fcf8f2;
+  --theme-card: #fffdf9;
+  --theme-muted: #f4ede2;
+  --theme-input: #fffdf9;
+  --theme-border: #e6dccb;
+  --theme-border-subtle: #f2ece1;
+  --theme-text: #271217;
+  --theme-text-sec: #4a2c32;
+  --theme-text-muted: #7c5d63;
+  --brand-50: #fff1f2;
+  --brand-100: #ffe4e6;
+  --brand-200: #fecdd3;
+  --brand-500: #e11d48;
+  --brand-600: #be123c;
+  --brand-700: #9f1239;
+  --brand-text-dark: #881337;
+  --brand-grad-to: #9f1239;
+}
+
+/* 🔥 KAPALI TEMA 1: Gece Ateşi & Obsidyen */
+[data-theme="dark-obsidian"] {
+  --foreground-rgb: 248, 250, 252;
+  --background-rgb: 11, 15, 25;
+  --theme-bg: #0b0f19;
+  --theme-card: #131b2e;
+  --theme-muted: #1c2742;
+  --theme-input: #0f1626;
+  --theme-border: #263554;
+  --theme-border-subtle: #1c2742;
+  --theme-text: #f8fafc;
+  --theme-text-sec: #cbd5e1;
+  --theme-text-muted: #94a3b8;
+  --brand-50: rgba(249, 115, 22, 0.14);
+  --brand-100: rgba(249, 115, 22, 0.24);
+  --brand-200: rgba(249, 115, 22, 0.38);
+  --brand-500: #f97316;
+  --brand-600: #ea580c;
+  --brand-700: #c2410c;
+  --brand-text-dark: #fdba74;
+  --brand-grad-to: #dc2626;
+}
+
+/* ✨ KAPALI TEMA 2: VIP Gold & Kömür */
+[data-theme="dark-luxury"] {
+  --foreground-rgb: 250, 250, 249;
+  --background-rgb: 12, 12, 14;
+  --theme-bg: #0c0c0e;
+  --theme-card: #16161a;
+  --theme-muted: #222228;
+  --theme-input: #111114;
+  --theme-border: #2e2e36;
+  --theme-border-subtle: #202026;
+  --theme-text: #fafaf9;
+  --theme-text-sec: #d6d3d1;
+  --theme-text-muted: #a8a29e;
+  --brand-50: rgba(245, 158, 11, 0.14);
+  --brand-100: rgba(245, 158, 11, 0.24);
+  --brand-200: rgba(245, 158, 11, 0.4);
+  --brand-500: #f59e0b;
+  --brand-600: #d97706;
+  --brand-700: #b45309;
+  --brand-text-dark: #fcd34d;
+  --brand-grad-to: #b45309;
+}
+
+/* 🌌 KAPALI TEMA 3: Modern Gece & Mor-İndigo */
+[data-theme="dark-neon"] {
+  --foreground-rgb: 245, 243, 255;
+  --background-rgb: 13, 11, 30;
+  --theme-bg: #0d0b1e;
+  --theme-card: #171432;
+  --theme-muted: #231f49;
+  --theme-input: #120f29;
+  --theme-border: #312b63;
+  --theme-border-subtle: #211d45;
+  --theme-text: #f5f3ff;
+  --theme-text-sec: #ddd6fe;
+  --theme-text-muted: #a5b4fc;
+  --brand-50: rgba(139, 92, 246, 0.15);
+  --brand-100: rgba(139, 92, 246, 0.25);
+  --brand-200: rgba(139, 92, 246, 0.42);
+  --brand-500: #8b5cf6;
+  --brand-600: #7c3aed;
+  --brand-700: #6d28d9;
+  --brand-text-dark: #c4b5fd;
+  --brand-grad-to: #4f46e5;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+  color: var(--theme-text, rgb(var(--foreground-rgb)));
+  background: var(--theme-bg, rgb(var(--background-rgb)));
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Tema Yüzey ve Renk Uyarlamaları (Yazıcı Fişleri Hariç) */
+[data-theme] .bg-slate-50:not(#printable-receipt *):not(#printable-z-report *):not(#printable-qr-grid *) {
+  background-color: var(--theme-bg) !important;
+}
+
+[data-theme] .bg-white:not(#printable-receipt):not(#printable-receipt *):not(#printable-z-report):not(#printable-z-report *):not(#printable-qr-grid):not(#printable-qr-grid *) {
+  background-color: var(--theme-card) !important;
+}
+
+[data-theme] .bg-slate-100:not(#printable-receipt *):not(#printable-z-report *) {
+  background-color: var(--theme-muted) !important;
+}
+
+[data-theme] .text-slate-900:not(#printable-receipt *):not(#printable-z-report *):not(#printable-qr-grid *):not(.bg-white):not(.bg-\[\#DCF8C6\]) {
+  color: var(--theme-text) !important;
+}
+
+[data-theme] .text-slate-800:not(#printable-receipt *):not(#printable-z-report *),
+[data-theme] .text-slate-700:not(#printable-receipt *):not(#printable-z-report *) {
+  color: var(--theme-text-sec) !important;
+}
+
+[data-theme] .text-slate-600:not(#printable-receipt *):not(#printable-z-report *),
+[data-theme] .text-slate-500:not(#printable-receipt *):not(#printable-z-report *) {
+  color: var(--theme-text-muted) !important;
+}
+
+[data-theme] .border-slate-200:not(#printable-receipt *):not(#printable-z-report *),
+[data-theme] .border-slate-300:not(#printable-receipt *):not(#printable-z-report *) {
+  border-color: var(--theme-border) !important;
+}
+
+[data-theme] .border-slate-100:not(#printable-receipt *):not(#printable-z-report *) {
+  border-color: var(--theme-border-subtle) !important;
+}
+
+/* Koyu Temalarda Form Elemanları (Input, Select, Textarea) */
+[data-theme-mode="dark"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme-mode="dark"] select,
+[data-theme-mode="dark"] textarea {
+  background-color: var(--theme-input) !important;
+  color: var(--theme-text) !important;
+  border-color: var(--theme-border) !important;
+}
+
+[data-theme-mode="dark"] input::placeholder,
+[data-theme-mode="dark"] textarea::placeholder {
+  color: var(--theme-text-muted) !important;
+  opacity: 0.75;
+}
+
+/* Koyu Temalarda Yumuşak Renkli Kutuların Okunabilirliği */
+[data-theme-mode="dark"] .bg-emerald-50,
+[data-theme-mode="dark"] .bg-emerald-50\/60,
+[data-theme-mode="dark"] .bg-emerald-50\/50 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+}
+[data-theme-mode="dark"] .text-emerald-900,
+[data-theme-mode="dark"] .text-emerald-800,
+[data-theme-mode="dark"] .text-emerald-700 {
+  color: #6ee7b7 !important;
+}
+[data-theme-mode="dark"] .bg-amber-50,
+[data-theme-mode="dark"] .bg-amber-50\/60 {
+  background-color: rgba(245, 158, 11, 0.13) !important;
+}
+[data-theme-mode="dark"] .text-amber-900,
+[data-theme-mode="dark"] .text-amber-800,
+[data-theme-mode="dark"] .text-amber-700 {
+  color: #fcd34d !important;
+}
+[data-theme-mode="dark"] .bg-indigo-50,
+[data-theme-mode="dark"] .bg-indigo-50\/50 {
+  background-color: rgba(99, 102, 241, 0.14) !important;
+}
+[data-theme-mode="dark"] .text-indigo-900,
+[data-theme-mode="dark"] .text-indigo-800,
+[data-theme-mode="dark"] .text-indigo-700 {
+  color: #a5b4fc !important;
+}
+[data-theme-mode="dark"] .bg-red-50 {
+  background-color: rgba(239, 68, 68, 0.14) !important;
+}
+[data-theme-mode="dark"] .text-red-800,
+[data-theme-mode="dark"] .text-red-700 {
+  color: #fca5a5 !important;
+}
+
+/* Marka / Vurgu Rengi (Brand Accent) Dönüşümleri */
+[data-theme] .bg-orange-600 {
+  background-color: var(--brand-600) !important;
+}
+[data-theme] .bg-orange-500 {
+  background-color: var(--brand-500) !important;
+}
+[data-theme] .hover\:bg-orange-700:hover,
+[data-theme] .hover\:bg-orange-600:hover {
+  background-color: var(--brand-700) !important;
+}
+[data-theme] .text-orange-600,
+[data-theme] .text-orange-500 {
+  color: var(--brand-500) !important;
+}
+[data-theme] .text-orange-700,
+[data-theme] .text-orange-800,
+[data-theme] .text-orange-900 {
+  color: var(--brand-text-dark) !important;
+}
+[data-theme] .bg-orange-50,
+[data-theme] .bg-orange-50\/60,
+[data-theme] .bg-orange-50\/50,
+[data-theme] .bg-orange-50\/40 {
+  background-color: var(--brand-50) !important;
+}
+[data-theme] .bg-orange-100 {
+  background-color: var(--brand-100) !important;
+}
+[data-theme] .border-orange-200,
+[data-theme] .border-orange-300 {
+  border-color: var(--brand-200) !important;
+}
+[data-theme] .border-orange-500 {
+  border-color: var(--brand-500) !important;
+}
+[data-theme] .from-orange-500 {
+  --tw-gradient-from: var(--brand-500) var(--tw-gradient-from-position) !important;
+}
+[data-theme] .to-red-600 {
+  --tw-gradient-to: var(--brand-grad-to) var(--tw-gradient-to-position) !important;
 }
 
 /* Gizli kaydırma çubuğu (Kategori barı için) */

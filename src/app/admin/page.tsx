@@ -42,6 +42,9 @@ import {
   Upload,
   Database,
   Navigation,
+  Palette,
+  Sun,
+  Moon,
 } from "lucide-react";
 import {
   Category,
@@ -54,6 +57,12 @@ import {
   RestaurantSettings,
   WhatsAppLog,
 } from "@/types";
+import {
+  STOREFRONT_THEMES,
+  ThemeId,
+  applyThemeToDocument,
+  getThemeDefinition,
+} from "@/lib/themes";
 
 interface CrmCustomerItem {
   phone: string;
@@ -159,6 +168,9 @@ export default function AdminDashboardPage() {
     const ordData = await ordRes.json();
     const crmData = crmRes.ok ? await crmRes.json() : { customers: [] };
     setSettings(data.settings);
+    if (data.settings?.storefrontTheme) {
+      applyThemeToDocument(data.settings.storefrontTheme);
+    }
     setCategories(data.categories || []);
     setItems(data.items || []);
     setUsers(profData.users || []);
@@ -674,6 +686,47 @@ export default function AdminDashboardPage() {
                 </span>
               </button>
             </>
+          )}
+
+          {settings && (
+            <div className="inline-flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs">
+              <Palette className="w-3.5 h-3.5 text-orange-400" />
+              <select
+                value={settings.storefrontTheme || "light-classic"}
+                onChange={(e) => {
+                  const nextTheme = e.target.value as ThemeId;
+                  applyThemeToDocument(nextTheme);
+                  try {
+                    localStorage.setItem("restoran_selected_theme", nextTheme);
+                  } catch {
+                    // ignore
+                  }
+                  persistSettings(
+                    {
+                      ...settings,
+                      storefrontTheme: nextTheme,
+                    },
+                    `Tema "${getThemeDefinition(nextTheme).name}" olarak güncellendi!`
+                  );
+                }}
+                className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"
+              >
+                <optgroup label="☀️ Açık Temalar (3)" className="text-slate-900 bg-white">
+                  {STOREFRONT_THEMES.filter((t) => t.mode === "light").map((t) => (
+                    <option key={t.id} value={t.id} className="text-slate-900 bg-white">
+                      ☀️ {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="🌙 Kapalı / Koyu Temalar (3)" className="text-slate-900 bg-white">
+                  {STOREFRONT_THEMES.filter((t) => t.mode === "dark").map((t) => (
+                    <option key={t.id} value={t.id} className="text-slate-900 bg-white">
+                      🌙 {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
           )}
 
           <Link
@@ -3409,6 +3462,229 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   }
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
                 />
+              </div>
+            </div>
+
+            {/* 🎨 Vitrin & Sistem Görünüm Teması (3 Açık + 3 Kapalı Tema) */}
+            <div className="border-t border-slate-200 pt-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                  <Palette className="w-4 h-4 text-orange-600" />
+                  <span>
+                    🎨 Vitrin & Menü Görünüm Teması (3 Açık • 3 Kapalı Tema)
+                  </span>
+                </div>
+
+                <label className="inline-flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.allowCustomerThemeSwitch !== false}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        allowCustomerThemeSwitch: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 accent-orange-600 rounded"
+                  />
+                  <span className="text-xs font-bold text-slate-800">
+                    Müşteriler vitrinde temayı değiştirebilsin
+                  </span>
+                </label>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                Restoranınızın konseptine uygun varsayılan açık veya koyu temayı seçin. Seçtiğiniz tema anında önizlenir ve kaydedildiğinde tüm müşteri ekranlarına uygulanır.
+              </p>
+
+              {/* 3 Açık Tema */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
+                  <Sun className="w-3.5 h-3.5 text-amber-500" />
+                  <span>☀️ Açık Temalar (3 Seçenek)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {STOREFRONT_THEMES.filter((t) => t.mode === "light").map(
+                    (theme) => {
+                      const isSelected =
+                        (settings.storefrontTheme || "light-classic") ===
+                        theme.id;
+                      return (
+                        <button
+                          key={theme.id}
+                          type="button"
+                          onClick={() => {
+                            applyThemeToDocument(theme.id);
+                            try {
+                              localStorage.setItem(
+                                "restoran_selected_theme",
+                                theme.id
+                              );
+                            } catch {
+                              // ignore
+                            }
+                            setSettings({
+                              ...settings,
+                              storefrontTheme: theme.id,
+                            });
+                          }}
+                          className={`text-left p-3.5 rounded-2xl border-2 transition cursor-pointer flex flex-col justify-between gap-2.5 ${
+                            isSelected
+                              ? "border-orange-500 ring-2 ring-orange-500/20 shadow-md"
+                              : "border-slate-200 hover:border-slate-300"
+                          }`}
+                          style={{ backgroundColor: theme.previewBg }}
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-1">
+                              <span
+                                className="text-[10px] font-extrabold px-2 py-0.5 rounded-full text-white"
+                                style={{ backgroundColor: theme.previewAccent }}
+                              >
+                                {theme.badge}
+                              </span>
+                              {isSelected && (
+                                <CheckCircle2
+                                  className="w-4 h-4"
+                                  style={{ color: theme.previewAccent }}
+                                />
+                              )}
+                            </div>
+                            <div
+                              className="font-extrabold text-xs sm:text-sm"
+                              style={{ color: theme.previewText }}
+                            >
+                              {theme.name}
+                            </div>
+                            <p
+                              className="text-[11px] leading-snug opacity-80"
+                              style={{ color: theme.previewText }}
+                            >
+                              {theme.description}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between pt-1">
+                            <div className="flex items-center gap-1">
+                              <span
+                                className="w-3.5 h-3.5 rounded-full border border-black/15"
+                                style={{ backgroundColor: theme.previewBg }}
+                              />
+                              <span
+                                className="w-3.5 h-3.5 rounded-full border border-black/15"
+                                style={{ backgroundColor: theme.previewCard }}
+                              />
+                              <span
+                                className="w-3.5 h-3.5 rounded-full"
+                                style={{ backgroundColor: theme.previewAccent }}
+                              />
+                            </div>
+                            <span
+                              className="text-[10px] font-extrabold"
+                              style={{ color: theme.previewAccent }}
+                            >
+                              {isSelected ? "✓ Seçili" : "Seç"}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+
+              {/* 3 Kapalı (Koyu) Tema */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
+                  <Moon className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>🌙 Kapalı / Koyu Temalar (3 Seçenek)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {STOREFRONT_THEMES.filter((t) => t.mode === "dark").map(
+                    (theme) => {
+                      const isSelected =
+                        (settings.storefrontTheme || "light-classic") ===
+                        theme.id;
+                      return (
+                        <button
+                          key={theme.id}
+                          type="button"
+                          onClick={() => {
+                            applyThemeToDocument(theme.id);
+                            try {
+                              localStorage.setItem(
+                                "restoran_selected_theme",
+                                theme.id
+                              );
+                            } catch {
+                              // ignore
+                            }
+                            setSettings({
+                              ...settings,
+                              storefrontTheme: theme.id,
+                            });
+                          }}
+                          className={`text-left p-3.5 rounded-2xl border-2 transition cursor-pointer flex flex-col justify-between gap-2.5 ${
+                            isSelected
+                              ? "border-orange-500 ring-2 ring-orange-500/30 shadow-md"
+                              : "border-slate-700 hover:border-slate-500"
+                          }`}
+                          style={{ backgroundColor: theme.previewBg }}
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-1">
+                              <span
+                                className="text-[10px] font-extrabold px-2 py-0.5 rounded-full text-white"
+                                style={{ backgroundColor: theme.previewAccent }}
+                              >
+                                {theme.badge}
+                              </span>
+                              {isSelected && (
+                                <CheckCircle2
+                                  className="w-4 h-4"
+                                  style={{ color: theme.previewAccent }}
+                                />
+                              )}
+                            </div>
+                            <div
+                              className="font-extrabold text-xs sm:text-sm"
+                              style={{ color: theme.previewText }}
+                            >
+                              {theme.name}
+                            </div>
+                            <p
+                              className="text-[11px] leading-snug opacity-80"
+                              style={{ color: theme.previewText }}
+                            >
+                              {theme.description}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between pt-1">
+                            <div className="flex items-center gap-1">
+                              <span
+                                className="w-3.5 h-3.5 rounded-full border border-white/20"
+                                style={{ backgroundColor: theme.previewBg }}
+                              />
+                              <span
+                                className="w-3.5 h-3.5 rounded-full border border-white/20"
+                                style={{ backgroundColor: theme.previewCard }}
+                              />
+                              <span
+                                className="w-3.5 h-3.5 rounded-full"
+                                style={{ backgroundColor: theme.previewAccent }}
+                              />
+                            </div>
+                            <span
+                              className="text-[10px] font-extrabold"
+                              style={{ color: theme.previewAccent }}
+                            >
+                              {isSelected ? "✓ Seçili" : "Seç"}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
               </div>
             </div>
 
