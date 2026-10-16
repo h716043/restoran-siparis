@@ -104,6 +104,19 @@ export default function KitchenTabletPage() {
   } | null>(null);
   const [posSubmitting, setPosSubmitting] = useState(false);
 
+  // Masa Detay, Masa Taşıma/Birleştirme & Parçalı Tahsilat Modalı State
+  const [selectedTableModal, setSelectedTableModal] = useState<string | null>(
+    null
+  );
+  const [transferTargetTable, setTransferTargetTable] = useState<string>("1");
+  const [tablePaymentMode, setTablePaymentMode] = useState<
+    "cash" | "card" | "split"
+  >("cash");
+  const [splitCashAmount, setSplitCashAmount] = useState<string>("");
+  const [splitCardAmount, setSplitCardAmount] = useState<string>("");
+  const [tableExtraDiscount, setTableExtraDiscount] = useState<string>("0");
+  const [tableActionLoading, setTableActionLoading] = useState(false);
+
   const knownPendingIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -376,10 +389,74 @@ export default function KitchenTabletPage() {
     setPosCustomizingItem(null);
   };
 
+  // Mutfak Usta Checklist: Ürün Bazlı "Hazırlandı ✓" Tikleme
+  const handleToggleItemPrepared = async (orderId: string, itemId: string) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              items: o.items.map((it) =>
+                it.id === itemId ? { ...it, prepared: !it.prepared } : it
+              ),
+            }
+          : o
+      )
+    );
+    try {
+      await fetch(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "toggle_item_prepared",
+          itemId,
+        }),
+      });
+      fetchOrders();
+    } catch (e) {
+      console.error("Ürün tikleme hatası:", e);
+    }
+  };
+
   const handlePosSubmitOrder = async (andPrint: boolean) => {
     if (posCart.length === 0) return;
     setPosSubmitting(true);
     try {
+      // Eğer Masada (dine_in) seçiliyse ve bu masada zaten açık bir adisyon varsa, doğrudan o adisyona ekle
+      const existingOpenTableOrder =
+        posOrderType === "dine_in"
+          ? orders.find(
+              (o) =>
+                o.orderType === "dine_in" &&
+                String(o.tableNumber).replace(/^masa[-_\s]*/i, "") ===
+                  String(posTableNumber).replace(/^masa[-_\s]*/i, "") &&
+                ["pending", "accepted", "ready"].includes(o.status)
+            )
+          : undefined;
+
+      if (existingOpenTableOrder) {
+        const res = await fetch(`/api/orders/${existingOpenTableOrder.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "append_items",
+            items: posCart,
+            extraNote: posNote.trim() || undefined,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPosCart([]);
+          setPosNote("");
+          setPosModalOpen(false);
+          await fetchOrders();
+          if (andPrint && data.order) {
+            handlePrint(data.order);
+          }
+        }
+        return;
+      }
+
       const subtotal = posCart.reduce((s, i) => s + i.totalPrice, 0);
       const res = await fetch("/api/orders", {
         method: "POST",
@@ -421,27 +498,112 @@ export default function KitchenTabletPage() {
     }
   };
 
-  // Canlı Masa Adisyonu Tek Tıkla Hesap Kapatma
-  const handleCloseTableBill = async (tableNum: string, tableOrders: Order[]) => {
-    await Promise.all([
-      ...tableOrders.map((o) =>
-        fetch(`/api/orders/${o.id}`, {
+  // Masa Detay & Parçalı Ödeme Modalını Açma
+  const openTableManagementModal = (tableNum: string, tableOrders: Order[]) => {
+    const total = tableOrders.reduce((s, o) => s + o.totalAmount, 0);
+    setSelectedTableModal(tableNum);
+    const nextTarget = tableNum === "1" ? "2" : "1";
+    setTransferTargetTable(nextTarget);
+    setTablePaymentMode("cash");
+    setTableExtraDiscount("0");
+    setSplitCashAmount(String(Math.round(total / 2)));
+    setSplitCardAmount(String(Math.max(0, total - Math.round(total / 2))));
+  };
+
+  // Masa Taşıma / Birleştirme
+  const handleTransferTable = async (fromTable: string, toTable: string) => {
+    if (!fromTable || !toTable || fromTable === toTable) return;
+    setTableActionLoading(true);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "transfer_table",
+          fromTable,
+          toTable,
+        }),
+      });
+      if (res.ok) {
+        setSelectedTableModal(toTable);
+        await fetchOrders();
+      }
+    } finally {
+      setTableActionLoading(false);
+    }
+  };
+
+  // Parçalı / Nakit / Kart Tahsilat ile Masa Hesabını Kapatma
+  const handleCloseTableWithPaymentModal = async (
+    tableNum: string,
+    tableOrders: Order[],
+    andPrint: boolean
+  ) => {
+    setTableActionLoading(true);
+    try {
+      const rawTotal = tableOrders.reduce((s, o) => s + o.totalAmount, 0);
+      const extraDisc = Math.max(0, Number(tableExtraDiscount || 0));
+      const finalPayable = Math.max(0, rawTotal - extraDisc);
+      const cashVal =
+        tablePaymentMode === "cash"
+          ? finalPayable
+          : tablePaymentMode === "card"
+          ? 0
+          : Math.max(0, Number(splitCashAmount || 0));
+      const cardVal =
+        tablePaymentMode === "card"
+          ? finalPayable
+          : tablePaymentMode === "cash"
+          ? 0
+          : Math.max(0, Number(splitCardAmount || 0));
+
+      if (andPrint) {
+        handlePrintCombinedTableBill(tableNum, tableOrders);
+      }
+
+      await Promise.all([
+        fetch("/api/orders", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "completed" }),
-        })
-      ),
-      ...tableCalls
-        .filter((c) => c.tableNumber === tableNum && c.status === "pending")
-        .map((c) =>
-          fetch("/api/table-calls", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: c.id }),
-          })
-        ),
-    ]);
-    await fetchOrders();
+          body: JSON.stringify({
+            action: "close_table_payment",
+            tableNumber: tableNum,
+            paymentMethod:
+              tablePaymentMode === "cash"
+                ? "cash"
+                : tablePaymentMode === "card"
+                ? "card_at_door"
+                : "pos_at_table",
+            cashAmount: cashVal,
+            cardAmount: cardVal,
+            discountAmount: extraDisc,
+          }),
+        }),
+        ...tableCalls
+          .filter(
+            (c) =>
+              String(c.tableNumber).replace(/^masa[-_\s]*/i, "") === tableNum &&
+              c.status === "pending"
+          )
+          .map((c) =>
+            fetch("/api/table-calls", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: c.id }),
+            })
+          ),
+      ]);
+
+      setSelectedTableModal(null);
+      await fetchOrders();
+    } finally {
+      setTableActionLoading(false);
+    }
+  };
+
+  // Canlı Masa Adisyonu Tek Tıkla Hesap Kapatma
+  const handleCloseTableBill = async (tableNum: string, tableOrders: Order[]) => {
+    openTableManagementModal(tableNum, tableOrders);
   };
 
   // Masa Adisyonu Birleştirilmiş Fiş Yazdırma
@@ -477,7 +639,14 @@ export default function KitchenTabletPage() {
 
   const handleToggleStock = async (item: MenuItem) => {
     try {
-      const updated = { ...item, available: !item.available };
+      const nextAvailable = !item.available;
+      const nextDailyStock =
+        nextAvailable && item.dailyStock === 0 ? 15 : item.dailyStock;
+      const updated = {
+        ...item,
+        available: nextAvailable,
+        dailyStock: nextDailyStock,
+      };
       setMenuItems((prev) =>
         prev.map((m) => (m.id === item.id ? updated : m))
       );
@@ -689,6 +858,15 @@ export default function KitchenTabletPage() {
           >
             <Truck className="w-4 h-4" />
             Kurye Ekranı
+          </Link>
+
+          {/* TV Müşteri Sıra Çağrı Ekranı Kısayolu */}
+          <Link
+            href="/tv"
+            target="_blank"
+            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-3 py-2 rounded-xl transition"
+          >
+            📺 TV Sıra Ekranı
           </Link>
 
           {/* Simülasyon: Masa Rezervasyonu */}
@@ -1077,8 +1255,15 @@ export default function KitchenTabletPage() {
                         </div>
                       </div>
 
-                      {/* Ürün Kalemleri (1/2/3 Alt Ürün + Porsiyon + Ekstra Ayrımlı) */}
+                      {/* Ürün Kalemleri (1/2/3 Alt Ürün + Porsiyon + Ekstra Ayrımlı + Usta Checklist) */}
                       <div className="space-y-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
+                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-400 border-b border-slate-800 pb-1.5">
+                          <span>👨‍🍳 Usta Hazırlık Kontrolü (Ürüne Tıklayıp Tikleyin)</span>
+                          <span className="text-emerald-400">
+                            {order.items.filter((i) => i.prepared).length} /{" "}
+                            {order.items.length} Hazır
+                          </span>
+                        </div>
                         {order.items.map((item) => {
                           const structuredBlocks = parseStructuredModifiers(
                             item.selectedModifiers
@@ -1086,15 +1271,42 @@ export default function KitchenTabletPage() {
                           return (
                             <div
                               key={item.id}
-                              className="border-b border-slate-800/60 last:border-none pb-2.5 last:pb-0 space-y-2"
+                              className={`border-b border-slate-800/60 last:border-none pb-2.5 last:pb-0 space-y-2 rounded-xl p-2 transition ${
+                                item.prepared
+                                  ? "bg-emerald-950/30 border border-emerald-500/40"
+                                  : ""
+                              }`}
                             >
-                              <div className="flex justify-between font-bold text-sm">
-                                <span>
-                                  <span className="text-orange-400">
-                                    {item.quantity}x
-                                  </span>{" "}
-                                  {item.name}
-                                </span>
+                              <div className="flex items-center justify-between gap-2 font-bold text-sm">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleItemPrepared(order.id, item.id)
+                                  }
+                                  className="flex items-center gap-2 text-left cursor-pointer group"
+                                >
+                                  <span
+                                    className={`inline-flex items-center justify-center px-2 py-0.5 rounded-lg text-[11px] font-black border transition ${
+                                      item.prepared
+                                        ? "bg-emerald-600 text-white border-emerald-400"
+                                        : "bg-slate-800 group-hover:bg-emerald-600/30 text-slate-300 border-slate-700"
+                                    }`}
+                                  >
+                                    {item.prepared ? "✓ Hazır" : "⬜ Tikle"}
+                                  </span>
+                                  <span
+                                    className={
+                                      item.prepared
+                                        ? "line-through text-emerald-300/80"
+                                        : "text-white"
+                                    }
+                                  >
+                                    <span className="text-orange-400">
+                                      {item.quantity}x
+                                    </span>{" "}
+                                    {item.name}
+                                  </span>
+                                </button>
                                 <span>
                                   {item.totalPrice.toFixed(2)}{" "}
                                   {settings?.currency}
@@ -1396,6 +1608,13 @@ export default function KitchenTabletPage() {
                       </div>
 
                       <div className="space-y-2.5 text-sm">
+                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-400 px-1">
+                          <span>👨‍🍳 Usta Hazırlık Kontrolü (Ürüne Tıklayıp Tikleyin)</span>
+                          <span className="text-emerald-400">
+                            {order.items.filter((i) => i.prepared).length} /{" "}
+                            {order.items.length} Kalem Hazır ✓
+                          </span>
+                        </div>
                         {order.items.map((item) => {
                           const structuredBlocks = parseStructuredModifiers(
                             item.selectedModifiers
@@ -1403,15 +1622,42 @@ export default function KitchenTabletPage() {
                           return (
                             <div
                               key={item.id}
-                              className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 space-y-2"
+                              className={`p-3 rounded-xl border space-y-2 transition ${
+                                item.prepared
+                                  ? "bg-emerald-950/35 border-emerald-500/50"
+                                  : "bg-slate-950/60 border-slate-800/80"
+                              }`}
                             >
-                              <div className="flex justify-between text-slate-100 font-bold">
-                                <span>
-                                  <strong className="text-orange-400">
-                                    {item.quantity}x
-                                  </strong>{" "}
-                                  {item.name}
-                                </span>
+                              <div className="flex items-center justify-between gap-2 text-slate-100 font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleItemPrepared(order.id, item.id)
+                                  }
+                                  className="flex items-center gap-2 text-left cursor-pointer group"
+                                >
+                                  <span
+                                    className={`inline-flex items-center justify-center px-2.5 py-1 rounded-lg text-xs font-black border transition ${
+                                      item.prepared
+                                        ? "bg-emerald-600 text-white border-emerald-400 shadow-sm"
+                                        : "bg-slate-800 group-hover:bg-emerald-600/30 text-slate-200 border-slate-700"
+                                    }`}
+                                  >
+                                    {item.prepared ? "✓ Hazırlandı" : "⬜ Hazırla"}
+                                  </span>
+                                  <span
+                                    className={
+                                      item.prepared
+                                        ? "line-through text-emerald-300/80"
+                                        : "text-white"
+                                    }
+                                  >
+                                    <strong className="text-orange-400">
+                                      {item.quantity}x
+                                    </strong>{" "}
+                                    {item.name}
+                                  </span>
+                                </button>
                                 <span className="font-semibold">
                                   {item.totalPrice.toFixed(2)}{" "}
                                   {settings?.currency}
@@ -1573,10 +1819,10 @@ export default function KitchenTabletPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-extrabold text-white">
-                  🪑 Canlı Masa Haritası & Açık Masa Adisyonları
+                  🪑 Canlı Salon Masa Haritası, Açık Adisyon & Parçalı Ödeme
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Dolu masaların tüm siparişlerini tek adisyonda görün, yeni ürün ekleyin, birleşik masa fişi yazdırın veya hesabı kapatın.
+                  Dolu masaların tüm siparişlerini tek adisyonda görün, açık adisyona yeni ürün ekleyin, masa taşıyın/birleştirin veya Nakit / Kart / Parçalı (Alman Usulü) hesap kapatın.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
@@ -1588,6 +1834,9 @@ export default function KitchenTabletPage() {
                 </span>
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 px-3 py-1.5 rounded-xl">
                   🟣 Garson / Hesap Çağrısı
+                </span>
+                <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 px-3 py-1.5 rounded-xl">
+                  🔵 Rezerve Masa
                 </span>
               </div>
             </div>
@@ -1609,6 +1858,14 @@ export default function KitchenTabletPage() {
                     String(c.tableNumber).replace(/^masa[-_\s]*/i, "") ===
                     tableNum
                 );
+                const activeResv = reservations.find(
+                  (r) =>
+                    r.status === "confirmed" &&
+                    String(r.assignedTable || "").replace(
+                      /^masa[-_\s]*/i,
+                      ""
+                    ) === tableNum
+                );
                 const totalTableBill = tableActiveOrders.reduce(
                   (s, o) => s + o.totalAmount,
                   0
@@ -1623,6 +1880,8 @@ export default function KitchenTabletPage() {
                         ? "bg-purple-950/40 border-purple-400 shadow-lg shadow-purple-950/40 animate-pulse"
                         : isOccupied
                         ? "bg-slate-900 border-orange-500 shadow-lg"
+                        : activeResv
+                        ? "bg-blue-950/30 border-blue-500/60"
                         : "bg-slate-900/60 border-emerald-500/30 hover:border-emerald-500/60"
                     }`}
                   >
@@ -1634,6 +1893,8 @@ export default function KitchenTabletPage() {
                               ? "bg-purple-600 text-white"
                               : isOccupied
                               ? "bg-orange-600 text-white"
+                              : activeResv
+                              ? "bg-blue-600 text-white"
                               : "bg-emerald-600/20 text-emerald-300"
                           }`}
                         >
@@ -1643,12 +1904,24 @@ export default function KitchenTabletPage() {
                           <span className="text-lg font-black text-emerald-400">
                             {totalTableBill.toFixed(2)} {settings?.currency}
                           </span>
+                        ) : activeResv ? (
+                          <span className="text-xs font-bold text-blue-300">
+                            🔵 Rezerve ({activeResv.reservationTime})
+                          </span>
                         ) : (
                           <span className="text-xs font-bold text-emerald-400">
                             🟢 Boş
                           </span>
                         )}
                       </div>
+
+                      {activeResv && !isOccupied && (
+                        <div className="bg-blue-950/60 border border-blue-500/40 rounded-xl p-2 text-xs text-blue-200">
+                          📅 <strong>{activeResv.customerName}</strong> (
+                          {activeResv.guestCount} Kişi • Saat{" "}
+                          {activeResv.reservationTime})
+                        </div>
+                      )}
 
                       {activeCall && (
                         <div className="bg-purple-900/60 border border-purple-400/50 rounded-xl p-2 text-xs font-bold text-purple-100 flex items-center justify-between">
@@ -1675,9 +1948,14 @@ export default function KitchenTabletPage() {
                             ord.items.map((item) => (
                               <div
                                 key={`${ord.id}-${item.id}`}
-                                className="flex justify-between text-slate-200"
+                                className="flex justify-between items-center text-slate-200"
                               >
-                                <span>
+                                <span
+                                  className={
+                                    item.prepared ? "text-emerald-300" : ""
+                                  }
+                                >
+                                  {item.prepared ? "✓ " : "⏳ "}
                                   <strong className="text-orange-400">
                                     {item.quantity}x
                                   </strong>{" "}
@@ -1710,7 +1988,9 @@ export default function KitchenTabletPage() {
                           }}
                           className="flex-1 bg-slate-800 hover:bg-orange-600 text-slate-200 hover:text-white text-xs font-extrabold py-2 px-2.5 rounded-xl transition cursor-pointer"
                         >
-                          + Ürün / Sipariş Ekle
+                          {isOccupied
+                            ? "+ Açık Adisyona Ürün Ekle"
+                            : "+ Yeni Adisyon Aç"}
                         </button>
                         {isOccupied && (
                           <button
@@ -1730,22 +2010,433 @@ export default function KitchenTabletPage() {
                       </div>
 
                       {isOccupied && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCloseTableBill(tableNum, tableActiveOrders)
-                          }
-                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold py-2.5 rounded-xl transition cursor-pointer shadow"
-                        >
-                          ✅ Hesabı Kapat ({totalTableBill.toFixed(0)}{" "}
-                          {settings?.currency} Tahsil Edildi)
-                        </button>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openTableManagementModal(
+                                tableNum,
+                                tableActiveOrders
+                              )
+                            }
+                            className="bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-[11px] font-extrabold py-2 px-2 rounded-xl transition cursor-pointer"
+                          >
+                            🔄 Masa Taşı / Böl
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openTableManagementModal(
+                                tableNum,
+                                tableActiveOrders
+                              )
+                            }
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold py-2 px-2 rounded-xl transition cursor-pointer shadow"
+                          >
+                            💳 Hesabı Kapat ({totalTableBill.toFixed(0)}{" "}
+                            {settings?.currency})
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
                 );
               })}
             </div>
+
+            {/* MASA DETAY, MASA TAŞIMA/BİRLEŞTİRME & PARÇALI ÖDEME (ALMAN USULÜ) MODALI */}
+            {selectedTableModal &&
+              (() => {
+                const modalTableOrders = orders.filter(
+                  (o) =>
+                    o.orderType === "dine_in" &&
+                    String(o.tableNumber).replace(/^masa[-_\s]*/i, "") ===
+                      selectedTableModal &&
+                    ["pending", "accepted", "ready"].includes(o.status)
+                );
+                const rawTableTotal = modalTableOrders.reduce(
+                  (s, o) => s + o.totalAmount,
+                  0
+                );
+                const extraDiscNum = Math.max(
+                  0,
+                  Number(tableExtraDiscount || 0)
+                );
+                const netPayable = Math.max(0, rawTableTotal - extraDiscNum);
+
+                return (
+                  <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6">
+                    <div className="bg-slate-900 border-2 border-orange-500/60 w-full max-w-2xl rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+                      <div className="px-5 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-orange-600 text-white font-black text-sm px-3 py-1 rounded-xl">
+                              MASA {selectedTableModal}
+                            </span>
+                            <h3 className="font-extrabold text-base text-white">
+                              Açık Adisyon, Masa Taşıma & Tahsilat
+                            </h3>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Masadaki ürünleri inceleyin, başka masaya aktarın veya Nakit / Kart / Parçalı (Alman Usulü) ödeme alın.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTableModal(null)}
+                          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                        {/* Açık Adisyon Kalemleri */}
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                            <span className="text-xs font-extrabold uppercase text-orange-400">
+                              📋 Masadaki Açık Sipariş Kalemleri
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const t = selectedTableModal;
+                                setSelectedTableModal(null);
+                                setPosOrderType("dine_in");
+                                setPosTableNumber(t);
+                                setPosName(`Masa ${t}`);
+                                setPosModalOpen(true);
+                              }}
+                              className="text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white px-3 py-1 rounded-lg cursor-pointer"
+                            >
+                              + Adisyona Ürün Ekle
+                            </button>
+                          </div>
+
+                          {modalTableOrders.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-3 text-center">
+                              Bu masada açık sipariş kalmadı.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {modalTableOrders.map((ord) =>
+                                ord.items.map((item) => (
+                                  <div
+                                    key={`${ord.id}-${item.id}`}
+                                    className="flex items-center justify-between text-xs bg-slate-900 px-3 py-2 rounded-xl border border-slate-800"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                          item.prepared
+                                            ? "bg-emerald-600/20 text-emerald-300"
+                                            : "bg-slate-800 text-slate-400"
+                                        }`}
+                                      >
+                                        {item.prepared ? "✓ Hazır" : "⏳ Mutfak"}
+                                      </span>
+                                      <span className="font-bold text-white">
+                                        <strong className="text-orange-400">
+                                          {item.quantity}x
+                                        </strong>{" "}
+                                        {item.name}
+                                      </span>
+                                    </div>
+                                    <span className="font-bold text-emerald-400">
+                                      {item.totalPrice.toFixed(2)}{" "}
+                                      {settings?.currency}
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Masa Taşıma / Birleştirme Alanı */}
+                        <div className="bg-indigo-950/30 border border-indigo-500/40 rounded-2xl p-4 space-y-2.5">
+                          <div className="text-xs font-extrabold text-indigo-300">
+                            🔄 Masa Taşı veya Başka Masayla Birleştir
+                          </div>
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <select
+                              value={transferTargetTable}
+                              onChange={(e) =>
+                                setTransferTargetTable(e.target.value)
+                              }
+                              className="flex-1 bg-slate-900 border border-indigo-500/40 rounded-xl px-3 py-2.5 text-xs font-bold text-white"
+                            >
+                              {Array.from(
+                                { length: settings?.tableCount || 15 },
+                                (_, i) => String(i + 1)
+                              )
+                                .filter((n) => n !== selectedTableModal)
+                                .map((n) => {
+                                  const targetHasOrder = orders.some(
+                                    (o) =>
+                                      o.orderType === "dine_in" &&
+                                      String(o.tableNumber).replace(
+                                        /^masa[-_\s]*/i,
+                                        ""
+                                      ) === n &&
+                                      ["pending", "accepted", "ready"].includes(
+                                        o.status
+                                      )
+                                  );
+                                  return (
+                                    <option key={n} value={n}>
+                                      Masa {n}{" "}
+                                      {targetHasOrder
+                                        ? "(Dolu — Adisyonları Birleştir)"
+                                        : "(Boş — Masayı Taşı)"}
+                                    </option>
+                                  );
+                                })}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={tableActionLoading}
+                              onClick={() =>
+                                handleTransferTable(
+                                  selectedTableModal,
+                                  transferTargetTable
+                                )
+                              }
+                              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer whitespace-nowrap"
+                            >
+                              🔄 Masa {transferTargetTable}&apos;e Aktar / Birleştir
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Tahsilat & Parçalı Ödeme (Alman Usulü) Alanı */}
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-extrabold uppercase text-emerald-400">
+                              💳 Tahsilat Yöntemi & Parçalı Hesap (Alman Usulü)
+                            </span>
+                            <span className="text-sm font-black text-white">
+                              Adisyon: {rawTableTotal.toFixed(2)}{" "}
+                              {settings?.currency}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setTablePaymentMode("cash")}
+                              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                tablePaymentMode === "cash"
+                                  ? "bg-emerald-600 border-emerald-400 text-white"
+                                  : "bg-slate-900 border-slate-800 text-slate-300"
+                              }`}
+                            >
+                              💵 Tamamı Nakit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTablePaymentMode("card")}
+                              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                tablePaymentMode === "card"
+                                  ? "bg-blue-600 border-blue-400 text-white"
+                                  : "bg-slate-900 border-slate-800 text-slate-300"
+                              }`}
+                            >
+                              💳 Tamamı Kart (POS)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTablePaymentMode("split");
+                                const half = Math.round(netPayable / 2);
+                                setSplitCashAmount(String(half));
+                                setSplitCardAmount(
+                                  String(Math.max(0, netPayable - half))
+                                );
+                              }}
+                              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                tablePaymentMode === "split"
+                                  ? "bg-purple-600 border-purple-400 text-white"
+                                  : "bg-slate-900 border-slate-800 text-slate-300"
+                              }`}
+                            >
+                              ⚖️ Parçalı (Nakit + Kart)
+                            </button>
+                          </div>
+
+                          {/* Masa İskontosu */}
+                          <div className="flex items-center justify-between gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">
+                            <span className="text-xs font-bold text-slate-300">
+                              🏷️ Masa İndirimi / İkram İskontosu ({settings?.currency}):
+                            </span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={tableExtraDiscount}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setTableExtraDiscount(val);
+                                const nextNet = Math.max(
+                                  0,
+                                  rawTableTotal - Number(val || 0)
+                                );
+                                if (tablePaymentMode === "split") {
+                                  const half = Math.round(nextNet / 2);
+                                  setSplitCashAmount(String(half));
+                                  setSplitCardAmount(
+                                    String(Math.max(0, nextNet - half))
+                                  );
+                                }
+                              }}
+                              className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-black text-emerald-400 text-right"
+                            />
+                          </div>
+
+                          {/* Parçalı Ödeme (Alman Usulü) Detay Kutusu */}
+                          {tablePaymentMode === "split" && (
+                            <div className="bg-purple-950/30 border border-purple-500/40 rounded-xl p-3.5 space-y-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs font-extrabold text-purple-200">
+                                  ⚖️ Kişi Sayısına Göre Hızlı Böl:
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {[2, 3, 4, 5].map((people) => (
+                                    <button
+                                      key={people}
+                                      type="button"
+                                      onClick={() => {
+                                        const perPerson = Math.round(
+                                          netPayable / people
+                                        );
+                                        setSplitCashAmount(String(perPerson));
+                                        setSplitCardAmount(
+                                          String(
+                                            Math.max(0, netPayable - perPerson)
+                                          )
+                                        );
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-purple-900/70 hover:bg-purple-600 text-purple-100 text-[11px] font-bold border border-purple-500/40 cursor-pointer"
+                                    >
+                                      {people} Kişi ({Math.round(netPayable / people)}{" "}
+                                      {settings?.currency}/kişi)
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-[11px] font-bold text-emerald-300 mb-1">
+                                    💵 Nakit Tahsil Edilen ({settings?.currency})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={splitCashAmount}
+                                    onChange={(e) => {
+                                      const cVal = Math.max(
+                                        0,
+                                        Number(e.target.value || 0)
+                                      );
+                                      setSplitCashAmount(e.target.value);
+                                      setSplitCardAmount(
+                                        String(
+                                          Math.max(
+                                            0,
+                                            Number(
+                                              (netPayable - cVal).toFixed(2)
+                                            )
+                                          )
+                                        )
+                                      );
+                                    }}
+                                    className="w-full bg-slate-900 border border-emerald-500/40 rounded-xl px-3 py-2 text-sm font-black text-emerald-400"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-bold text-blue-300 mb-1">
+                                    💳 POS / Karttan Çekilen ({settings?.currency})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={splitCardAmount}
+                                    onChange={(e) => {
+                                      const kVal = Math.max(
+                                        0,
+                                        Number(e.target.value || 0)
+                                      );
+                                      setSplitCardAmount(e.target.value);
+                                      setSplitCashAmount(
+                                        String(
+                                          Math.max(
+                                            0,
+                                            Number(
+                                              (netPayable - kVal).toFixed(2)
+                                            )
+                                          )
+                                        )
+                                      );
+                                    }}
+                                    className="w-full bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-sm font-black text-blue-400"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                            <span className="text-sm font-extrabold text-slate-300">
+                              NET TAHSİL EDİLECEK TUTAR:
+                            </span>
+                            <span className="text-xl font-black text-emerald-400">
+                              {netPayable.toFixed(2)} {settings?.currency}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                            <button
+                              type="button"
+                              disabled={
+                                tableActionLoading ||
+                                modalTableOrders.length === 0
+                              }
+                              onClick={() =>
+                                handleCloseTableWithPaymentModal(
+                                  selectedTableModal,
+                                  modalTableOrders,
+                                  false
+                                )
+                              }
+                              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold text-xs py-3.5 px-4 rounded-xl transition cursor-pointer shadow-lg"
+                            >
+                              ✅ Tahsilatı Tamamla & Masayı Kapat
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                tableActionLoading ||
+                                modalTableOrders.length === 0
+                              }
+                              onClick={() =>
+                                handleCloseTableWithPaymentModal(
+                                  selectedTableModal,
+                                  modalTableOrders,
+                                  true
+                                )
+                              }
+                              className="bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-extrabold text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer shadow-lg"
+                            >
+                              <Printer className="w-4 h-4" />
+                              Birleşik Fiş Yazdır + Masayı Kapat
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
           </div>
         )}
 
@@ -1755,10 +2446,10 @@ export default function KitchenTabletPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-extrabold text-white">
-                  🍲 Mutfak Hızlı Stok & &ldquo;Tükendi&rdquo; Kontrolü
+                  🍲 Mutfak Hızlı Stok, Günlük Porsiyon Sayacı & &ldquo;Tükendi&rdquo; Kontrolü
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Biten bir yemeği tek dokunuşla &ldquo;Tükendi&rdquo; olarak işaretleyin; müşteri ekranında (Netlify dahil) anında kapanır ve sipariş alınamaz.
+                  Biten bir yemeği tek dokunuşla &ldquo;Tükendi&rdquo; olarak işaretleyin veya günlük kalan porsiyon adedini güncelleyin; müşteri ekranında anında senkronize olur.
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs font-bold">
@@ -1779,35 +2470,80 @@ export default function KitchenTabletPage() {
                 return (
                   <div
                     key={item.id}
-                    className={`p-4 rounded-2xl border flex items-center justify-between gap-3 transition ${
+                    className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 transition ${
                       item.available
                         ? "bg-slate-900 border-slate-800"
                         : "bg-rose-950/30 border-rose-500/40"
                     }`}
                   >
-                    <div className="min-w-0">
-                      <span className="text-[10px] font-bold uppercase text-orange-400">
-                        {catName}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase text-orange-400">
+                          {catName}
+                        </span>
+                        <h3 className="font-bold text-sm text-white truncate">
+                          {item.name}
+                        </h3>
+                        <p className="text-xs text-slate-400 font-semibold mt-0.5">
+                          {item.price.toFixed(2)} {settings?.currency}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-[10px] font-black px-2 py-1 rounded-lg whitespace-nowrap ${
+                          item.dailyStock === null ||
+                          item.dailyStock === undefined
+                            ? "bg-slate-800 text-slate-400"
+                            : item.dailyStock <= 5
+                            ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                            : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                        }`}
+                      >
+                        {item.dailyStock === null ||
+                        item.dailyStock === undefined
+                          ? "♾️ Sınırsız"
+                          : `📦 Kalan: ${item.dailyStock} Porsiyon`}
                       </span>
-                      <h3 className="font-bold text-sm text-white truncate">
-                        {item.name}
-                      </h3>
-                      <p className="text-xs text-slate-400 font-semibold mt-0.5">
-                        {item.price.toFixed(2)} {settings?.currency}
-                      </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleToggleStock(item)}
-                      className={`px-4 py-2.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
-                        item.available
-                          ? "bg-emerald-600 hover:bg-rose-600 text-white"
-                          : "bg-rose-600 hover:bg-emerald-600 text-white"
-                      }`}
-                    >
-                      {item.available ? "🟢 Stokta (Kapat)" : "🔴 TÜKENDİ (Aç)"}
-                    </button>
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const nextStock = Number(item.dailyStock || 0) + 10;
+                          const updated: MenuItem = {
+                            ...item,
+                            dailyStock: nextStock,
+                            available: true,
+                          };
+                          setMenuItems((prev) =>
+                            prev.map((m) => (m.id === item.id ? updated : m))
+                          );
+                          await fetch("/api/menu", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ item: updated }),
+                          });
+                          fetchOrders();
+                        }}
+                        className="px-3 py-2 rounded-xl text-[11px] font-extrabold bg-slate-800 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                      >
+                        +10 Porsiyon
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStock(item)}
+                        className={`flex-1 px-3 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer ${
+                          item.available
+                            ? "bg-emerald-600 hover:bg-rose-600 text-white"
+                            : "bg-rose-600 hover:bg-emerald-600 text-white"
+                        }`}
+                      >
+                        {item.available
+                          ? "🟢 Stokta (Kapat)"
+                          : "🔴 TÜKENDİ (Aç)"}
+                      </button>
+                    </div>
                   </div>
                 );
               })}

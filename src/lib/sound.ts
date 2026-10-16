@@ -83,6 +83,37 @@ class SoundAlertManager {
       osc.stop(now + n.start + n.duration);
     }
   }
+
+  public playReadyBeep() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const notes = [
+      { freq: 987.77, start: 0, duration: 0.2 }, // B5
+      { freq: 1318.51, start: 0.22, duration: 0.4 }, // E6
+    ];
+
+    for (const n of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(n.freq, now + n.start);
+
+      gain.gain.setValueAtTime(0.001, now + n.start);
+      gain.gain.exponentialRampToValueAtTime(0.4, now + n.start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(
+        0.001,
+        now + n.start + n.duration
+      );
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + n.start);
+      osc.stop(now + n.start + n.duration);
+    }
+  }
 }
 
 export const soundAlert = new SoundAlertManager();

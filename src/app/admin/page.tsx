@@ -210,7 +210,14 @@ export default function AdminDashboardPage() {
   };
 
   const handleToggleItemAvailability = async (item: MenuItem) => {
-    const updated = { ...item, available: !item.available };
+    const nextAvailable = !item.available;
+    const nextDailyStock =
+      nextAvailable && item.dailyStock === 0 ? 15 : item.dailyStock;
+    const updated = {
+      ...item,
+      available: nextAvailable,
+      dailyStock: nextDailyStock,
+    };
     await fetch("/api/menu", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -744,6 +751,14 @@ export default function AdminDashboardPage() {
           >
             <Navigation className="w-3.5 h-3.5" />
             🛵 Kurye Ekranı
+          </Link>
+
+          <Link
+            href="/tv"
+            target="_blank"
+            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 px-3.5 py-2 rounded-xl border border-slate-700 transition"
+          >
+            📺 TV Sıra Ekranı
           </Link>
 
           <button
@@ -1468,16 +1483,69 @@ export default function AdminDashboardPage() {
                             <p className="text-xs text-slate-500 line-clamp-1">
                               {item.description}
                             </p>
-                            <div className="text-sm font-extrabold text-slate-900 mt-1">
-                              {item.price.toFixed(2)} {settings?.currency} •{" "}
+                            <div className="flex flex-wrap items-center gap-2 text-sm font-extrabold text-slate-900 mt-1">
+                              <span>
+                                {item.price.toFixed(2)} {settings?.currency}
+                              </span>
+                              <span>•</span>
                               <span className="text-xs font-normal text-slate-500">
                                 {item.modifierGroups.length} Opsiyon Grubu
                               </span>
+                              {item.dailyStock !== null &&
+                              item.dailyStock !== undefined ? (
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[11px] font-extrabold px-2 py-0.5 rounded-full border ${
+                                    item.dailyStock <= 0
+                                      ? "bg-rose-100 text-rose-800 border-rose-300"
+                                      : item.dailyStock <= 5
+                                      ? "bg-amber-100 text-amber-800 border-amber-300"
+                                      : "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                  }`}
+                                >
+                                  📦 Günlük Stok: {item.dailyStock} Porsiyon
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-semibold text-slate-400">
+                                  📦 Stok: Sınırsız
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-center">
+                        <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                          {item.dailyStock !== null &&
+                            item.dailyStock !== undefined && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const nextStock =
+                                    Number(item.dailyStock || 0) + 10;
+                                  const updatedItem: MenuItem = {
+                                    ...item,
+                                    dailyStock: nextStock,
+                                    available: true,
+                                  };
+                                  await fetch("/api/menu", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      item: updatedItem,
+                                    }),
+                                  });
+                                  loadData();
+                                  showToast(
+                                    `"${item.name}" stokuna +10 porsiyon eklendi (${nextStock} porsiyon).`
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 transition cursor-pointer"
+                                title="Günlük porsiyon stokuna hızlıca +10 porsiyon ekle"
+                              >
+                                +10 Porsiyon
+                              </button>
+                            )}
                           <button
                             onClick={() => handleToggleItemAvailability(item)}
                             className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
@@ -4086,6 +4154,83 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                 />
                 <span>🟢 Stokta Mevcut (Satışa Açık)</span>
               </label>
+            </div>
+
+            {/* Günlük Porsiyon / Kritik Stok Sayacı */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-extrabold text-amber-900">
+                    📦 Günlük Porsiyon / Kritik Stok Sayacı (İsteğe Bağlı)
+                  </span>
+                  <p className="text-[11px] text-amber-800/80">
+                    Boş bırakırsanız sınırsız satılır. Sayı girerseniz her siparişte otomatik düşer, 5 ve altında &quot;🔥 Son X Porsiyon!&quot; uyarısı çıkar, 0 olduğunda otomatik &quot;Tükendi&quot; olur.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Sınırsız"
+                    value={
+                      editingItem.dailyStock === null ||
+                      editingItem.dailyStock === undefined
+                        ? ""
+                        : editingItem.dailyStock
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      if (val === "") {
+                        setEditingItem({
+                          ...editingItem,
+                          dailyStock: null,
+                        });
+                      } else {
+                        const num = Math.max(0, Number(val));
+                        setEditingItem({
+                          ...editingItem,
+                          dailyStock: num,
+                          available: num > 0 ? true : editingItem.available,
+                        });
+                      }
+                    }}
+                    className="w-28 px-3 py-1.5 text-sm font-black text-slate-900 bg-white border border-amber-300 rounded-xl"
+                  />
+                  {editingItem.dailyStock !== null &&
+                    editingItem.dailyStock !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingItem({
+                            ...editingItem,
+                            dailyStock: null,
+                          })
+                        }
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 cursor-pointer"
+                      >
+                        Sınırsız Yap
+                      </button>
+                    )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[5, 10, 20, 30, 50].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() =>
+                      setEditingItem({
+                        ...editingItem,
+                        dailyStock: preset,
+                        available: true,
+                      })
+                    }
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-white hover:bg-amber-600 text-amber-900 hover:text-white border border-amber-200 transition cursor-pointer"
+                  >
+                    {preset} Porsiyon
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Opsiyon Grupları & Hazır Şablonlar */}

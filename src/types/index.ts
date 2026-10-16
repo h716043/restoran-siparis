@@ -38,6 +38,8 @@ export interface MenuItem {
   imageUrl: string;
   available: boolean;
   popular?: boolean;
+  /** Günlük porsiyon / kritik stok sınırı (null veya undefined = Sınırsız) */
+  dailyStock?: number | null;
   modifierGroups: ModifierGroup[];
 }
 
@@ -71,6 +73,13 @@ export interface OrderItem {
   totalPrice: number;
   selectedModifiers: SelectedModifier[];
   itemNote?: string;
+  /** Mutfak ekranında usta tarafından hazırlandı olarak tiklendi mi? */
+  prepared?: boolean;
+}
+
+export interface SplitPaymentInfo {
+  cashAmount: number;
+  cardAmount: number;
 }
 
 export interface Order {
@@ -88,6 +97,7 @@ export interface Order {
   scheduledTime?: string; // Örn: "Bugün 19:30" (İleri saatli sipariş / Ön sipariş)
   orderNote?: string;
   paymentMethod: PaymentMethod;
+  splitPaymentInfo?: SplitPaymentInfo;
   subtotal: number;
   discountAmount?: number;
   couponCode?: string;

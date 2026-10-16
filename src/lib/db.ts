@@ -49,7 +49,7 @@ const DB_PATH = path.join(DATA_DIR, "restaurant.sqlite");
 
 const globalForDb = globalThis as unknown as {
   sqliteDb?: DatabaseSync;
-  schemaMigratedV9?: boolean;
+  schemaMigratedV10?: boolean;
 };
 
 export function getDb(): DatabaseSync {
@@ -58,10 +58,10 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     globalForDb.sqliteDb = db;
-    globalForDb.schemaMigratedV9 = true;
-  } else if (!globalForDb.schemaMigratedV9) {
+    globalForDb.schemaMigratedV10 = true;
+  } else if (!globalForDb.schemaMigratedV10) {
     initSchema(globalForDb.sqliteDb);
-    globalForDb.schemaMigratedV9 = true;
+    globalForDb.schemaMigratedV10 = true;
   }
   return globalForDb.sqliteDb;
 }
@@ -146,6 +146,7 @@ function initSchema(db: DatabaseSync) {
       imageUrl TEXT NOT NULL,
       available INTEGER NOT NULL DEFAULT 1,
       popular INTEGER NOT NULL DEFAULT 0,
+      dailyStock INTEGER DEFAULT NULL,
       modifierGroupsJson TEXT NOT NULL DEFAULT '[]'
     );
 
@@ -164,6 +165,7 @@ function initSchema(db: DatabaseSync) {
       scheduledTime TEXT,
       orderNote TEXT,
       paymentMethod TEXT NOT NULL,
+      splitPaymentJson TEXT,
       subtotal REAL NOT NULL,
       discountAmount REAL DEFAULT 0,
       couponCode TEXT,
@@ -231,7 +233,7 @@ function initSchema(db: DatabaseSync) {
     );
   `);
 
-  // Ensure new columns exist on orders and users tables
+  // Ensure new columns exist on orders, menu_items, and users tables
   const alterCols = [
     "ALTER TABLE orders ADD COLUMN userId TEXT;",
     "ALTER TABLE orders ADD COLUMN deliveryZoneId TEXT;",
@@ -245,6 +247,8 @@ function initSchema(db: DatabaseSync) {
     "ALTER TABLE orders ADD COLUMN rating INTEGER;",
     "ALTER TABLE orders ADD COLUMN reviewText TEXT;",
     "ALTER TABLE orders ADD COLUMN reviewedAt TEXT;",
+    "ALTER TABLE orders ADD COLUMN splitPaymentJson TEXT;",
+    "ALTER TABLE menu_items ADD COLUMN dailyStock INTEGER DEFAULT NULL;",
     "ALTER TABLE users ADD COLUMN loyaltyPoints REAL DEFAULT 0;",
   ];
   for (const sql of alterCols) {
@@ -810,6 +814,7 @@ export function getMenuItems(): MenuItem[] {
     imageUrl: string;
     available: number;
     popular: number;
+    dailyStock: number | null;
     modifierGroupsJson: string;
   }>;
 
@@ -822,17 +827,32 @@ export function getMenuItems(): MenuItem[] {
     imageUrl: r.imageUrl,
     available: Boolean(r.available),
     popular: Boolean(r.popular),
+    dailyStock:
+      r.dailyStock !== null && r.dailyStock !== undefined
+        ? Number(r.dailyStock)
+        : null,
     modifierGroups: JSON.parse(r.modifierGroupsJson || "[]"),
   }));
 }
 
 export function saveMenuItem(item: MenuItem): MenuItem {
   const db = getDb();
+  const normalizedStock =
+    item.dailyStock !== null &&
+    item.dailyStock !== undefined &&
+    String(item.dailyStock).trim() !== ""
+      ? Math.max(0, Math.round(Number(item.dailyStock)))
+      : null;
+  item.dailyStock = normalizedStock;
+  if (normalizedStock !== null && normalizedStock <= 0) {
+    item.available = false;
+  }
+
   const existing = db.prepare("SELECT id FROM menu_items WHERE id = ?").get(item.id);
   if (existing) {
     db.prepare(`
       UPDATE menu_items
-      SET categoryId = ?, name = ?, description = ?, price = ?, imageUrl = ?, available = ?, popular = ?, modifierGroupsJson = ?
+      SET categoryId = ?, name = ?, description = ?, price = ?, imageUrl = ?, available = ?, popular = ?, dailyStock = ?, modifierGroupsJson = ?
       WHERE id = ?
     `).run(
       item.categoryId,
@@ -842,6 +862,7 @@ export function saveMenuItem(item: MenuItem): MenuItem {
       item.imageUrl,
       item.available ? 1 : 0,
       item.popular ? 1 : 0,
+      normalizedStock,
       JSON.stringify(item.modifierGroups || []),
       item.id
     );
@@ -849,8 +870,8 @@ export function saveMenuItem(item: MenuItem): MenuItem {
     const id = item.id || `item-${Date.now()}`;
     item.id = id;
     db.prepare(`
-      INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, modifierGroupsJson)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, dailyStock, modifierGroupsJson)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       item.categoryId,
@@ -860,6 +881,7 @@ export function saveMenuItem(item: MenuItem): MenuItem {
       item.imageUrl,
       item.available ? 1 : 0,
       item.popular ? 1 : 0,
+      normalizedStock,
       JSON.stringify(item.modifierGroups || [])
     );
   }
@@ -869,6 +891,35 @@ export function saveMenuItem(item: MenuItem): MenuItem {
 export function deleteMenuItem(id: string) {
   const db = getDb();
   db.prepare("DELETE FROM menu_items WHERE id = ?").run(id);
+}
+
+/** Sipariş kalemlerine göre günlük porsiyon stoklarını düşürür veya iade eder */
+function adjustMenuStockForItems(items: Order["items"], direction: "decrement" | "restore") {
+  const db = getDb();
+  for (const ordItem of items) {
+    if (!ordItem.menuItemId) continue;
+    const row = db
+      .prepare("SELECT id, dailyStock, available FROM menu_items WHERE id = ?")
+      .get(ordItem.menuItemId) as
+      | { id: string; dailyStock: number | null; available: number }
+      | undefined;
+    if (!row || row.dailyStock === null || row.dailyStock === undefined) continue;
+
+    const qty = Math.max(1, Number(ordItem.quantity || 1));
+    if (direction === "decrement") {
+      const nextStock = Math.max(0, Number(row.dailyStock) - qty);
+      const nextAvail = nextStock <= 0 ? 0 : row.available;
+      db.prepare(
+        "UPDATE menu_items SET dailyStock = ?, available = ? WHERE id = ?"
+      ).run(nextStock, nextAvail, row.id);
+    } else {
+      const nextStock = Number(row.dailyStock) + qty;
+      const nextAvail = nextStock > 0 ? 1 : row.available;
+      db.prepare(
+        "UPDATE menu_items SET dailyStock = ?, available = ? WHERE id = ?"
+      ).run(nextStock, nextAvail, row.id);
+    }
+  }
 }
 
 export function getOrders(): Order[] {
@@ -890,6 +941,7 @@ export function getOrders(): Order[] {
     scheduledTime: string | null;
     orderNote: string | null;
     paymentMethod: Order["paymentMethod"];
+    splitPaymentJson: string | null;
     subtotal: number;
     discountAmount: number | null;
     couponCode: string | null;
@@ -923,6 +975,9 @@ export function getOrders(): Order[] {
     scheduledTime: r.scheduledTime || undefined,
     orderNote: r.orderNote || undefined,
     paymentMethod: r.paymentMethod,
+    splitPaymentInfo: r.splitPaymentJson
+      ? JSON.parse(r.splitPaymentJson)
+      : undefined,
     subtotal: r.subtotal,
     discountAmount: r.discountAmount || 0,
     couponCode: r.couponCode || undefined,
@@ -969,6 +1024,7 @@ export function getOrderById(id: string): Order | null {
     scheduledTime: string | null;
     orderNote: string | null;
     paymentMethod: Order["paymentMethod"];
+    splitPaymentJson: string | null;
     subtotal: number;
     discountAmount: number | null;
     couponCode: string | null;
@@ -1003,6 +1059,9 @@ export function getOrderById(id: string): Order | null {
     scheduledTime: r.scheduledTime || undefined,
     orderNote: r.orderNote || undefined,
     paymentMethod: r.paymentMethod,
+    splitPaymentInfo: r.splitPaymentJson
+      ? JSON.parse(r.splitPaymentJson)
+      : undefined,
     subtotal: r.subtotal,
     discountAmount: r.discountAmount || 0,
     couponCode: r.couponCode || undefined,
@@ -1048,11 +1107,11 @@ export function createOrder(
     INSERT INTO orders (
       id, orderNumber, orderType, status, tableNumber, userId,
       customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
-      scheduledTime, orderNote, paymentMethod, subtotal, discountAmount, couponCode,
+      scheduledTime, orderNote, paymentMethod, splitPaymentJson, subtotal, discountAmount, couponCode,
       deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
       loyaltyPointsEarned, loyaltyPointsUsed,
       itemsJson, createdAt, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     order.id,
     order.orderNumber,
@@ -1068,6 +1127,7 @@ export function createOrder(
     order.scheduledTime || null,
     order.orderNote || null,
     order.paymentMethod,
+    order.splitPaymentInfo ? JSON.stringify(order.splitPaymentInfo) : null,
     order.subtotal,
     order.discountAmount || 0,
     order.couponCode || null,
@@ -1082,6 +1142,9 @@ export function createOrder(
     order.createdAt,
     order.updatedAt
   );
+
+  // Günlük porsiyon stoklarını düşür
+  adjustMenuStockForItems(order.items, "decrement");
 
   return order;
 }
@@ -1244,6 +1307,11 @@ export function updateOrderStatus(
   const rej = rejectReason !== undefined ? rejectReason : existing.rejectReason;
   const cou = courierName !== undefined ? courierName : existing.courierName;
 
+  // Eğer sipariş iptal/red edildiyse günlük stokları geri yükle
+  if (status === "rejected" && existing.status !== "rejected") {
+    adjustMenuStockForItems(existing.items, "restore");
+  }
+
   db.prepare(`
     UPDATE orders
     SET status = ?, estimatedMinutes = ?, courierName = ?, rejectReason = ?, updatedAt = ?
@@ -1251,6 +1319,231 @@ export function updateOrderStatus(
   `).run(status, est || null, cou || null, rej || null, updatedAt, id);
 
   return getOrderById(id);
+}
+
+/** Mutfak ekranında usta ürün bazlı "Hazırlandı ✓" tiklemesi */
+export function toggleOrderItemPrepared(
+  orderId: string,
+  itemId: string
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+
+  const updatedItems = existing.items.map((item) => {
+    if (itemId === "all") {
+      return { ...item, prepared: true };
+    }
+    if (item.id === itemId) {
+      return { ...item, prepared: !item.prepared };
+    }
+    return item;
+  });
+
+  const updatedAt = new Date().toISOString();
+  db.prepare(`
+    UPDATE orders
+    SET itemsJson = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(JSON.stringify(updatedItems), updatedAt, orderId);
+
+  return getOrderById(orderId);
+}
+
+/** Açık masa adisyonuna yeni ürünler ekler */
+export function appendItemsToOrder(
+  orderId: string,
+  newItems: Order["items"],
+  extraNote?: string
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+
+  const mergedItems = [...existing.items, ...newItems];
+  const addedSubtotal = newItems.reduce(
+    (sum, i) => sum + Number(i.totalPrice || 0),
+    0
+  );
+  const nextSubtotal = existing.subtotal + addedSubtotal;
+  const nextTotal = Math.max(
+    0,
+    nextSubtotal - (existing.discountAmount || 0) + (existing.deliveryFee || 0)
+  );
+  const nextNote = extraNote?.trim()
+    ? existing.orderNote
+      ? `${existing.orderNote} | Ek: ${extraNote.trim()}`
+      : extraNote.trim()
+    : existing.orderNote || null;
+
+  const updatedAt = new Date().toISOString();
+  db.prepare(`
+    UPDATE orders
+    SET itemsJson = ?, subtotal = ?, totalAmount = ?, orderNote = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(
+    JSON.stringify(mergedItems),
+    nextSubtotal,
+    nextTotal,
+    nextNote,
+    updatedAt,
+    orderId
+  );
+
+  adjustMenuStockForItems(newItems, "decrement");
+
+  return getOrderById(orderId);
+}
+
+/** Masadaki açık adisyonları başka bir masaya taşır veya dolu masayla birleştirir */
+export function transferTableOrders(
+  fromTable: string,
+  toTable: string
+): Order[] {
+  const db = getDb();
+  const cleanFrom = String(fromTable).trim();
+  const cleanTo = String(toTable).trim();
+  if (!cleanFrom || !cleanTo || cleanFrom === cleanTo) return getOrders();
+
+  const allOrders = getOrders();
+  const fromActive = allOrders.filter(
+    (o) =>
+      o.orderType === "dine_in" &&
+      String(o.tableNumber) === cleanFrom &&
+      (o.status === "pending" || o.status === "accepted" || o.status === "ready")
+  );
+  if (fromActive.length === 0) return allOrders;
+
+  const toActive = allOrders.filter(
+    (o) =>
+      o.orderType === "dine_in" &&
+      String(o.tableNumber) === cleanTo &&
+      (o.status === "pending" || o.status === "accepted" || o.status === "ready")
+  );
+
+  const now = new Date().toISOString();
+
+  if (toActive.length > 0) {
+    // Hedef masada zaten açık adisyon varsa birleştir (Masa Birleştirme)
+    const primaryTarget = toActive[0];
+    const itemsToAppend = fromActive.flatMap((o) => o.items);
+    const addedSub = fromActive.reduce((s, o) => s + o.subtotal, 0);
+    const addedDisc = fromActive.reduce(
+      (s, o) => s + (o.discountAmount || 0),
+      0
+    );
+    const mergedItems = [...primaryTarget.items, ...itemsToAppend];
+    const nextSubtotal = primaryTarget.subtotal + addedSub;
+    const nextDiscount = (primaryTarget.discountAmount || 0) + addedDisc;
+    const nextTotal = Math.max(0, nextSubtotal - nextDiscount);
+    const mergedNote = [
+      primaryTarget.orderNote,
+      `Masa ${cleanFrom} birleştirildi`,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+
+    db.prepare(`
+      UPDATE orders
+      SET itemsJson = ?, subtotal = ?, discountAmount = ?, totalAmount = ?, orderNote = ?, updatedAt = ?
+      WHERE id = ?
+    `).run(
+      JSON.stringify(mergedItems),
+      nextSubtotal,
+      nextDiscount,
+      nextTotal,
+      mergedNote,
+      now,
+      primaryTarget.id
+    );
+
+    for (const oldOrd of fromActive) {
+      db.prepare("DELETE FROM orders WHERE id = ?").run(oldOrd.id);
+    }
+  } else {
+    // Hedef masa boşsa doğrudan masa numarasını güncelle (Masa Taşıma)
+    for (const ord of fromActive) {
+      db.prepare(`
+        UPDATE orders
+        SET tableNumber = ?, customerName = ?, updatedAt = ?
+        WHERE id = ?
+      `).run(cleanTo, `Masa ${cleanTo}`, now, ord.id);
+    }
+  }
+
+  // Bekleyen masa çağrılarını da yeni masaya aktar
+  db.prepare(`
+    UPDATE table_calls
+    SET tableNumber = ?
+    WHERE tableNumber = ? AND status = 'pending'
+  `).run(cleanTo, cleanFrom);
+
+  return getOrders();
+}
+
+/** Masanın açık adisyonlarını Nakit / Kart / Parçalı (Alman Usulü) ödeme ile kapatır */
+export function closeTableOrdersWithPayment(
+  tableNumber: string,
+  paymentData: {
+    paymentMethod: Order["paymentMethod"];
+    cashAmount?: number;
+    cardAmount?: number;
+    discountAmount?: number;
+  }
+): Order[] {
+  const db = getDb();
+  const cleanTable = String(tableNumber).trim();
+  const allOrders = getOrders();
+  const tableActive = allOrders.filter(
+    (o) =>
+      o.orderType === "dine_in" &&
+      String(o.tableNumber) === cleanTable &&
+      (o.status === "pending" || o.status === "accepted" || o.status === "ready")
+  );
+  if (tableActive.length === 0) return allOrders;
+
+  const now = new Date().toISOString();
+  const extraDiscount = Math.max(0, Number(paymentData.discountAmount || 0));
+
+  tableActive.forEach((ord, idx) => {
+    const applyDisc = idx === 0 ? (ord.discountAmount || 0) + extraDiscount : ord.discountAmount || 0;
+    const nextTotal = Math.max(0, ord.subtotal - applyDisc);
+    const splitInfo =
+      idx === 0 &&
+      paymentData.cashAmount !== undefined &&
+      paymentData.cardAmount !== undefined &&
+      paymentData.cashAmount > 0 &&
+      paymentData.cardAmount > 0
+        ? JSON.stringify({
+            cashAmount: Number(paymentData.cashAmount),
+            cardAmount: Number(paymentData.cardAmount),
+          })
+        : ord.splitPaymentInfo
+        ? JSON.stringify(ord.splitPaymentInfo)
+        : null;
+
+    db.prepare(`
+      UPDATE orders
+      SET status = 'completed', paymentMethod = ?, splitPaymentJson = ?, discountAmount = ?, totalAmount = ?, updatedAt = ?
+      WHERE id = ?
+    `).run(
+      paymentData.paymentMethod,
+      splitInfo,
+      applyDisc,
+      nextTotal,
+      now,
+      ord.id
+    );
+  });
+
+  // O masanın bekleyen garson/hesap çağrılarını kapat
+  db.prepare(`
+    UPDATE table_calls
+    SET status = 'resolved'
+    WHERE tableNumber = ? AND status = 'pending'
+  `).run(cleanTable);
+
+  return getOrders();
 }
 
 // --- WhatsApp OTP & Customer Membership Functions ---
@@ -1500,8 +1793,8 @@ export function mergeCatalogFromCloud(payload: {
   if (payload.menuItems && payload.menuItems.length > 0) {
     db.prepare("DELETE FROM menu_items").run();
     const stmt = db.prepare(`
-      INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, modifierGroupsJson)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, dailyStock, modifierGroupsJson)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const item of payload.menuItems) {
       stmt.run(
@@ -1513,6 +1806,9 @@ export function mergeCatalogFromCloud(payload: {
         item.imageUrl,
         item.available ? 1 : 0,
         item.popular ? 1 : 0,
+        item.dailyStock !== undefined && item.dailyStock !== null
+          ? Number(item.dailyStock)
+          : null,
         JSON.stringify(item.modifierGroups || [])
       );
     }
@@ -1535,13 +1831,22 @@ export function mergeActivityFromCloud(payload: {
       INSERT INTO orders (
         id, orderNumber, orderType, status, tableNumber, userId,
         customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
-        scheduledTime, orderNote, paymentMethod, subtotal, discountAmount, couponCode,
+        scheduledTime, orderNote, paymentMethod, splitPaymentJson, subtotal, discountAmount, couponCode,
         deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
         loyaltyPointsEarned, loyaltyPointsUsed, rating, reviewText, reviewedAt,
         itemsJson, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.status ELSE orders.status END,
+        tableNumber = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.tableNumber ELSE orders.tableNumber END,
+        customerName = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.customerName ELSE orders.customerName END,
+        orderNote = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.orderNote ELSE orders.orderNote END,
+        paymentMethod = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.paymentMethod ELSE orders.paymentMethod END,
+        splitPaymentJson = COALESCE(excluded.splitPaymentJson, orders.splitPaymentJson),
+        subtotal = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.subtotal ELSE orders.subtotal END,
+        discountAmount = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.discountAmount ELSE orders.discountAmount END,
+        totalAmount = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.totalAmount ELSE orders.totalAmount END,
+        itemsJson = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.itemsJson ELSE orders.itemsJson END,
         estimatedMinutes = COALESCE(excluded.estimatedMinutes, orders.estimatedMinutes),
         courierName = COALESCE(excluded.courierName, orders.courierName),
         rejectReason = COALESCE(excluded.rejectReason, orders.rejectReason),
@@ -1566,6 +1871,7 @@ export function mergeActivityFromCloud(payload: {
         o.scheduledTime || null,
         o.orderNote || null,
         o.paymentMethod,
+        o.splitPaymentInfo ? JSON.stringify(o.splitPaymentInfo) : null,
         o.subtotal,
         o.discountAmount || 0,
         o.couponCode || null,

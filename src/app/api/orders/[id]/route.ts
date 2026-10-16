@@ -67,6 +67,40 @@ export async function PATCH(
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
+    // Mutfak ekranında usta ürün bazlı "Hazırlandı ✓" tiklemesi
+    if (body.action === "toggle_item_prepared") {
+      const { toggleOrderItemPrepared } = await import("@/lib/db");
+      const toggled = toggleOrderItemPrepared(id, String(body.itemId || "all"));
+      if (!toggled) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      await syncActivityWithCloud();
+      return NextResponse.json({ order: toggled });
+    }
+
+    // Açık masa adisyonuna sonradan ürün ekleme
+    if (body.action === "append_items") {
+      const { appendItemsToOrder } = await import("@/lib/db");
+      const { pushCatalogToCloud } = await import("@/lib/cloud-sync");
+      const appended = appendItemsToOrder(
+        id,
+        body.items || [],
+        body.extraNote
+      );
+      if (!appended) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      await syncActivityWithCloud();
+      await pushCatalogToCloud();
+      return NextResponse.json({ order: appended });
+    }
+
     const updated = updateOrderStatus(
       id,
       body.status,

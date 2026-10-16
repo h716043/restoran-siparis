@@ -1670,6 +1670,22 @@ function CustomerMenuContent() {
                                       Tükendi
                                     </span>
                                   )}
+                                  {item.available &&
+                                    item.dailyStock !== null &&
+                                    item.dailyStock !== undefined &&
+                                    item.dailyStock > 0 && (
+                                      <span
+                                        className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                                          item.dailyStock <= 5
+                                            ? "bg-rose-600 text-white animate-pulse"
+                                            : "bg-amber-100 text-amber-800 border border-amber-300"
+                                        }`}
+                                      >
+                                        {item.dailyStock <= 5
+                                          ? `🔥 Son ${item.dailyStock} Porsiyon!`
+                                          : `📦 Kalan: ${item.dailyStock} Porsiyon`}
+                                      </span>
+                                    )}
                                   {item.modifierGroups &&
                                     item.modifierGroups.length > 0 && (
                                       <span className="inline-flex text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
@@ -1920,6 +1936,13 @@ function CustomerMenuContent() {
             (typeof window === "undefined" ||
               !window.location.hostname.endsWith(".netlify.app")) && (
               <div className="flex items-center gap-3">
+                <Link
+                  href="/tv"
+                  className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 font-semibold transition"
+                >
+                  📺 TV Sıra Ekranı
+                </Link>
+                <span>•</span>
                 <Link
                   href="/kitchen"
                   className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 font-semibold transition"

@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   adjustUserLoyaltyPoints,
+  closeTableOrdersWithPayment,
   createOrder,
   getOrders,
   getSettings,
   getUserByPhone,
+  transferTableOrders,
   upsertUserAfterOtp,
 } from "@/lib/db";
 import {
   pullActivityFromCloud,
+  pushCatalogToCloud,
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
 
@@ -16,6 +19,34 @@ export async function GET(req: NextRequest) {
   try {
     await pullActivityFromCloud();
     const settings = getSettings();
+
+    // TV Müşteri Sıra Çağrı Ekranı (/tv) için şifresiz, kişisel veri içermeyen özet akış
+    if (req.nextUrl.searchParams.get("publicTv") === "1") {
+      const allOrders = getOrders();
+      const tvOrders = allOrders
+        .filter(
+          (o) =>
+            o.status === "accepted" ||
+            o.status === "ready" ||
+            o.status === "pending"
+        )
+        .map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          orderType: o.orderType,
+          tableNumber: o.tableNumber,
+          status: o.status,
+          estimatedMinutes: o.estimatedMinutes,
+          createdAt: o.createdAt,
+          updatedAt: o.updatedAt,
+        }));
+      return NextResponse.json({
+        orders: tvOrders,
+        restaurantName: settings.name,
+        slogan: settings.slogan,
+      });
+    }
+
     const role = req.cookies.get("restoran_staff_role")?.value;
     const courierPin = req.headers.get("x-courier-pin");
     const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
@@ -152,11 +183,62 @@ export async function POST(req: NextRequest) {
       items: body.items,
     });
     await syncActivityWithCloud();
+    await pushCatalogToCloud();
     return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
     console.error("POST /api/orders error:", error);
     return NextResponse.json(
       { error: "Sipariş oluşturulamadı" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await pullActivityFromCloud(true);
+    const settings = getSettings();
+    const role = req.cookies.get("restoran_staff_role")?.value;
+    const isAuthorized = role === "admin" || role === "kitchen";
+    if (!isAuthorized) {
+      return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
+    }
+
+    const body = await req.json();
+
+    if (body.action === "transfer_table") {
+      const orders = transferTableOrders(
+        String(body.fromTable || ""),
+        String(body.toTable || "")
+      );
+      await syncActivityWithCloud();
+      return NextResponse.json({ orders });
+    }
+
+    if (body.action === "close_table_payment") {
+      const orders = closeTableOrdersWithPayment(
+        String(body.tableNumber || ""),
+        {
+          paymentMethod: body.paymentMethod || "cash",
+          cashAmount:
+            body.cashAmount !== undefined ? Number(body.cashAmount) : undefined,
+          cardAmount:
+            body.cardAmount !== undefined ? Number(body.cardAmount) : undefined,
+          discountAmount:
+            body.discountAmount !== undefined
+              ? Number(body.discountAmount)
+              : undefined,
+        }
+      );
+      await syncActivityWithCloud();
+      return NextResponse.json({ orders });
+    }
+
+    return NextResponse.json({ error: "Geçersiz işlem" }, { status: 400 });
+  } catch (error) {
+    console.error("PATCH /api/orders error:", error);
+    return NextResponse.json(
+      { error: "İşlem gerçekleştirilemedi" },
       { status: 500 }
     );
   }
