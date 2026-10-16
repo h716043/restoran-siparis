@@ -4218,13 +4218,103 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                 >
                   + Ekstra Malzemeler
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const count =
+                      editingItem.modifierGroups.filter((g) =>
+                        Boolean(g.productTag)
+                      ).length + 1;
+                    const now = Date.now();
+                    const tpl: ModifierGroup = {
+                      id: `mod-kamp-urun-${now}`,
+                      productTag: `🍖 ${count}. ÜRÜN: Ana Yemek / Kampanya Ürünü`,
+                      name: `${count}. Ürün & Porsiyon Seçimi`,
+                      required: true,
+                      multiSelect: false,
+                      options: [
+                        {
+                          id: `o-${now}-1`,
+                          name: "1 Porsiyon (Standart)",
+                          price: 0,
+                          subOptions: [
+                            {
+                              id: `so-${now}-1`,
+                              name: "Ekstra Sıcak Lavaş",
+                              price: 20,
+                            },
+                            {
+                              id: `so-${now}-2`,
+                              name: "Ekstra Kaşar / Sos",
+                              price: 35,
+                            },
+                            {
+                              id: `so-${now}-3`,
+                              name: "Soğansız Olsun",
+                              price: 0,
+                            },
+                          ],
+                        },
+                        {
+                          id: `o-${now}-2`,
+                          name: "1.5 Porsiyon (Doyuran)",
+                          price: 120,
+                          subOptions: [
+                            {
+                              id: `so-${now}-4`,
+                              name: "Duble Lavaş & Köz Paket",
+                              price: 35,
+                            },
+                            {
+                              id: `so-${now}-5`,
+                              name: "Süzme Yoğurt & Tereyağ Sos",
+                              price: 50,
+                            },
+                            {
+                              id: `so-${now}-6`,
+                              name: "Soğansız Olsun",
+                              price: 0,
+                            },
+                          ],
+                        },
+                      ],
+                    };
+                    setEditingItem({
+                      ...editingItem,
+                      modifierGroups: [...editingItem.modifierGroups, tpl],
+                    });
+                  }}
+                  className="text-[11px] font-extrabold bg-orange-600 hover:bg-orange-700 text-white px-2.5 py-1 rounded-lg transition cursor-pointer shadow-2xs"
+                >
+                  + 🎁 Kampanya Alt Ürünü (Porsiyon + Ekstralı)
+                </button>
               </div>
 
               {editingItem.modifierGroups.map((group, gIdx) => (
                 <div
                   key={group.id}
-                  className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2"
+                  className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5"
                 >
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Kampanya Alt Ürün Başlığı (İsteğe Bağlı - Örn: 🍖 1. ÜRÜN: Kebap Seçimi)"
+                      value={group.productTag || ""}
+                      onChange={(e) => {
+                        const updated = [...editingItem.modifierGroups];
+                        updated[gIdx] = {
+                          ...group,
+                          productTag: e.target.value || undefined,
+                        };
+                        setEditingItem({
+                          ...editingItem,
+                          modifierGroups: updated,
+                        });
+                      }}
+                      className="w-full px-2.5 py-1 text-xs font-extrabold text-orange-800 bg-orange-50/70 border border-orange-200 rounded-lg"
+                    />
+                  </div>
+
                   <div className="flex items-center justify-between gap-2">
                     <input
                       type="text"
@@ -4292,62 +4382,187 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     </button>
                   </div>
 
-                  <div className="space-y-1.5 pl-2">
+                  <div className="space-y-2 pl-2">
                     {group.options.map((opt, oIdx) => (
-                      <div key={opt.id} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Seçenek adı"
-                          value={opt.name}
-                          onChange={(e) => {
-                            const updated = [...editingItem.modifierGroups];
-                            const opts = [...group.options];
-                            opts[oIdx] = { ...opt, name: e.target.value };
-                            updated[gIdx] = { ...group, options: opts };
-                            setEditingItem({
-                              ...editingItem,
-                              modifierGroups: updated,
-                            });
-                          }}
-                          className="flex-1 px-2 py-1 text-xs border border-slate-200 rounded bg-white"
-                        />
-                        <input
-                          type="number"
-                          placeholder="+Fiyat"
-                          value={opt.price}
-                          onChange={(e) => {
-                            const updated = [...editingItem.modifierGroups];
-                            const opts = [...group.options];
-                            opts[oIdx] = {
-                              ...opt,
-                              price: Number(e.target.value),
-                            };
-                            updated[gIdx] = { ...group, options: opts };
-                            setEditingItem({
-                              ...editingItem,
-                              modifierGroups: updated,
-                            });
-                          }}
-                          className="w-20 px-2 py-1 text-xs border border-slate-200 rounded bg-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...editingItem.modifierGroups];
-                            const opts = group.options.filter(
-                              (_, idx) => idx !== oIdx
-                            );
-                            updated[gIdx] = { ...group, options: opts };
-                            setEditingItem({
-                              ...editingItem,
-                              modifierGroups: updated,
-                            });
-                          }}
-                          className="text-red-500 hover:text-red-700 font-black px-1.5 cursor-pointer"
-                          title="Seçeneği Sil"
-                        >
-                          ×
-                        </button>
+                      <div
+                        key={opt.id}
+                        className="bg-white p-2 rounded-lg border border-slate-200/80 space-y-1.5"
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="Porsiyon / Seçenek adı"
+                            value={opt.name}
+                            onChange={(e) => {
+                              const updated = [...editingItem.modifierGroups];
+                              const opts = [...group.options];
+                              opts[oIdx] = { ...opt, name: e.target.value };
+                              updated[gIdx] = { ...group, options: opts };
+                              setEditingItem({
+                                ...editingItem,
+                                modifierGroups: updated,
+                              });
+                            }}
+                            className="flex-1 px-2 py-1 text-xs font-semibold border border-slate-200 rounded bg-white"
+                          />
+                          <input
+                            type="number"
+                            placeholder="+Fiyat"
+                            value={opt.price}
+                            onChange={(e) => {
+                              const updated = [...editingItem.modifierGroups];
+                              const opts = [...group.options];
+                              opts[oIdx] = {
+                                ...opt,
+                                price: Number(e.target.value),
+                              };
+                              updated[gIdx] = { ...group, options: opts };
+                              setEditingItem({
+                                ...editingItem,
+                                modifierGroups: updated,
+                              });
+                            }}
+                            className="w-20 px-2 py-1 text-xs border border-slate-200 rounded bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editingItem.modifierGroups];
+                              const opts = [...group.options];
+                              const currentSubs = opt.subOptions || [];
+                              opts[oIdx] = {
+                                ...opt,
+                                subOptions: [
+                                  ...currentSubs,
+                                  {
+                                    id: `sub-${Date.now()}`,
+                                    name: "Porsiyon Ekstrası",
+                                    price: 25,
+                                  },
+                                ],
+                              };
+                              updated[gIdx] = { ...group, options: opts };
+                              setEditingItem({
+                                ...editingItem,
+                                modifierGroups: updated,
+                              });
+                            }}
+                            className="text-[10px] font-bold bg-orange-50 hover:bg-orange-600 hover:text-white text-orange-700 border border-orange-200 px-2 py-1 rounded whitespace-nowrap cursor-pointer"
+                            title="Bu porsiyona özel ekstra malzeme ekle"
+                          >
+                            + Porsiyon Ekstrası
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...editingItem.modifierGroups];
+                              const opts = group.options.filter(
+                                (_, idx) => idx !== oIdx
+                              );
+                              updated[gIdx] = { ...group, options: opts };
+                              setEditingItem({
+                                ...editingItem,
+                                modifierGroups: updated,
+                              });
+                            }}
+                            className="text-red-500 hover:text-red-700 font-black px-1.5 cursor-pointer"
+                            title="Seçeneği Sil"
+                          >
+                            ×
+                          </button>
+                        </div>
+
+                        {/* Bu Porsiyona Özel Ekstralar (subOptions) */}
+                        {opt.subOptions && opt.subOptions.length > 0 && (
+                          <div className="pl-3 ml-2 border-l-2 border-orange-300 space-y-1 pt-1">
+                            <div className="text-[10px] font-extrabold text-orange-700">
+                              ↳ &ldquo;{opt.name}&rdquo; Porsiyonunun Ekstraları:
+                            </div>
+                            {opt.subOptions.map((subOpt, sIdx) => (
+                              <div
+                                key={subOpt.id}
+                                className="flex items-center gap-1.5"
+                              >
+                                <input
+                                  type="text"
+                                  placeholder="Ekstra adı (örn: Ekstra Kaşar / Soğansız)"
+                                  value={subOpt.name}
+                                  onChange={(e) => {
+                                    const updated = [
+                                      ...editingItem.modifierGroups,
+                                    ];
+                                    const opts = [...group.options];
+                                    const subs = [...(opt.subOptions || [])];
+                                    subs[sIdx] = {
+                                      ...subOpt,
+                                      name: e.target.value,
+                                    };
+                                    opts[oIdx] = { ...opt, subOptions: subs };
+                                    updated[gIdx] = {
+                                      ...group,
+                                      options: opts,
+                                    };
+                                    setEditingItem({
+                                      ...editingItem,
+                                      modifierGroups: updated,
+                                    });
+                                  }}
+                                  className="flex-1 px-2 py-0.5 text-[11px] border border-slate-200 rounded bg-slate-50"
+                                />
+                                <input
+                                  type="number"
+                                  placeholder="+Fiyat"
+                                  value={subOpt.price}
+                                  onChange={(e) => {
+                                    const updated = [
+                                      ...editingItem.modifierGroups,
+                                    ];
+                                    const opts = [...group.options];
+                                    const subs = [...(opt.subOptions || [])];
+                                    subs[sIdx] = {
+                                      ...subOpt,
+                                      price: Number(e.target.value),
+                                    };
+                                    opts[oIdx] = { ...opt, subOptions: subs };
+                                    updated[gIdx] = {
+                                      ...group,
+                                      options: opts,
+                                    };
+                                    setEditingItem({
+                                      ...editingItem,
+                                      modifierGroups: updated,
+                                    });
+                                  }}
+                                  className="w-16 px-2 py-0.5 text-[11px] border border-slate-200 rounded bg-slate-50"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = [
+                                      ...editingItem.modifierGroups,
+                                    ];
+                                    const opts = [...group.options];
+                                    const subs = (opt.subOptions || []).filter(
+                                      (_, idx) => idx !== sIdx
+                                    );
+                                    opts[oIdx] = { ...opt, subOptions: subs };
+                                    updated[gIdx] = {
+                                      ...group,
+                                      options: opts,
+                                    };
+                                    setEditingItem({
+                                      ...editingItem,
+                                      modifierGroups: updated,
+                                    });
+                                  }}
+                                  className="text-red-500 text-xs font-bold px-1 cursor-pointer"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                     <button

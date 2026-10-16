@@ -15,6 +15,11 @@ import {
   TableReservation,
   WhatsAppLog,
 } from "@/types";
+import {
+  CAMPAIGN_CATEGORY,
+  CAMPAIGN_MENU_ITEMS,
+  enrichSingleItemPortions,
+} from "@/lib/campaignSeed";
 
 function resolveDataDir(): string {
   if (process.env.NETLIFY === "true" || process.env.AWS_LAMBDA_FUNCTION_NAME) {
@@ -44,7 +49,7 @@ const DB_PATH = path.join(DATA_DIR, "restaurant.sqlite");
 
 const globalForDb = globalThis as unknown as {
   sqliteDb?: DatabaseSync;
-  schemaMigratedV8?: boolean;
+  schemaMigratedV9?: boolean;
 };
 
 export function getDb(): DatabaseSync {
@@ -53,10 +58,10 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     globalForDb.sqliteDb = db;
-    globalForDb.schemaMigratedV8 = true;
-  } else if (!globalForDb.schemaMigratedV8) {
+    globalForDb.schemaMigratedV9 = true;
+  } else if (!globalForDb.schemaMigratedV9) {
     initSchema(globalForDb.sqliteDb);
-    globalForDb.schemaMigratedV8 = true;
+    globalForDb.schemaMigratedV9 = true;
   }
   return globalForDb.sqliteDb;
 }
@@ -327,6 +332,91 @@ function initSchema(db: DatabaseSync) {
       db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(
         JSON.stringify(parsed)
       );
+    }
+  }
+
+  ensureCampaignCategoryAndItems(db);
+}
+
+function ensureCampaignCategoryAndItems(db: DatabaseSync) {
+  // 1. "🎁 Kampanya & Fırsat Menüleri" kategorisi yoksa en başa (sortOrder: 0) ekle
+  const existingCampCat = db
+    .prepare("SELECT id FROM categories WHERE id = ?")
+    .get(CAMPAIGN_CATEGORY.id);
+  if (!existingCampCat) {
+    db.prepare(
+      "INSERT INTO categories (id, name, slug, sortOrder, icon) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      CAMPAIGN_CATEGORY.id,
+      CAMPAIGN_CATEGORY.name,
+      CAMPAIGN_CATEGORY.slug,
+      CAMPAIGN_CATEGORY.sortOrder,
+      CAMPAIGN_CATEGORY.icon
+    );
+  }
+
+  // 2. Kampanya ürünlerini (birden fazla ürün içeren, her ürünün porsiyonu + her porsiyonun ekstraları olan) ekle
+  const insertItemStmt = db.prepare(`
+    INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, modifierGroupsJson)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const campItem of CAMPAIGN_MENU_ITEMS) {
+    const exists = db
+      .prepare("SELECT id FROM menu_items WHERE id = ?")
+      .get(campItem.id);
+    if (!exists) {
+      insertItemStmt.run(
+        campItem.id,
+        campItem.categoryId,
+        campItem.name,
+        campItem.description,
+        campItem.price,
+        campItem.imageUrl,
+        campItem.available ? 1 : 0,
+        campItem.popular ? 1 : 0,
+        JSON.stringify(campItem.modifierGroups)
+      );
+    }
+  }
+
+  // 3. Mevcut tekil ürünlerin porsiyon seçeneklerinde henüz porsiyon ekstrası (subOptions) yoksa zenginleştir
+  const allRows = db
+    .prepare("SELECT * FROM menu_items WHERE categoryId != ?")
+    .all(CAMPAIGN_CATEGORY.id) as Array<{
+    id: string;
+    categoryId: string;
+    name: string;
+    description: string;
+    price: number;
+    imageUrl: string;
+    available: number;
+    popular: number;
+    modifierGroupsJson: string;
+  }>;
+
+  const updateStmt = db.prepare(
+    "UPDATE menu_items SET modifierGroupsJson = ? WHERE id = ?"
+  );
+
+  for (const r of allRows) {
+    const currentItem: MenuItem = {
+      id: r.id,
+      categoryId: r.categoryId,
+      name: r.name,
+      description: r.description,
+      price: r.price,
+      imageUrl: r.imageUrl,
+      available: Boolean(r.available),
+      popular: Boolean(r.popular),
+      modifierGroups: JSON.parse(r.modifierGroupsJson || "[]"),
+    };
+    const hasAnySubOptions = currentItem.modifierGroups.some((g) =>
+      g.options.some((o) => o.subOptions && o.subOptions.length > 0)
+    );
+    if (!hasAnySubOptions) {
+      const enriched = enrichSingleItemPortions(currentItem);
+      updateStmt.run(JSON.stringify(enriched.modifierGroups), r.id);
     }
   }
 }
@@ -1407,6 +1497,7 @@ export function mergeCatalogFromCloud(payload: {
       );
     }
   }
+  ensureCampaignCategoryAndItems(db);
 }
 
 export function mergeActivityFromCloud(payload: {

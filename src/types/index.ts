@@ -13,11 +13,15 @@ export interface ModifierOption {
   id: string;
   name: string;
   price: number;
+  /** Bu porsiyon / seçenek seçildiğinde açılan, o porsiyona özel ekstra ve tercihler */
+  subOptions?: ModifierOption[];
 }
 
 export interface ModifierGroup {
   id: string;
   name: string; // örn: "Porsiyon Seçimi", "Ekstra Malzemeler", "Çıkarılacak Malzemeler"
+  /** Kampanya menülerinde bu grubun ait olduğu alt ürün başlığı (örn: "1. Ürün: Kebap & Izgara") */
+  productTag?: string;
   required: boolean;
   multiSelect: boolean;
   minSelect?: number;

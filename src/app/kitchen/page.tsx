@@ -41,6 +41,7 @@ import {
   OrderType,
   PaymentMethod,
   RestaurantSettings,
+  SelectedModifier,
   TableCall,
   TableReservation,
 } from "@/types";
@@ -84,6 +85,14 @@ export default function KitchenTabletPage() {
     useState<PaymentMethod>("cash");
   const [posCategory, setPosCategory] = useState<string>("all");
   const [posCart, setPosCart] = useState<OrderItem[]>([]);
+  const [posCustomizingItem, setPosCustomizingItem] =
+    useState<MenuItem | null>(null);
+  const [posChosenModifiers, setPosChosenModifiers] = useState<
+    Record<string, string[]>
+  >({});
+  const [posChosenSubOptions, setPosChosenSubOptions] = useState<
+    Record<string, string[]>
+  >({});
   const [posCustomerInfo, setPosCustomerInfo] = useState<{
     orderCount: number;
     loyaltyPoints: number;
@@ -260,33 +269,86 @@ export default function KitchenTabletPage() {
   };
 
   const handlePosAddItem = (item: MenuItem) => {
-    setPosCart((prev) => {
-      const existingIdx = prev.findIndex((c) => c.menuItemId === item.id);
-      if (existingIdx > -1) {
-        return prev.map((c, idx) =>
-          idx === existingIdx
-            ? {
-                ...c,
-                quantity: c.quantity + 1,
-                totalPrice: (c.quantity + 1) * c.unitPrice,
-              }
-            : c
-        );
+    if (item.modifierGroups && item.modifierGroups.length > 0) {
+      const defaults: Record<string, string[]> = {};
+      for (const g of item.modifierGroups) {
+        if (g.required && g.options.length > 0) {
+          defaults[g.id] = [g.options[0].id];
+        } else {
+          defaults[g.id] = [];
+        }
       }
-      return [
-        ...prev,
-        {
-          id: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          menuItemId: item.id,
-          name: item.name,
-          quantity: 1,
-          basePrice: item.price,
-          unitPrice: item.price,
-          totalPrice: item.price,
-          selectedModifiers: [],
-        },
-      ];
-    });
+      setPosChosenModifiers(defaults);
+      setPosChosenSubOptions({});
+      setPosCustomizingItem(item);
+      return;
+    }
+
+    setPosCart((prev) => [
+      ...prev,
+      {
+        id: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        menuItemId: item.id,
+        name: item.name,
+        quantity: 1,
+        basePrice: item.price,
+        unitPrice: item.price,
+        totalPrice: item.price,
+        selectedModifiers: [],
+      },
+    ]);
+  };
+
+  const handleConfirmPosCustomizedItem = () => {
+    if (!posCustomizingItem) return;
+    let extra = 0;
+    const selectedMods: SelectedModifier[] = [];
+
+    for (const group of posCustomizingItem.modifierGroups || []) {
+      const chosenIds = posChosenModifiers[group.id] || [];
+      const baseGroupName = group.productTag
+        ? `${group.productTag} (${group.name})`
+        : group.name;
+
+      for (const opt of group.options) {
+        if (chosenIds.includes(opt.id)) {
+          extra += opt.price;
+          selectedMods.push({
+            groupName: baseGroupName,
+            optionName: opt.name,
+            price: opt.price,
+          });
+          const subKey = `${group.id}__${opt.id}`;
+          const chosenSubIds = posChosenSubOptions[subKey] || [];
+          for (const subOpt of opt.subOptions || []) {
+            if (chosenSubIds.includes(subOpt.id)) {
+              extra += subOpt.price;
+              selectedMods.push({
+                groupName: `${group.productTag || opt.name} • Porsiyon Ekstrası`,
+                optionName: subOpt.name,
+                price: subOpt.price,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const unit = posCustomizingItem.price + extra;
+    setPosCart((prev) => [
+      ...prev,
+      {
+        id: `pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        menuItemId: posCustomizingItem.id,
+        name: posCustomizingItem.name,
+        quantity: 1,
+        basePrice: posCustomizingItem.price,
+        unitPrice: unit,
+        totalPrice: unit,
+        selectedModifiers: selectedMods,
+      },
+    ]);
+    setPosCustomizingItem(null);
   };
 
   const handlePosSubmitOrder = async (andPrint: boolean) => {
@@ -1806,34 +1868,174 @@ export default function KitchenTabletPage() {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[55vh] overflow-y-auto pr-1">
-                  {menuItems
-                    .filter(
-                      (m) =>
-                        m.available &&
-                        (posCategory === "all" || m.categoryId === posCategory)
-                    )
-                    .map((item) => (
+                {posCustomizingItem ? (
+                  <div className="bg-slate-950 border border-orange-500/60 rounded-2xl p-4 space-y-3 max-h-[55vh] overflow-y-auto">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div>
+                        <div className="text-xs font-extrabold text-orange-400">
+                          Porsiyon & Ekstra Seçimi
+                        </div>
+                        <h4 className="font-bold text-sm text-white">
+                          {posCustomizingItem.name}
+                        </h4>
+                      </div>
                       <button
-                        key={item.id}
                         type="button"
-                        onClick={() => handlePosAddItem(item)}
-                        className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-orange-500 rounded-2xl p-3 text-left flex flex-col justify-between gap-2 transition cursor-pointer"
+                        onClick={() => setPosCustomizingItem(null)}
+                        className="text-xs font-bold text-slate-400 hover:text-white px-2.5 py-1 rounded-lg bg-slate-800"
                       >
-                        <div className="font-bold text-xs text-white line-clamp-2">
-                          {item.name}
-                        </div>
-                        <div className="flex items-center justify-between w-full">
-                          <span className="text-xs font-black text-orange-400">
-                            {item.price.toFixed(0)} {settings?.currency}
-                          </span>
-                          <span className="bg-orange-600/20 text-orange-300 text-[10px] font-bold px-2 py-0.5 rounded-lg">
-                            + Ekle
-                          </span>
-                        </div>
+                        ← Ürünlere Dön
                       </button>
+                    </div>
+
+                    {(posCustomizingItem.modifierGroups || []).map((group) => (
+                      <div
+                        key={group.id}
+                        className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-2"
+                      >
+                        {group.productTag && (
+                          <div className="bg-orange-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded-md">
+                            {group.productTag}
+                          </div>
+                        )}
+                        <div className="text-xs font-bold text-slate-200">
+                          {group.name}
+                        </div>
+                        <div className="space-y-1.5">
+                          {group.options.map((opt) => {
+                            const isChecked = (
+                              posChosenModifiers[group.id] || []
+                            ).includes(opt.id);
+                            const subKey = `${group.id}__${opt.id}`;
+                            const chosenSubIds = posChosenSubOptions[subKey] || [];
+                            return (
+                              <div key={opt.id} className="space-y-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPosChosenModifiers((prev) => {
+                                      const cur = prev[group.id] || [];
+                                      if (!group.multiSelect) {
+                                        return { ...prev, [group.id]: [opt.id] };
+                                      }
+                                      return {
+                                        ...prev,
+                                        [group.id]: cur.includes(opt.id)
+                                          ? cur.filter((x) => x !== opt.id)
+                                          : [...cur, opt.id],
+                                      };
+                                    });
+                                  }}
+                                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                                    isChecked
+                                      ? "bg-orange-600/20 border-orange-500 text-white"
+                                      : "bg-slate-950 border-slate-800 text-slate-300"
+                                  }`}
+                                >
+                                  <span>
+                                    {isChecked ? "✓ " : ""}
+                                    {opt.name}
+                                  </span>
+                                  <span>
+                                    {opt.price > 0
+                                      ? `+${opt.price} ${settings?.currency}`
+                                      : "Dahil"}
+                                  </span>
+                                </button>
+
+                                {isChecked &&
+                                  opt.subOptions &&
+                                  opt.subOptions.length > 0 && (
+                                    <div className="ml-3 pl-2.5 border-l-2 border-orange-500 space-y-1 pt-1">
+                                      <div className="text-[10px] font-extrabold text-orange-300">
+                                        ↳ Bu Porsiyonun Ekstraları:
+                                      </div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {opt.subOptions.map((subOpt) => {
+                                          const subChecked = chosenSubIds.includes(
+                                            subOpt.id
+                                          );
+                                          return (
+                                            <button
+                                              key={subOpt.id}
+                                              type="button"
+                                              onClick={() => {
+                                                setPosChosenSubOptions((prev) => {
+                                                  const cur = prev[subKey] || [];
+                                                  return {
+                                                    ...prev,
+                                                    [subKey]: cur.includes(
+                                                      subOpt.id
+                                                    )
+                                                      ? cur.filter(
+                                                          (x) => x !== subOpt.id
+                                                        )
+                                                      : [...cur, subOpt.id],
+                                                  };
+                                                });
+                                              }}
+                                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+                                                subChecked
+                                                  ? "bg-orange-600 text-white border-orange-500"
+                                                  : "bg-slate-950 text-slate-300 border-slate-700"
+                                              }`}
+                                            >
+                                              {subChecked ? "✓ " : "+ "}
+                                              {subOpt.name}
+                                              {subOpt.price > 0
+                                                ? ` (+${subOpt.price} ${settings?.currency})`
+                                                : ""}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
-                </div>
+
+                    <button
+                      type="button"
+                      onClick={handleConfirmPosCustomizedItem}
+                      className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs py-3 rounded-xl transition cursor-pointer"
+                    >
+                      ✓ Seçilen Porsiyon & Ekstralarla Adisyona Ekle
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[55vh] overflow-y-auto pr-1">
+                    {menuItems
+                      .filter(
+                        (m) =>
+                          m.available &&
+                          (posCategory === "all" || m.categoryId === posCategory)
+                      )
+                      .map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => handlePosAddItem(item)}
+                          className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-orange-500 rounded-2xl p-3 text-left flex flex-col justify-between gap-2 transition cursor-pointer"
+                        >
+                          <div className="font-bold text-xs text-white line-clamp-2">
+                            {item.name}
+                          </div>
+                          <div className="flex items-center justify-between w-full">
+                            <span className="text-xs font-black text-orange-400">
+                              {item.price.toFixed(0)} {settings?.currency}
+                            </span>
+                            <span className="bg-orange-600/20 text-orange-300 text-[10px] font-bold px-2 py-0.5 rounded-lg">
+                              + Seç/Ekle
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
 
               {/* Sağ: Müşteri Bilgileri & Adisyon Sepeti */}
