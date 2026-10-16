@@ -1189,6 +1189,13 @@ export function getTableCalls(): TableCall[] {
     .all() as unknown as TableCall[];
 }
 
+export function getAllTableCalls(): TableCall[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM table_calls ORDER BY createdAt DESC LIMIT 100")
+    .all() as unknown as TableCall[];
+}
+
 export function createTableCall(
   tableNumber: string,
   type: TableCall["type"]
@@ -1205,7 +1212,20 @@ export function createTableCall(
 
 export function resolveTableCall(id: string) {
   const db = getDb();
+  if (id === "all") {
+    db.prepare("UPDATE table_calls SET status = 'resolved' WHERE status = 'pending'").run();
+    return;
+  }
+  const target = db
+    .prepare("SELECT tableNumber, type FROM table_calls WHERE id = ?")
+    .get(id) as { tableNumber: string; type: string } | undefined;
+
   db.prepare("UPDATE table_calls SET status = 'resolved' WHERE id = ?").run(id);
+  if (target) {
+    db.prepare(
+      "UPDATE table_calls SET status = 'resolved' WHERE tableNumber = ? AND type = ? AND status = 'pending'"
+    ).run(target.tableNumber, target.type);
+  }
 }
 
 export function updateOrderStatus(
@@ -1574,7 +1594,7 @@ export function mergeActivityFromCloud(payload: {
         assignedTable, status, rejectReason, createdAt
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        status = excluded.status,
+        status = CASE WHEN reservations.status != 'pending' AND excluded.status = 'pending' THEN reservations.status ELSE excluded.status END,
         assignedTable = COALESCE(excluded.assignedTable, reservations.assignedTable),
         rejectReason = COALESCE(excluded.rejectReason, reservations.rejectReason)
     `);
@@ -1600,7 +1620,8 @@ export function mergeActivityFromCloud(payload: {
     const upsertCall = db.prepare(`
       INSERT INTO table_calls (id, tableNumber, type, status, createdAt)
       VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status
+      ON CONFLICT(id) DO UPDATE SET
+        status = CASE WHEN table_calls.status = 'resolved' OR excluded.status = 'resolved' THEN 'resolved' ELSE excluded.status END
     `);
     for (const c of payload.tableCalls) {
       upsertCall.run(c.id, c.tableNumber, c.type, c.status, c.createdAt);

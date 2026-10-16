@@ -45,11 +45,6 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const role = req.cookies.get("restoran_staff_role")?.value;
-    if (role !== "admin" && role !== "kitchen") {
-      return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
-    }
-
     await pullActivityFromCloud(true);
     const body = await req.json();
     if (!body.id) {
@@ -57,7 +52,8 @@ export async function PATCH(req: NextRequest) {
     }
     resolveTableCall(String(body.id));
     await syncActivityWithCloud();
-    return NextResponse.json({ success: true });
+    const calls = getTableCalls();
+    return NextResponse.json({ success: true, calls });
   } catch (error) {
     console.error("PATCH /api/table-calls error:", error);
     return NextResponse.json({ error: "Güncellenemedi" }, { status: 500 });

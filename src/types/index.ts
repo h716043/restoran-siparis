@@ -53,6 +53,12 @@ export interface SelectedModifier {
   groupName: string;
   optionName: string;
   price: number;
+  /** Kampanya menüsündeki alt ürün başlığı (Örn: "🍕 1. Ürün: Taş Fırın Pide Seçimi") */
+  productTag?: string;
+  /** Seçimin rolü: porsiyon/ana ürün seçimi mi, porsiyon ekstrası mı, genel ekstra mı, çıkarılacak malzeme mi */
+  modifierRole?: "portion" | "sub_extra" | "extra" | "removal";
+  /** Porsiyon ekstrası ise ait olduğu porsiyon adı */
+  parentOptionName?: string;
 }
 
 export interface OrderItem {

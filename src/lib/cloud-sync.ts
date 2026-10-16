@@ -1,12 +1,12 @@
 import {
   getActiveOtpCodes,
+  getAllTableCalls,
   getAllUsers,
   getCategories,
   getMenuItems,
   getOrders,
   getReservations,
   getSettings,
-  getTableCalls,
   getWhatsAppLogs,
   mergeActivityFromCloud,
   mergeCatalogFromCloud,
@@ -228,7 +228,7 @@ export async function syncActivityWithCloud(): Promise<boolean> {
     const mergedPayload = JSON.stringify({
       orders: getOrders(),
       reservations: getReservations(),
-      tableCalls: getTableCalls(),
+      tableCalls: getAllTableCalls(),
       users: getAllUsers(),
       otpCodes: getActiveOtpCodes(),
       whatsappLogs: getWhatsAppLogs(),

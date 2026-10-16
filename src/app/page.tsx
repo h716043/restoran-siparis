@@ -71,6 +71,11 @@ import {
   applyThemeToDocument,
   getThemeDefinition,
 } from "@/lib/themes";
+import {
+  extractSubProductHeader,
+  parseStructuredModifiers,
+  splitOptionNameAndPortion,
+} from "@/lib/modifierFormat";
 
 interface PublicReviewItem {
   id: string;
@@ -750,6 +755,16 @@ function CustomerMenuContent() {
       const baseGroupName = group.productTag
         ? `${group.productTag} (${group.name})`
         : group.name;
+      const gLower = group.name.toLowerCase();
+      const mainRole: SelectedModifier["modifierRole"] = gLower.includes(
+        "çıkarılacak"
+      )
+        ? "removal"
+        : gLower.includes("porsiyon") ||
+          gLower.includes("çeşit") ||
+          Boolean(group.productTag)
+        ? "portion"
+        : "extra";
 
       for (const opt of group.options) {
         if (chosenIds.includes(opt.id)) {
@@ -757,16 +772,26 @@ function CustomerMenuContent() {
             groupName: baseGroupName,
             optionName: opt.name,
             price: opt.price,
+            productTag: group.productTag,
+            modifierRole: mainRole,
           });
 
           const subKey = `${group.id}__${opt.id}`;
           const chosenSubIds = chosenSubOptions[subKey] || [];
           for (const subOpt of opt.subOptions || []) {
             if (chosenSubIds.includes(subOpt.id)) {
+              const subLower = subOpt.name.toLowerCase();
+              const isRemoval =
+                subLower.startsWith("soğansız") ||
+                subLower.startsWith("domatessiz") ||
+                subLower.startsWith("turşusuz");
               selectedMods.push({
                 groupName: `${group.productTag || opt.name} • Porsiyon Ekstrası`,
                 optionName: subOpt.name,
                 price: subOpt.price,
+                productTag: group.productTag,
+                modifierRole: isRemoval ? "removal" : "sub_extra",
+                parentOptionName: opt.name,
               });
             }
           }
@@ -2773,153 +2798,216 @@ function CustomerMenuContent() {
                 </p>
               </div>
 
-              {(selectedItem.modifierGroups || []).map((group) => (
-                <div
-                  key={group.id}
-                  className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2.5"
-                >
-                  {group.productTag && (
-                    <div className="bg-orange-600 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg flex items-center justify-between shadow-xs">
-                      <span>{group.productTag}</span>
-                      <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">
-                        Porsiyon + Ekstra
+              {(selectedItem.modifierGroups || []).map((group) => {
+                const subHeader = extractSubProductHeader(group.productTag);
+                const isPortionGroup =
+                  Boolean(group.productTag) ||
+                  group.name.toLowerCase().includes("porsiyon") ||
+                  group.name.toLowerCase().includes("çeşit");
+
+                return (
+                  <div
+                    key={group.id}
+                    className={`p-3.5 rounded-2xl border-2 space-y-3 ${
+                      group.productTag
+                        ? "bg-orange-50/40 border-orange-300"
+                        : "bg-slate-50 border-slate-200/80"
+                    }`}
+                  >
+                    {group.productTag && (
+                      <div className="bg-gradient-to-r from-orange-600 to-red-600 text-white px-3.5 py-2 rounded-xl flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-2">
+                          {subHeader.stepBadge && (
+                            <span className="bg-white text-orange-700 font-black text-xs px-2.5 py-0.5 rounded-lg shadow-2xs">
+                              {subHeader.stepBadge}
+                            </span>
+                          )}
+                          <span className="font-extrabold text-xs sm:text-sm">
+                            {subHeader.cleanTitle || group.productTag}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold bg-black/25 px-2 py-0.5 rounded-full whitespace-nowrap">
+                          Ürün + Porsiyon + Ekstra
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                        {isPortionGroup ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
+                            🍽️ PORSİYON & ÇEŞİT
+                          </span>
+                        ) : group.name.toLowerCase().includes("çıkarılacak") ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200">
+                            🚫 ÇIKARILACAK
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            ✨ EKSTRA
+                          </span>
+                        )}
+                        <span>{group.name}</span>
+                      </h4>
+                      <span
+                        className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                          group.required
+                            ? "bg-orange-100 text-orange-800 border border-orange-200"
+                            : "bg-slate-200 text-slate-700"
+                        }`}
+                      >
+                        {group.required ? "Zorunlu Seçim" : "İsteğe Bağlı"}
                       </span>
                     </div>
-                  )}
 
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-sm text-slate-900">
-                      {group.name}
-                    </h4>
-                    <span
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        group.required
-                          ? "bg-orange-100 text-orange-700"
-                          : "bg-slate-200 text-slate-600"
-                      }`}
-                    >
-                      {group.required ? "Zorunlu" : "İsteğe Bağlı"}
-                    </span>
-                  </div>
+                    <div className="space-y-2">
+                      {group.options.map((opt) => {
+                        const isChecked = (
+                          chosenModifiers[group.id] || []
+                        ).includes(opt.id);
+                        const subKey = `${group.id}__${opt.id}`;
+                        const chosenSubIds = chosenSubOptions[subKey] || [];
+                        const splitOpt = isPortionGroup
+                          ? splitOptionNameAndPortion(opt.name)
+                          : { dishName: "", portionLabel: opt.name };
 
-                  <div className="space-y-2">
-                    {group.options.map((opt) => {
-                      const isChecked = (
-                        chosenModifiers[group.id] || []
-                      ).includes(opt.id);
-                      const subKey = `${group.id}__${opt.id}`;
-                      const chosenSubIds = chosenSubOptions[subKey] || [];
-                      return (
-                        <div key={opt.id} className="space-y-1.5">
-                          <label
-                            onClick={() =>
-                              toggleModifierOption(
-                                group.id,
-                                opt.id,
-                                group.multiSelect
-                              )
-                            }
-                            className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${
-                              isChecked
-                                ? "border-orange-500 bg-orange-50/60"
-                                : "border-slate-200 bg-white hover:border-slate-300"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <input
-                                type={group.multiSelect ? "checkbox" : "radio"}
-                                checked={isChecked}
-                                onChange={() => {}}
-                                className="w-4 h-4 accent-orange-600"
-                              />
-                              <div>
-                                <span className="text-sm font-semibold text-slate-800 block">
-                                  {opt.name}
-                                </span>
-                                {opt.subOptions &&
-                                  opt.subOptions.length > 0 && (
-                                    <span className="text-[10px] font-bold text-orange-700">
-                                      + {opt.subOptions.length} adet porsiyon ekstrası / malzeme tercihi
+                        return (
+                          <div key={opt.id} className="space-y-1.5">
+                            <label
+                              onClick={() =>
+                                toggleModifierOption(
+                                  group.id,
+                                  opt.id,
+                                  group.multiSelect
+                                )
+                              }
+                              className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition ${
+                                isChecked
+                                  ? "border-orange-500 bg-white shadow-xs"
+                                  : "border-slate-200 bg-white hover:border-slate-300"
+                              }`}
+                            >
+                              <div className="flex items-start gap-2.5 pr-2">
+                                <input
+                                  type={group.multiSelect ? "checkbox" : "radio"}
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="w-4 h-4 accent-orange-600 mt-0.5"
+                                />
+                                <div className="space-y-1">
+                                  {isPortionGroup ? (
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      {splitOpt.dishName && (
+                                        <span className="text-sm font-extrabold text-slate-900">
+                                          {splitOpt.dishName}
+                                        </span>
+                                      )}
+                                      <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-lg">
+                                        🍽️ Porsiyon: {splitOpt.portionLabel}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm font-semibold text-slate-800 block">
+                                      {opt.name}
                                     </span>
                                   )}
-                              </div>
-                            </div>
-                            {opt.price > 0 ? (
-                              <span className="text-xs font-bold text-slate-700 whitespace-nowrap">
-                                +{opt.price.toFixed(2)} {settings?.currency}
-                              </span>
-                            ) : (
-                              <span className="text-[11px] font-semibold text-emerald-700 whitespace-nowrap">
-                                Dahil
-                              </span>
-                            )}
-                          </label>
 
-                          {/* Seçilen Porsiyona Özel Ekstralar (subOptions) */}
-                          {isChecked &&
-                            opt.subOptions &&
-                            opt.subOptions.length > 0 && (
-                              <div className="ml-4 pl-3 border-l-2 border-orange-400 bg-white/90 p-2.5 rounded-xl space-y-1.5 shadow-2xs">
-                                <div className="text-[11px] font-extrabold text-orange-800 flex items-center justify-between">
-                                  <span>
-                                    ↳ Bu Porsiyon İçin Ekstra & Tercihler:
-                                  </span>
-                                  <span className="text-[10px] font-semibold text-slate-500">
-                                    İsteğe Bağlı
-                                  </span>
-                                </div>
-                                <div className="grid grid-cols-1 gap-1">
-                                  {opt.subOptions.map((subOpt) => {
-                                    const subChecked = chosenSubIds.includes(
-                                      subOpt.id
-                                    );
-                                    return (
-                                      <label
-                                        key={subOpt.id}
-                                        onClick={() =>
-                                          toggleSubOption(
-                                            group.id,
-                                            opt.id,
-                                            subOpt.id
-                                          )
-                                        }
-                                        className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer transition ${
-                                          subChecked
-                                            ? "border-orange-500 bg-orange-50 font-bold text-slate-900"
-                                            : "border-slate-200 bg-slate-50/70 text-slate-700 hover:border-slate-300"
-                                        }`}
-                                      >
-                                        <span className="flex items-center gap-2">
-                                          <input
-                                            type="checkbox"
-                                            checked={subChecked}
-                                            onChange={() => {}}
-                                            className="w-3.5 h-3.5 accent-orange-600 rounded"
-                                          />
-                                          <span>{subOpt.name}</span>
-                                        </span>
-                                        {subOpt.price > 0 ? (
-                                          <span className="font-bold text-orange-700">
-                                            +{subOpt.price.toFixed(2)}{" "}
-                                            {settings?.currency}
-                                          </span>
-                                        ) : (
-                                          <span className="text-[10px] text-emerald-700 font-semibold">
-                                            Ücretsiz
-                                          </span>
-                                        )}
-                                      </label>
-                                    );
-                                  })}
+                                  {opt.subOptions &&
+                                    opt.subOptions.length > 0 && (
+                                      <span className="text-[11px] font-bold text-orange-700 block">
+                                        👇 Seçildiğinde bu porsiyona özel{" "}
+                                        {opt.subOptions.length} ekstra/tercih
+                                        açılır
+                                      </span>
+                                    )}
                                 </div>
                               </div>
-                            )}
-                        </div>
-                      );
-                    })}
+                              {opt.price > 0 ? (
+                                <span className="text-xs font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-1 rounded-lg whitespace-nowrap">
+                                  +{opt.price.toFixed(2)} {settings?.currency}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                                  Menüye Dahil
+                                </span>
+                              )}
+                            </label>
+
+                            {/* Seçilen Porsiyona Özel Ekstralar (subOptions) */}
+                            {isChecked &&
+                              opt.subOptions &&
+                              opt.subOptions.length > 0 && (
+                                <div className="ml-3 sm:ml-5 pl-3 border-l-4 border-orange-500 bg-white p-3 rounded-xl border border-orange-200 space-y-2 shadow-xs">
+                                  <div className="flex items-center justify-between border-b border-orange-100 pb-1.5">
+                                    <span className="text-xs font-black text-orange-800 flex items-center gap-1.5">
+                                      <span className="bg-orange-600 text-white text-[10px] px-2 py-0.5 rounded-md">
+                                        ✨ EKSTRALAR
+                                      </span>
+                                      <span>
+                                        {splitOpt.dishName || splitOpt.portionLabel}{" "}
+                                        İçin Ekstra & Tercihler:
+                                      </span>
+                                    </span>
+                                    <span className="text-[10px] font-bold text-slate-500">
+                                      İsteğe Bağlı
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-1.5">
+                                    {opt.subOptions.map((subOpt) => {
+                                      const subChecked = chosenSubIds.includes(
+                                        subOpt.id
+                                      );
+                                      return (
+                                        <label
+                                          key={subOpt.id}
+                                          onClick={() =>
+                                            toggleSubOption(
+                                              group.id,
+                                              opt.id,
+                                              subOpt.id
+                                            )
+                                          }
+                                          className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs cursor-pointer transition ${
+                                            subChecked
+                                              ? "border-orange-500 bg-orange-50 font-bold text-slate-900"
+                                              : "border-slate-200 bg-slate-50/70 text-slate-700 hover:border-slate-300"
+                                          }`}
+                                        >
+                                          <span className="flex items-center gap-2">
+                                            <input
+                                              type="checkbox"
+                                              checked={subChecked}
+                                              onChange={() => {}}
+                                              className="w-3.5 h-3.5 accent-orange-600 rounded"
+                                            />
+                                            <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                                              + EKSTRA
+                                            </span>
+                                            <span>{subOpt.name}</span>
+                                          </span>
+                                          {subOpt.price > 0 ? (
+                                            <span className="font-extrabold text-orange-700 whitespace-nowrap">
+                                              +{subOpt.price.toFixed(2)}{" "}
+                                              {settings?.currency}
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] text-emerald-700 font-bold whitespace-nowrap">
+                                              Ücretsiz
+                                            </span>
+                                          )}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">
@@ -3284,61 +3372,164 @@ function CustomerMenuContent() {
     if (checkoutStep === "cart") {
       return (
         <div className="p-4 space-y-4">
-          <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto pr-1">
-            {cart.map((item) => (
-              <div key={item.id} className="py-3 first:pt-0 last:pb-0 space-y-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold text-sm text-slate-900">
-                    {item.name}
+          <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto pr-1">
+            {cart.map((item) => {
+              const structuredBlocks = parseStructuredModifiers(
+                item.selectedModifiers
+              );
+              return (
+                <div
+                  key={item.id}
+                  className="py-3 first:pt-0 last:pb-0 space-y-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="font-bold text-sm text-slate-900">
+                      {item.name}
+                    </div>
+                    <div className="font-extrabold text-sm text-slate-900 whitespace-nowrap">
+                      {item.totalPrice.toFixed(2)} {settings?.currency}
+                    </div>
                   </div>
-                  <div className="font-bold text-sm text-slate-900 whitespace-nowrap">
-                    {item.totalPrice.toFixed(2)} {settings?.currency}
-                  </div>
-                </div>
 
-                {item.selectedModifiers.length > 0 && (
-                  <div className="text-xs text-slate-500 space-y-0.5">
-                    {item.selectedModifiers.map((m, idx) => (
-                      <div key={idx}>
-                        • {m.optionName}{" "}
-                        {m.price > 0
-                          ? `(+${m.price} ${settings?.currency})`
-                          : ""}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                  {structuredBlocks.length > 0 && (
+                    <div className="space-y-2 pt-0.5">
+                      {structuredBlocks.map((block, bIdx) => (
+                        <div
+                          key={bIdx}
+                          className={`rounded-xl p-2.5 text-xs space-y-1.5 border ${
+                            block.stepBadge
+                              ? "bg-orange-50/50 border-orange-200"
+                              : "bg-slate-50 border-slate-200/80"
+                          }`}
+                        >
+                          {/* 1. ÜRÜN / 2. ÜRÜN / 3. ÜRÜN Başlığı */}
+                          {(block.stepBadge || block.productTitle) && (
+                            <div className="flex items-center gap-1.5 pb-1 border-b border-orange-200/60">
+                              {block.stepBadge && (
+                                <span className="bg-orange-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md">
+                                  {block.stepBadge}
+                                </span>
+                              )}
+                              {block.productTitle && (
+                                <span className="font-extrabold text-slate-900 text-xs">
+                                  {block.productTitle}
+                                </span>
+                              )}
+                            </div>
+                          )}
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs text-slate-400">
-                    Birim: {item.unitPrice.toFixed(2)} {settings?.currency}
-                  </span>
-                  <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-1.5 py-0.5">
-                    <button
-                      type="button"
-                      onClick={() => updateCartQuantity(item.id, -1)}
-                      className="p-1 text-slate-600 hover:text-red-600"
-                    >
-                      {item.quantity === 1 ? (
-                        <Trash2 className="w-3.5 h-3.5" />
-                      ) : (
-                        <Minus className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <span className="text-xs font-bold w-4 text-center">
-                      {item.quantity}
+                          {/* Seçilen Alt Ürün Çeşidi */}
+                          {block.chosenDishName && (
+                            <div className="flex items-center gap-1.5 text-slate-800">
+                              <span className="font-black text-[10px] uppercase bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                                ÜRÜN:
+                              </span>
+                              <span className="font-bold">
+                                {block.chosenDishName}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Seçilen Porsiyon */}
+                          {block.portionLabel && (
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-black text-[10px] uppercase bg-indigo-100 text-indigo-800 border border-indigo-200 px-1.5 py-0.5 rounded">
+                                  🍽️ PORSİYON:
+                                </span>
+                                <span className="font-extrabold text-indigo-950">
+                                  {block.portionLabel}
+                                </span>
+                              </div>
+                              {block.portionPrice > 0 && (
+                                <span className="font-bold text-orange-700 text-[11px] whitespace-nowrap">
+                                  +{block.portionPrice} {settings?.currency}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Seçilen Ekstralar */}
+                          {block.extras.length > 0 && (
+                            <div className="pt-1 border-t border-slate-200/60 space-y-1">
+                              <div className="text-[10px] font-black uppercase text-emerald-800 flex items-center gap-1">
+                                <span>✨ EKSTRALAR & TERCİHLER:</span>
+                              </div>
+                              <div className="space-y-0.5 pl-1.5">
+                                {block.extras.map((ex, eIdx) => (
+                                  <div
+                                    key={eIdx}
+                                    className="flex items-center justify-between text-[11px] text-slate-700"
+                                  >
+                                    <span className="font-medium">
+                                      + {ex.name}
+                                    </span>
+                                    {ex.price > 0 && (
+                                      <span className="font-bold text-emerald-700 whitespace-nowrap">
+                                        +{ex.price} {settings?.currency}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Çıkarılacak Malzemeler */}
+                          {block.removals.length > 0 && (
+                            <div className="pt-1 border-t border-slate-200/60 space-y-0.5">
+                              {block.removals.map((rem, rIdx) => (
+                                <div
+                                  key={rIdx}
+                                  className="text-[11px] font-bold text-rose-700"
+                                >
+                                  🚫 Çıkarılacak: {rem.name}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {item.itemNote && (
+                    <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                      📝 Not: {item.itemNote}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-xs text-slate-400">
+                      Birim: {item.unitPrice.toFixed(2)} {settings?.currency}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => updateCartQuantity(item.id, 1)}
-                      className="p-1 text-slate-600 hover:text-orange-600"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-1.5 py-0.5">
+                      <button
+                        type="button"
+                        onClick={() => updateCartQuantity(item.id, -1)}
+                        className="p-1 text-slate-600 hover:text-red-600"
+                      >
+                        {item.quantity === 1 ? (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        ) : (
+                          <Minus className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <span className="text-xs font-bold w-4 text-center">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => updateCartQuantity(item.id, 1)}
+                        className="p-1 text-slate-600 hover:text-orange-600"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* SEPETTE "YANINA İYİ GİDER" (UPSELL) ÖNERİLERİ */}

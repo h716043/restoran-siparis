@@ -46,6 +46,11 @@ import {
   TableReservation,
 } from "@/types";
 import { soundAlert } from "@/lib/sound";
+import {
+  extractSubProductHeader,
+  parseStructuredModifiers,
+  splitOptionNameAndPortion,
+} from "@/lib/modifierFormat";
 
 export default function KitchenTabletPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -309,6 +314,16 @@ export default function KitchenTabletPage() {
       const baseGroupName = group.productTag
         ? `${group.productTag} (${group.name})`
         : group.name;
+      const gLower = group.name.toLowerCase();
+      const mainRole: SelectedModifier["modifierRole"] = gLower.includes(
+        "çıkarılacak"
+      )
+        ? "removal"
+        : gLower.includes("porsiyon") ||
+          gLower.includes("çeşit") ||
+          Boolean(group.productTag)
+        ? "portion"
+        : "extra";
 
       for (const opt of group.options) {
         if (chosenIds.includes(opt.id)) {
@@ -317,16 +332,26 @@ export default function KitchenTabletPage() {
             groupName: baseGroupName,
             optionName: opt.name,
             price: opt.price,
+            productTag: group.productTag,
+            modifierRole: mainRole,
           });
           const subKey = `${group.id}__${opt.id}`;
           const chosenSubIds = posChosenSubOptions[subKey] || [];
           for (const subOpt of opt.subOptions || []) {
             if (chosenSubIds.includes(subOpt.id)) {
               extra += subOpt.price;
+              const subLower = subOpt.name.toLowerCase();
+              const isRemoval =
+                subLower.startsWith("soğansız") ||
+                subLower.startsWith("domatessiz") ||
+                subLower.startsWith("turşusuz");
               selectedMods.push({
                 groupName: `${group.productTag || opt.name} • Porsiyon Ekstrası`,
                 optionName: subOpt.name,
                 price: subOpt.price,
+                productTag: group.productTag,
+                modifierRole: isRemoval ? "removal" : "sub_extra",
+                parentOptionName: opt.name,
               });
             }
           }
@@ -469,11 +494,33 @@ export default function KitchenTabletPage() {
 
   const handleResolveTableCall = async (id: string) => {
     try {
-      await fetch("/api/table-calls", {
+      // Tıklanır tıklanmaz ekrandan anında kaldır (Optimistic UI)
+      const target = tableCalls.find((c) => c.id === id);
+      setTableCalls((prev) =>
+        id === "all"
+          ? []
+          : prev.filter(
+              (c) =>
+                c.id !== id &&
+                !(
+                  target &&
+                  c.tableNumber === target.tableNumber &&
+                  c.type === target.type
+                )
+            )
+      );
+
+      const res = await fetch("/api/table-calls", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.calls)) {
+          setTableCalls(data.calls);
+        }
+      }
       fetchOrders();
     } catch (e) {
       console.error("Masa çağrısı kapatılamadı:", e);
@@ -750,6 +797,15 @@ export default function KitchenTabletPage() {
               <span>
                 CANLI MASA ÇAĞRILARI ({pendingTableCalls.length} Masa Bekliyor)
               </span>
+              {pendingTableCalls.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => handleResolveTableCall("all")}
+                  className="ml-2 bg-purple-800 hover:bg-emerald-600 text-purple-100 hover:text-white text-[11px] font-extrabold px-2.5 py-1 rounded-lg border border-purple-400/50 transition cursor-pointer"
+                >
+                  Tümünü Temizle ✓
+                </button>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2.5">
               {pendingTableCalls.map((call) => (
@@ -790,8 +846,9 @@ export default function KitchenTabletPage() {
                     </span>
                   </div>
                   <button
+                    type="button"
                     onClick={() => handleResolveTableCall(call.id)}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg transition"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg transition cursor-pointer"
                   >
                     İlgilenildi ✓
                   </button>
@@ -1020,39 +1077,136 @@ export default function KitchenTabletPage() {
                         </div>
                       </div>
 
-                      {/* Ürün Kalemleri */}
-                      <div className="space-y-2 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-                        {order.items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="border-b border-slate-800/60 last:border-none pb-2 last:pb-0"
-                          >
-                            <div className="flex justify-between font-bold text-sm">
-                              <span>
-                                <span className="text-orange-400">
-                                  {item.quantity}x
-                                </span>{" "}
-                                {item.name}
-                              </span>
-                              <span>
-                                {item.totalPrice.toFixed(2)} {settings?.currency}
-                              </span>
+                      {/* Ürün Kalemleri (1/2/3 Alt Ürün + Porsiyon + Ekstra Ayrımlı) */}
+                      <div className="space-y-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
+                        {order.items.map((item) => {
+                          const structuredBlocks = parseStructuredModifiers(
+                            item.selectedModifiers
+                          );
+                          return (
+                            <div
+                              key={item.id}
+                              className="border-b border-slate-800/60 last:border-none pb-2.5 last:pb-0 space-y-2"
+                            >
+                              <div className="flex justify-between font-bold text-sm">
+                                <span>
+                                  <span className="text-orange-400">
+                                    {item.quantity}x
+                                  </span>{" "}
+                                  {item.name}
+                                </span>
+                                <span>
+                                  {item.totalPrice.toFixed(2)}{" "}
+                                  {settings?.currency}
+                                </span>
+                              </div>
+
+                              {structuredBlocks.length > 0 && (
+                                <div className="space-y-2 pl-2">
+                                  {structuredBlocks.map((block, bIdx) => (
+                                    <div
+                                      key={bIdx}
+                                      className={`rounded-xl p-2.5 text-xs space-y-1.5 border ${
+                                        block.stepBadge
+                                          ? "bg-slate-900 border-orange-500/40"
+                                          : "bg-slate-900/70 border-slate-800"
+                                      }`}
+                                    >
+                                      {(block.stepBadge ||
+                                        block.productTitle) && (
+                                        <div className="flex items-center gap-2 pb-1 border-b border-slate-800">
+                                          {block.stepBadge && (
+                                            <span className="bg-orange-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md">
+                                              {block.stepBadge}
+                                            </span>
+                                          )}
+                                          {block.productTitle && (
+                                            <span className="font-extrabold text-orange-300 text-xs">
+                                              {block.productTitle}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {block.chosenDishName && (
+                                        <div className="flex items-center gap-1.5 text-slate-100">
+                                          <span className="font-black text-[10px] uppercase bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700">
+                                            ÜRÜN:
+                                          </span>
+                                          <span className="font-bold text-white">
+                                            {block.chosenDishName}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {block.portionLabel && (
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-black text-[10px] uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-1.5 py-0.5 rounded">
+                                              🍽️ PORSİYON:
+                                            </span>
+                                            <span className="font-extrabold text-indigo-200">
+                                              {block.portionLabel}
+                                            </span>
+                                          </div>
+                                          {block.portionPrice > 0 && (
+                                            <span className="text-[11px] font-bold text-orange-400">
+                                              +{block.portionPrice}{" "}
+                                              {settings?.currency}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {block.extras.length > 0 && (
+                                        <div className="pt-1 border-t border-slate-800/80 space-y-1">
+                                          <div className="text-[10px] font-black uppercase text-emerald-400">
+                                            ✨ EKSTRALAR & TERCİHLER:
+                                          </div>
+                                          <div className="space-y-0.5 pl-1.5">
+                                            {block.extras.map((ex, eIdx) => (
+                                              <div
+                                                key={eIdx}
+                                                className="flex items-center justify-between text-xs text-slate-200"
+                                              >
+                                                <span>+ {ex.name}</span>
+                                                {ex.price > 0 && (
+                                                  <span className="text-[11px] font-bold text-emerald-400">
+                                                    +{ex.price}{" "}
+                                                    {settings?.currency}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {block.removals.length > 0 && (
+                                        <div className="pt-1 border-t border-slate-800/80 space-y-0.5">
+                                          {block.removals.map((rem, rIdx) => (
+                                            <div
+                                              key={rIdx}
+                                              className="text-xs font-bold text-rose-400"
+                                            >
+                                              🚫 Çıkarılacak: {rem.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {item.itemNote && (
+                                <div className="text-xs text-amber-300 pl-2 italic">
+                                  Not: {item.itemNote}
+                                </div>
+                              )}
                             </div>
-                            {item.selectedModifiers.map((m, i) => (
-                              <div
-                                key={i}
-                                className="text-xs text-slate-400 pl-4"
-                              >
-                                + {m.optionName}
-                              </div>
-                            ))}
-                            {item.itemNote && (
-                              <div className="text-xs text-amber-300 pl-4 italic">
-                                Not: {item.itemNote}
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                         {order.orderNote && (
                           <div className="pt-2 text-xs text-amber-300 font-semibold border-t border-slate-800">
                             📌 Sipariş Notu: {order.orderNote}
@@ -1219,7 +1373,10 @@ export default function KitchenTabletPage() {
                           {order.customerAddress && (
                             <div className="text-xs text-slate-400 mt-0.5">
                               📍{" "}
-                              {order.deliveryZoneName
+                              {order.deliveryZoneName &&
+                              !order.customerAddress.includes(
+                                order.deliveryZoneName
+                              )
                                 ? `[${order.deliveryZoneName}] `
                                 : ""}
                               {order.customerAddress}
@@ -1238,32 +1395,94 @@ export default function KitchenTabletPage() {
                         </div>
                       </div>
 
-                      <div className="space-y-1.5 text-sm">
-                        {order.items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex justify-between text-slate-200"
-                          >
-                            <span>
-                              <strong className="text-orange-400">
-                                {item.quantity}x
-                              </strong>{" "}
-                              {item.name}
-                              {item.selectedModifiers.length > 0 && (
-                                <span className="text-xs text-slate-400 ml-1">
-                                  (
-                                  {item.selectedModifiers
-                                    .map((m) => m.optionName)
-                                    .join(", ")}
-                                  )
+                      <div className="space-y-2.5 text-sm">
+                        {order.items.map((item) => {
+                          const structuredBlocks = parseStructuredModifiers(
+                            item.selectedModifiers
+                          );
+                          return (
+                            <div
+                              key={item.id}
+                              className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 space-y-2"
+                            >
+                              <div className="flex justify-between text-slate-100 font-bold">
+                                <span>
+                                  <strong className="text-orange-400">
+                                    {item.quantity}x
+                                  </strong>{" "}
+                                  {item.name}
                                 </span>
+                                <span className="font-semibold">
+                                  {item.totalPrice.toFixed(2)}{" "}
+                                  {settings?.currency}
+                                </span>
+                              </div>
+
+                              {structuredBlocks.length > 0 && (
+                                <div className="space-y-1.5 pl-2">
+                                  {structuredBlocks.map((block, bIdx) => (
+                                    <div
+                                      key={bIdx}
+                                      className="rounded-lg p-2 text-xs space-y-1 bg-slate-900 border border-slate-800"
+                                    >
+                                      {(block.stepBadge ||
+                                        block.productTitle) && (
+                                        <div className="flex items-center gap-1.5">
+                                          {block.stepBadge && (
+                                            <span className="bg-orange-600 text-white font-black text-[10px] px-1.5 py-0.5 rounded">
+                                              {block.stepBadge}
+                                            </span>
+                                          )}
+                                          {block.productTitle && (
+                                            <span className="font-bold text-orange-300">
+                                              {block.productTitle}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                      {block.chosenDishName && (
+                                        <div className="text-slate-200">
+                                          <strong className="text-slate-400">
+                                            Ürün:
+                                          </strong>{" "}
+                                          {block.chosenDishName}
+                                        </div>
+                                      )}
+                                      {block.portionLabel && (
+                                        <div className="text-indigo-300 font-bold">
+                                          🍽️ Porsiyon: {block.portionLabel}
+                                        </div>
+                                      )}
+                                      {block.extras.length > 0 && (
+                                        <div className="text-emerald-300 space-y-0.5">
+                                          <div className="text-[10px] font-black uppercase">
+                                            ✨ Ekstralar:
+                                          </div>
+                                          {block.extras.map((ex, eIdx) => (
+                                            <div
+                                              key={eIdx}
+                                              className="pl-2 text-slate-300"
+                                            >
+                                              + {ex.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {block.removals.length > 0 && (
+                                        <div className="text-rose-400 font-bold">
+                                          🚫 Çıkarılacak:{" "}
+                                          {block.removals
+                                            .map((r) => r.name)
+                                            .join(", ")}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
                               )}
-                            </span>
-                            <span className="font-semibold">
-                              {item.totalPrice.toFixed(2)} {settings?.currency}
-                            </span>
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {/* Paket Servis İçin Kurye Atama Seçicisi */}
@@ -1888,115 +2107,167 @@ export default function KitchenTabletPage() {
                       </button>
                     </div>
 
-                    {(posCustomizingItem.modifierGroups || []).map((group) => (
-                      <div
-                        key={group.id}
-                        className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-2"
-                      >
-                        {group.productTag && (
-                          <div className="bg-orange-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded-md">
-                            {group.productTag}
-                          </div>
-                        )}
-                        <div className="text-xs font-bold text-slate-200">
-                          {group.name}
-                        </div>
-                        <div className="space-y-1.5">
-                          {group.options.map((opt) => {
-                            const isChecked = (
-                              posChosenModifiers[group.id] || []
-                            ).includes(opt.id);
-                            const subKey = `${group.id}__${opt.id}`;
-                            const chosenSubIds = posChosenSubOptions[subKey] || [];
-                            return (
-                              <div key={opt.id} className="space-y-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPosChosenModifiers((prev) => {
-                                      const cur = prev[group.id] || [];
-                                      if (!group.multiSelect) {
-                                        return { ...prev, [group.id]: [opt.id] };
-                                      }
-                                      return {
-                                        ...prev,
-                                        [group.id]: cur.includes(opt.id)
-                                          ? cur.filter((x) => x !== opt.id)
-                                          : [...cur, opt.id],
-                                      };
-                                    });
-                                  }}
-                                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer ${
-                                    isChecked
-                                      ? "bg-orange-600/20 border-orange-500 text-white"
-                                      : "bg-slate-950 border-slate-800 text-slate-300"
-                                  }`}
-                                >
-                                  <span>
-                                    {isChecked ? "✓ " : ""}
-                                    {opt.name}
-                                  </span>
-                                  <span>
-                                    {opt.price > 0
-                                      ? `+${opt.price} ${settings?.currency}`
-                                      : "Dahil"}
-                                  </span>
-                                </button>
-
-                                {isChecked &&
-                                  opt.subOptions &&
-                                  opt.subOptions.length > 0 && (
-                                    <div className="ml-3 pl-2.5 border-l-2 border-orange-500 space-y-1 pt-1">
-                                      <div className="text-[10px] font-extrabold text-orange-300">
-                                        ↳ Bu Porsiyonun Ekstraları:
-                                      </div>
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {opt.subOptions.map((subOpt) => {
-                                          const subChecked = chosenSubIds.includes(
-                                            subOpt.id
-                                          );
-                                          return (
-                                            <button
-                                              key={subOpt.id}
-                                              type="button"
-                                              onClick={() => {
-                                                setPosChosenSubOptions((prev) => {
-                                                  const cur = prev[subKey] || [];
-                                                  return {
-                                                    ...prev,
-                                                    [subKey]: cur.includes(
-                                                      subOpt.id
-                                                    )
-                                                      ? cur.filter(
-                                                          (x) => x !== subOpt.id
-                                                        )
-                                                      : [...cur, subOpt.id],
-                                                  };
-                                                });
-                                              }}
-                                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
-                                                subChecked
-                                                  ? "bg-orange-600 text-white border-orange-500"
-                                                  : "bg-slate-950 text-slate-300 border-slate-700"
-                                              }`}
-                                            >
-                                              {subChecked ? "✓ " : "+ "}
-                                              {subOpt.name}
-                                              {subOpt.price > 0
-                                                ? ` (+${subOpt.price} ${settings?.currency})`
-                                                : ""}
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  )}
+                    {(posCustomizingItem.modifierGroups || []).map((group) => {
+                      const subHeader = extractSubProductHeader(
+                        group.productTag || group.name
+                      );
+                      return (
+                        <div
+                          key={group.id}
+                          className={`bg-slate-900 p-3 rounded-xl border space-y-2 ${
+                            subHeader.stepBadge
+                              ? "border-orange-500/60"
+                              : "border-slate-800"
+                          }`}
+                        >
+                          {subHeader.stepBadge ? (
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-orange-500/30">
+                              <div className="flex items-center gap-1.5">
+                                <span className="bg-orange-600 text-white text-[11px] font-black px-2.5 py-0.5 rounded-md">
+                                  📦 {subHeader.stepBadge}
+                                </span>
+                                <span className="text-xs font-extrabold text-orange-300">
+                                  {subHeader.cleanTitle || group.name}
+                                </span>
                               </div>
-                            );
-                          })}
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                🍽️ Porsiyon & Ekstra Seçimi
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-xs font-bold text-slate-200">
+                              {group.name}
+                            </div>
+                          )}
+                          <div className="space-y-1.5">
+                            {group.options.map((opt) => {
+                              const isChecked = (
+                                posChosenModifiers[group.id] || []
+                              ).includes(opt.id);
+                              const subKey = `${group.id}__${opt.id}`;
+                              const chosenSubIds =
+                                posChosenSubOptions[subKey] || [];
+                              const parsedOpt = splitOptionNameAndPortion(
+                                opt.name
+                              );
+                              return (
+                                <div key={opt.id} className="space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPosChosenModifiers((prev) => {
+                                        const cur = prev[group.id] || [];
+                                        if (!group.multiSelect) {
+                                          return {
+                                            ...prev,
+                                            [group.id]: [opt.id],
+                                          };
+                                        }
+                                        return {
+                                          ...prev,
+                                          [group.id]: cur.includes(opt.id)
+                                            ? cur.filter((x) => x !== opt.id)
+                                            : [...cur, opt.id],
+                                        };
+                                      });
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                                      isChecked
+                                        ? "bg-orange-600/20 border-orange-500 text-white"
+                                        : "bg-slate-950 border-slate-800 text-slate-300"
+                                    }`}
+                                  >
+                                    <div className="flex flex-wrap items-center gap-1.5 text-left">
+                                      <span>
+                                        {isChecked ? "✓ " : ""}
+                                        {parsedOpt.dishName ||
+                                          parsedOpt.portionLabel ||
+                                          opt.name}
+                                      </span>
+                                      {parsedOpt.dishName &&
+                                        parsedOpt.portionLabel && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                            🍽️ Porsiyon:{" "}
+                                            {parsedOpt.portionLabel}
+                                          </span>
+                                        )}
+                                    </div>
+                                    <span>
+                                      {opt.price > 0
+                                        ? `+${opt.price} ${settings?.currency}`
+                                        : "Dahil"}
+                                    </span>
+                                  </button>
+
+                                  {isChecked &&
+                                    opt.subOptions &&
+                                    opt.subOptions.length > 0 && (
+                                      <div className="ml-3 pl-2.5 py-2 pr-2 rounded-lg bg-emerald-950/30 border-l-4 border-emerald-500 space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-600 text-white">
+                                            ✨ EKSTRALAR (
+                                            {parsedOpt.portionLabel ||
+                                              parsedOpt.dishName ||
+                                              opt.name}
+                                            )
+                                          </span>
+                                          <span className="text-[10px] font-bold text-emerald-300">
+                                            İsteğe Bağlı
+                                          </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {opt.subOptions.map((subOpt) => {
+                                            const subChecked =
+                                              chosenSubIds.includes(subOpt.id);
+                                            return (
+                                              <button
+                                                key={subOpt.id}
+                                                type="button"
+                                                onClick={() => {
+                                                  setPosChosenSubOptions(
+                                                    (prev) => {
+                                                      const cur =
+                                                        prev[subKey] || [];
+                                                      return {
+                                                        ...prev,
+                                                        [subKey]: cur.includes(
+                                                          subOpt.id
+                                                        )
+                                                          ? cur.filter(
+                                                              (x) =>
+                                                                x !== subOpt.id
+                                                            )
+                                                          : [...cur, subOpt.id],
+                                                      };
+                                                    }
+                                                  );
+                                                }}
+                                                className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+                                                  subChecked
+                                                    ? "bg-emerald-600 text-white border-emerald-400"
+                                                    : "bg-slate-950 text-slate-300 border-slate-700"
+                                                }`}
+                                              >
+                                                {subChecked
+                                                  ? "✓ EKSTRA: "
+                                                  : "+ EKSTRA: "}
+                                                {subOpt.name}
+                                                {subOpt.price > 0
+                                                  ? ` (+${subOpt.price} ${settings?.currency})`
+                                                  : " (Ücretsiz)"}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                     <button
                       type="button"
@@ -2350,28 +2621,63 @@ export default function KitchenTabletPage() {
           </div>
 
           <div className="border-t-2 border-b-2 border-dashed border-black py-2 space-y-1.5">
-            {selectedOrderForPrint.items.map((item) => (
-              <div key={item.id}>
-                <div className="flex justify-between font-bold">
-                  <span>
-                    {item.quantity}x {item.name}
-                  </span>
-                  <span>
-                    {item.totalPrice.toFixed(2)} {settings?.currency}
-                  </span>
+            {selectedOrderForPrint.items.map((item) => {
+              const structuredBlocks = parseStructuredModifiers(
+                item.selectedModifiers
+              );
+              return (
+                <div key={item.id} className="space-y-0.5">
+                  <div className="flex justify-between font-bold">
+                    <span>
+                      {item.quantity}x {item.name}
+                    </span>
+                    <span>
+                      {item.totalPrice.toFixed(2)} {settings?.currency}
+                    </span>
+                  </div>
+                  {structuredBlocks.map((block, bIdx) => (
+                    <div
+                      key={bIdx}
+                      className="pl-2 text-[11px] border-l border-black ml-1 space-y-0.5"
+                    >
+                      {(block.stepBadge || block.productTitle) && (
+                        <div className="font-bold">
+                          {block.stepBadge ? `[${block.stepBadge}] ` : ""}
+                          {block.productTitle || ""}
+                        </div>
+                      )}
+                      {block.chosenDishName && (
+                        <div className="pl-1 font-bold">
+                          • Ürün: {block.chosenDishName}
+                        </div>
+                      )}
+                      {block.portionLabel && (
+                        <div className="pl-1">
+                          • Porsiyon: {block.portionLabel}
+                        </div>
+                      )}
+                      {block.extras.length > 0 && (
+                        <div className="pl-1">
+                          + Ekstra:{" "}
+                          {block.extras.map((e) => e.name).join(", ")}
+                        </div>
+                      )}
+                      {block.removals.length > 0 && (
+                        <div className="pl-1 font-bold">
+                          - Çıkarılacak:{" "}
+                          {block.removals.map((r) => r.name).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {item.itemNote && (
+                    <div className="pl-2 text-[11px] font-bold">
+                      * Not: {item.itemNote}
+                    </div>
+                  )}
                 </div>
-                {item.selectedModifiers.map((m, i) => (
-                  <div key={i} className="pl-2 text-[11px]">
-                    + {m.groupName}: {m.optionName}
-                  </div>
-                ))}
-                {item.itemNote && (
-                  <div className="pl-2 text-[11px] font-bold">
-                    * Not: {item.itemNote}
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {selectedOrderForPrint.orderNote && (
