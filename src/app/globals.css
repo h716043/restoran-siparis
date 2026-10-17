@@ -346,3 +346,31 @@ body {
     color: black !important;
   }
 }
+
+/* Mobil Dokunmatik Ergonomisi, iPhone Safe-Area & iOS Safari Auto-Zoom Engelleme */
+button,
+a,
+select,
+input,
+textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="password"],
+  input[type="date"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+

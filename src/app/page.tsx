@@ -1395,10 +1395,10 @@ function CustomerMenuContent() {
     activeUserOrders.length > 0 ? activeUserOrders[0] : guestActiveOrder;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-slate-50 pb-28 lg:pb-0">
       {/* Masa Çağrı / Hesap İste Bildirim Toast */}
       {tableCallToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-emerald-500/40 flex items-center gap-2.5 text-xs sm:text-sm font-bold">
+        <div className="fixed top-16 sm:top-auto sm:bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-emerald-500/40 flex items-center gap-2.5 text-xs sm:text-sm font-bold">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
           <span>{tableCallToast}</span>
         </div>
@@ -1709,98 +1709,102 @@ function CustomerMenuContent() {
             )}
           </div>
         </div>
+      </header>
 
-        {/* Kategori Sekmeleri & Arama Kutusu Tek Satırda */}
-        <div className="border-t border-slate-100 bg-white">
-          <div className="max-w-7xl mx-auto px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+      {/* 📌 AŞAĞI KAYDIRIRKEN ÜSTTE SABİT KALAN (STICKY) KATEGORİ, ARAMA & GÖRÜNÜM BARI */}
+      <div
+        id="sticky-category-bar"
+        className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-2xs"
+      >
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveCategory("all")}
+              className={`px-3 sm:px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer ${
+                activeCategory === "all"
+                  ? "bg-orange-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              Tüm Menü ({items.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveCategory("favorites")}
+              className={`px-3 sm:px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition flex items-center gap-1 cursor-pointer ${
+                activeCategory === "favorites"
+                  ? "bg-rose-600 text-white shadow-sm"
+                  : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+              }`}
+            >
+              <span>❤️ Favoriler ({favoriteIds.length})</span>
+            </button>
+            {categories.map((cat) => (
               <button
+                key={cat.id}
                 type="button"
-                onClick={() => setActiveCategory("all")}
-                className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition ${
-                  activeCategory === "all"
+                onClick={() => setActiveCategory(cat.id)}
+                className={`px-3 sm:px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer ${
+                  activeCategory === cat.id
                     ? "bg-orange-600 text-white shadow-sm"
                     : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
-                Tüm Menü ({items.length})
+                {cat.name}
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveCategory("favorites")}
-                className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition flex items-center gap-1 ${
-                  activeCategory === "favorites"
-                    ? "bg-rose-600 text-white shadow-sm"
-                    : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
-                }`}
-              >
-                <span>❤️ Favorilerim ({favoriteIds.length})</span>
-              </button>
-              {categories.map((cat) => (
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="relative flex-1 sm:w-52">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                id="mobile-menu-search-input"
+                type="search"
+                placeholder="Menüde lezzet ara..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+              {searchQuery && (
                 <button
-                  key={cat.id}
                   type="button"
-                  onClick={() => setActiveCategory(cat.id)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition ${
-                    activeCategory === cat.id
-                      ? "bg-orange-600 text-white shadow-sm"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* 🖼️ 3 Farklı Menü Görünüm Modu Seçici */}
+            <div
+              className="inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shrink-0"
+              title="Menü Görünüm Düzeni Seçin"
+            >
+              {[
+                { id: "showcase" as const, label: "📸 Vitrin" },
+                { id: "grid" as const, label: "🍱 Kart" },
+                { id: "compact" as const, label: "📋 Liste" },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => handleSelectMenuLayout(opt.id)}
+                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer ${
+                    menuLayout === opt.id
+                      ? "bg-slate-900 text-white shadow-2xs"
+                      : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  {cat.name}
+                  {opt.label}
                 </button>
               ))}
             </div>
-
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <div className="relative flex-1 sm:w-52">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Menüde lezzet ara..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-700"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-
-              {/* 🖼️ 3 Farklı Menü Görünüm Modu Seçici */}
-              <div
-                className="inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shrink-0"
-                title="Menü Görünüm Düzeni Seçin"
-              >
-                {[
-                  { id: "showcase" as const, label: "📸 Vitrin" },
-                  { id: "grid" as const, label: "🍱 Kart" },
-                  { id: "compact" as const, label: "📋 Liste" },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => handleSelectMenuLayout(opt.id)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer ${
-                      menuLayout === opt.id
-                        ? "bg-slate-900 text-white shadow-2xs"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* ✨ VİTRİN ÜSTÜ HIZLI RESTORAN BİLGİ & CANLI WHATSAPP DESTEK BANDI */}
       {settings?.showRestaurantInfoBar !== false && (
@@ -1850,6 +1854,77 @@ function CustomerMenuContent() {
           </div>
         </div>
       )}
+
+      {/* 📍 MOBİLDE EN ÜSTTE KOMPAKT "MAHALLE (BÖLGE) SEÇİMİ & TEK TIKLA KUPON BARI" */}
+      <div
+        id="mobile-zone-coupons-bar"
+        className="lg:hidden max-w-7xl mx-auto w-full px-4 mt-2.5 space-y-2"
+      >
+        {orderType === "delivery" && activeZones.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-slate-800">
+                <MapPin className="w-3.5 h-3.5 text-orange-600" />
+                Teslimat Mahalleniz:
+              </span>
+              {selectedZone && (
+                <span className="text-[10px] font-bold text-slate-500">
+                  Min: <strong className="text-slate-800">{selectedZone.minAmount} {settings?.currency}</strong> • Kurye:{" "}
+                  <strong className="text-emerald-700">
+                    {selectedZone.deliveryFee === 0
+                      ? "Ücretsiz"
+                      : `${selectedZone.deliveryFee} ${settings?.currency}`}
+                  </strong>
+                </span>
+              )}
+            </div>
+            <select
+              value={selectedZoneId}
+              onChange={(e) => setSelectedZoneId(e.target.value)}
+              className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+            >
+              {activeZones.map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  📍 {zone.name} (Min: {zone.minAmount} {settings?.currency} • ~{zone.estimatedMinutes} dk)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {activeCoupons.length > 0 && (
+          <div className="bg-orange-50/70 border border-orange-200/80 rounded-2xl px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-orange-900 whitespace-nowrap shrink-0">
+              <Ticket className="w-3.5 h-3.5 text-orange-600" />
+              Kuponlar:
+            </span>
+            {activeCoupons.map((cp) => {
+              const isApplied = appliedCoupon?.code === cp.code;
+              return (
+                <button
+                  key={cp.id}
+                  type="button"
+                  onClick={() => handleApplyCouponCode(cp.code)}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-extrabold whitespace-nowrap transition shrink-0 cursor-pointer ${
+                    isApplied
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs"
+                      : "bg-white text-slate-800 border-orange-300 hover:border-orange-500"
+                  }`}
+                >
+                  {isApplied ? `✓ ${cp.code}` : `🏷️ ${cp.code}`}{" "}
+                  <span className="opacity-85 font-semibold">
+                    (
+                    {cp.discountType === "percentage"
+                      ? `%${cp.discountValue}`
+                      : `${cp.discountValue} ${settings?.currency}`}
+                    )
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* ⏱️ SAATLİK HAPPY HOUR / ÖĞLE MENÜSÜ OTOMATİK İNDİRİM BARI */}
       {settings?.happyHourConfig?.enabled && (
@@ -3003,43 +3078,186 @@ function CustomerMenuContent() {
         </footer>
       )}
 
-      {/* Mobil Alt Sepet Çubuğu */}
-      {cart.length > 0 && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 p-3 bg-white border-t border-slate-200 shadow-2xl z-40">
-          <button
-            onClick={() => setMobileCartOpen(true)}
-            className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3.5 px-5 rounded-xl flex items-center justify-between shadow-lg shadow-orange-600/30"
-          >
-            <div className="flex items-center gap-2">
-              <span className="bg-white/20 px-2.5 py-0.5 rounded-lg text-sm">
-                {cart.reduce((s, i) => s + i.quantity, 0)}
+      {/* 📱 MOBİL ALT SABİT UYGULAMA MENÜSÜ (BOTTOM NAVIGATION BAR + QR GARSON ÇUBUĞU + SEPET ONAY BARI) */}
+      {!isEmbed && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-8px_30px_rgba(0,0,0,0.1)] pb-safe">
+          {/* 🔔 QR Masa Müşterileri İçin Yüzen Hızlı Garson & Hesap Çubuğu */}
+          {orderType === "dine_in" && (
+            <div className="px-3 pt-2 pb-1.5 bg-slate-900 text-white flex items-center justify-between gap-1.5 border-b border-slate-800">
+              <span className="text-[11px] font-extrabold text-orange-400 truncate">
+                🍽️ {tableNumber ? `Masa ${tableNumber}` : "Masa Seçin"}
               </span>
-              <span>Sepeti Görüntüle & Onayla</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={tableCallSending}
+                  onClick={() => handleSendTableCall("waiter")}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <BellRing className="w-3 h-3" />
+                  <span>Garson</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={tableCallSending}
+                  onClick={() => handleSendTableCall("bill_cash")}
+                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <Banknote className="w-3 h-3" />
+                  <span>Nakit Hesap</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={tableCallSending}
+                  onClick={() => handleSendTableCall("bill_card")}
+                  className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <CreditCard className="w-3 h-3" />
+                  <span>Kart Hesap</span>
+                </button>
+              </div>
             </div>
-            <span className="text-base">
-              {totalAmount.toFixed(2)} {settings?.currency}
-            </span>
-          </button>
+          )}
+
+          {/* 🛒 Sepet Doluysa Üstte Çıkan Canlı Sepeti Onayla Çubuğu */}
+          {cart.length > 0 && (
+            <div className="px-3 pt-2 pb-1">
+              <button
+                type="button"
+                onClick={() => setMobileCartOpen(true)}
+                className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white font-extrabold py-2.5 px-4 rounded-xl flex items-center justify-between shadow-md shadow-orange-600/25 cursor-pointer"
+              >
+                <div className="flex items-center gap-2 text-xs sm:text-sm">
+                  <span className="bg-white/20 px-2 py-0.5 rounded-lg font-black">
+                    {cart.reduce((s, i) => s + i.quantity, 0)} Ürün
+                  </span>
+                  <span>Sepeti Görüntüle &amp; Onayla →</span>
+                </div>
+                <span className="text-sm sm:text-base font-black">
+                  {totalAmount.toFixed(2)} {settings?.currency}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* 📱 5 Sekmeli Mobil Uygulama Alt Menüsü */}
+          <nav className="grid grid-cols-5 px-1.5 pt-1 pb-1 text-[10px] font-extrabold text-slate-600">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCategory("all");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className={`flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+                activeCategory === "all" && !mobileCartOpen && !accountModalOpen
+                  ? "text-orange-600"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Utensils className="w-4 h-4 mb-0.5" />
+              <span>Menü</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById("mobile-menu-search-input");
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  setTimeout(() => (el as HTMLInputElement).focus(), 250);
+                }
+              }}
+              className="flex flex-col items-center justify-center py-1 rounded-xl text-slate-600 hover:text-orange-600 transition cursor-pointer"
+            >
+              <Search className="w-4 h-4 mb-0.5" />
+              <span>Ara</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById("mobile-zone-coupons-bar");
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                } else {
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }
+              }}
+              className="relative flex flex-col items-center justify-center py-1 rounded-xl text-slate-600 hover:text-orange-600 transition cursor-pointer"
+            >
+              <Ticket className="w-4 h-4 mb-0.5 text-orange-500" />
+              <span>Fırsatlar</span>
+              {activeCoupons.length > 0 && (
+                <span className="absolute top-0.5 right-3 w-4 h-4 rounded-full bg-orange-500 text-white text-[9px] font-black flex items-center justify-center">
+                  {activeCoupons.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUser) {
+                  setAccountTab("active_orders");
+                  setAccountModalOpen(true);
+                } else if (guestActiveOrder) {
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                } else {
+                  setAuthStep("phone");
+                  setAuthError("");
+                  setAuthModalOpen(true);
+                }
+              }}
+              className="relative flex flex-col items-center justify-center py-1 rounded-xl text-slate-600 hover:text-orange-600 transition cursor-pointer"
+            >
+              <PackageCheck className="w-4 h-4 mb-0.5" />
+              <span>{currentUser ? "Siparişim" : "Takip/Üye"}</span>
+              {(activeUserOrders.length > 0 || guestActiveOrder) && (
+                <span className="absolute top-0.5 right-2.5 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileCartOpen(true)}
+              className={`relative flex flex-col items-center justify-center py-1 rounded-xl transition cursor-pointer ${
+                cart.length > 0
+                  ? "text-orange-600 font-black"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4 mb-0.5" />
+              <span>Sepetim</span>
+              {cart.length > 0 && (
+                <span className="absolute top-0 right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-orange-600 text-white text-[9px] font-black flex items-center justify-center">
+                  {cart.reduce((s, i) => s + i.quantity, 0)}
+                </span>
+              )}
+            </button>
+          </nav>
         </div>
       )}
 
       {/* Mobil Sepet Drawer Modal */}
       {mobileCartOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden bg-black/60 flex items-end justify-center">
-          <div className="bg-white w-full max-h-[90vh] rounded-t-3xl flex flex-col overflow-hidden">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShoppingBag className="w-5 h-5 text-orange-400" />
-                <h2 className="font-bold">Sipariş Sepetiniz</h2>
+        <div className="fixed inset-0 z-50 lg:hidden bg-black/60 backdrop-blur-xs flex items-end justify-center">
+          <div className="bg-white w-full max-h-[90dvh] rounded-t-3xl flex flex-col overflow-hidden shadow-2xl">
+            <div className="bg-slate-900 pt-2.5 px-4 pb-3.5 text-white">
+              <div className="w-12 h-1.5 bg-slate-600 rounded-full mx-auto mb-2.5" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShoppingBag className="w-5 h-5 text-orange-400" />
+                  <h2 className="font-bold">Sipariş Sepetiniz</h2>
+                </div>
+                <button
+                  onClick={() => setMobileCartOpen(false)}
+                  className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setMobileCartOpen(false)}
-                className="p-1 rounded-lg bg-slate-800 text-slate-300"
-              >
-                <X className="w-5 h-5" />
-              </button>
             </div>
-            <div className="overflow-y-auto flex-1">
+            <div className="overflow-y-auto flex-1 pb-safe">
               {renderCartAndCheckout()}
             </div>
           </div>
@@ -3049,28 +3267,31 @@ function CustomerMenuContent() {
       {/* ONLINE MASA REZERVASYONU MODALI (GLORIAFOOD TARZI) */}
       {reservationModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full max-w-xl rounded-t-3xl sm:rounded-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-orange-600 flex items-center justify-center text-white font-bold shadow">
-                  <CalendarDays className="w-6 h-6" />
+          <div className="bg-white w-full max-w-xl rounded-t-3xl sm:rounded-3xl max-h-[90dvh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
+            <div className="bg-slate-900 text-white pt-2.5 sm:pt-5 px-5 pb-4">
+              <div className="w-12 h-1.5 bg-slate-600 rounded-full mx-auto mb-2.5 sm:hidden" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-orange-600 flex items-center justify-center text-white font-bold shadow">
+                    <CalendarDays className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base sm:text-lg">
+                      Online Masa Rezervasyonu
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Tarih, saat ve kişi sayısı seçin • WhatsApp ile anında onay
+                      alın
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-extrabold text-base sm:text-lg">
-                    Online Masa Rezervasyonu
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Tarih, saat ve kişi sayısı seçin • WhatsApp ile anında onay
-                    alın
-                  </p>
-                </div>
+                <button
+                  onClick={() => setReservationModalOpen(false)}
+                  className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setReservationModalOpen(false)}
-                className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300"
-              >
-                <X className="w-5 h-5" />
-              </button>
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 space-y-5">
@@ -3253,42 +3474,45 @@ function CustomerMenuContent() {
       {/* MÜŞTERİ HESABIM MODALI */}
       {accountModalOpen && currentUser && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full max-w-2xl rounded-t-3xl sm:rounded-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-bold">
-                  <UserCheck className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-extrabold text-base sm:text-lg">
-                      {currentUser.name}
-                    </h3>
-                    {isLoyaltyEnabled && (
-                      <span className="inline-flex items-center gap-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-extrabold px-2.5 py-0.5 rounded-full">
-                        🎁 Cüzdan: {(currentUser.loyaltyPoints || 0).toFixed(2)}{" "}
-                        {settings?.currency}
-                      </span>
-                    )}
+          <div className="bg-white w-full max-w-2xl rounded-t-3xl sm:rounded-3xl max-h-[90dvh] flex flex-col overflow-hidden shadow-2xl border border-slate-200">
+            <div className="bg-slate-900 text-white pt-2.5 sm:pt-5 px-5 pb-4">
+              <div className="w-12 h-1.5 bg-slate-600 rounded-full mx-auto mb-2.5 sm:hidden" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-bold">
+                    <UserCheck className="w-6 h-6" />
                   </div>
-                  <p className="text-xs text-emerald-400 font-medium">
-                    WhatsApp Onaylı Üye • +{currentUser.phone}
-                  </p>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-extrabold text-base sm:text-lg">
+                        {currentUser.name}
+                      </h3>
+                      {isLoyaltyEnabled && (
+                        <span className="inline-flex items-center gap-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-extrabold px-2.5 py-0.5 rounded-full">
+                          🎁 Cüzdan: {(currentUser.loyaltyPoints || 0).toFixed(2)}{" "}
+                          {settings?.currency}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-emerald-400 font-medium">
+                      WhatsApp Onaylı Üye • +{currentUser.phone}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleLogout}
-                  className="inline-flex items-center gap-1 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-300 px-3 py-1.5 rounded-xl font-semibold transition"
-                >
-                  <LogOut className="w-3.5 h-3.5" /> Çıkış
-                </button>
-                <button
-                  onClick={() => setAccountModalOpen(false)}
-                  className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleLogout}
+                    className="inline-flex items-center gap-1 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-300 px-3 py-1.5 rounded-xl font-semibold transition"
+                  >
+                    <LogOut className="w-3.5 h-3.5" /> Çıkış
+                  </button>
+                  <button
+                    onClick={() => setAccountModalOpen(false)}
+                    className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -3927,8 +4151,9 @@ function CustomerMenuContent() {
       {/* Ürün Opsiyon & Ekstra Seçim Modalı */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[90dvh] flex flex-col overflow-hidden shadow-2xl">
             <div className="relative h-48 bg-slate-100">
+              <div className="w-12 h-1.5 bg-white/80 rounded-full mx-auto absolute top-2.5 left-1/2 -translate-x-1/2 z-10 shadow sm:hidden" />
               {selectedItem.imageUrl && (
                 <img
                   src={selectedItem.imageUrl}

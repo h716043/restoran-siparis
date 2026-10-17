@@ -51,8 +51,53 @@ export default function CourierPage() {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [courierAlertMsg, setCourierAlertMsg] = useState<string>("");
   const [showSettlementSlip, setShowSettlementSlip] = useState<boolean>(false);
+  const [wakeLockEnabled, setWakeLockEnabled] = useState<boolean>(true);
+  const [wakeLockActive, setWakeLockActive] = useState<boolean>(false);
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const knownDeliveryIdsRef = useRef<Set<string>>(new Set());
   const initialLoadedRef = useRef<boolean>(false);
+
+  const requestCourierWakeLock = useCallback(async () => {
+    if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+    try {
+      const wl = await (
+        navigator as Navigator & {
+          wakeLock: {
+            request: (type: "screen") => Promise<{ release: () => Promise<void> }>;
+          };
+        }
+      ).wakeLock.request("screen");
+      wakeLockRef.current = wl;
+      setWakeLockActive(true);
+    } catch {
+      setWakeLockActive(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!savedPin || !wakeLockEnabled) {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+      setWakeLockActive(false);
+      return;
+    }
+    requestCourierWakeLock();
+    const onVis = () => {
+      if (document.visibilityState === "visible" && wakeLockEnabled) {
+        requestCourierWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [savedPin, wakeLockEnabled, requestCourierWakeLock]);
 
   const playCourierAlertSound = useCallback(() => {
     try {
@@ -435,7 +480,23 @@ export default function CourierPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setWakeLockEnabled((prev) => !prev)}
+                className={`px-2.5 py-2 rounded-xl border text-xs font-extrabold flex items-center gap-1 cursor-pointer transition ${
+                  wakeLockEnabled
+                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                    : "bg-slate-800 border-slate-700 text-slate-400"
+                }`}
+                title={
+                  wakeLockActive
+                    ? "Ekran Uyanık Tutma Aktif (Sürüşte Ekran Kapanmaz)"
+                    : "Ekran Uyanık Tutma (Wake Lock)"
+                }
+              >
+                <span>{wakeLockEnabled ? "🔋 Ekran Açık" : "🌙 Uyku"}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowSettlementSlip(true)}

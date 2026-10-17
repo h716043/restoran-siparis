@@ -58,8 +58,11 @@ export default function WaiterTerminalPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [waiterName, setWaiterName] = useState<string>("Garson");
 
-  // Sound notification state
+  // Sound notification & Screen Wake Lock state
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [wakeLockEnabled, setWakeLockEnabled] = useState<boolean>(true);
+  const [wakeLockActive, setWakeLockActive] = useState<boolean>(false);
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const prevAlertSignatureRef = useRef<string>("");
 
   // Cart & Modifier Modal for Waiter POS
@@ -194,6 +197,59 @@ export default function WaiterTerminalPage() {
       localStorage.setItem("restoran_waiter_sound", next ? "1" : "0");
     }
     showToast(next ? "🔊 Sesli bildirimler açıldı" : "🔇 Sesli bildirimler kapatıldı");
+  };
+
+  // 🔋 Mobil Garson Telefon Ekranını Uyanık Tutma (Screen Wake Lock API)
+  const requestScreenWakeLock = useCallback(async () => {
+    if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+    try {
+      const wl = await (
+        navigator as Navigator & {
+          wakeLock: {
+            request: (type: "screen") => Promise<{ release: () => Promise<void> }>;
+          };
+        }
+      ).wakeLock.request("screen");
+      wakeLockRef.current = wl;
+      setWakeLockActive(true);
+    } catch {
+      setWakeLockActive(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authenticated || !wakeLockEnabled) {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+      setWakeLockActive(false);
+      return;
+    }
+    requestScreenWakeLock();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && wakeLockEnabled) {
+        requestScreenWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [authenticated, wakeLockEnabled, requestScreenWakeLock]);
+
+  const toggleWakeLock = () => {
+    const next = !wakeLockEnabled;
+    setWakeLockEnabled(next);
+    showToast(
+      next
+        ? "🔋 Ekran uyanık tutma (Wake Lock) aktif edildi"
+        : "🌙 Ekran otomatik kapanma normal moda alındı"
+    );
   };
 
   const handlePinLogin = async (e: React.FormEvent) => {
@@ -1029,6 +1085,22 @@ export default function WaiterTerminalPage() {
               className="w-24 sm:w-28 px-2.5 py-1.5 rounded-xl bg-stone-950 border border-stone-800 text-[11px] font-bold text-amber-300 focus:outline-none focus:border-amber-500"
             />
           )}
+          <button
+            type="button"
+            onClick={toggleWakeLock}
+            title={
+              wakeLockActive
+                ? "Ekran Uyanık Tutma Aktif (Telefon Ekranı Kapanmaz)"
+                : "Ekran Uyanık Tutma (Wake Lock)"
+            }
+            className={`px-2 py-1.5 rounded-xl text-[11px] font-bold border transition cursor-pointer ${
+              wakeLockEnabled
+                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                : "bg-stone-800 border-stone-700 text-stone-400"
+            }`}
+          >
+            {wakeLockEnabled ? "🔋 Açık" : "🌙 Uyku"}
+          </button>
           <button
             type="button"
             onClick={toggleSound}
@@ -2685,7 +2757,7 @@ export default function WaiterTerminalPage() {
       )}
 
       {/* Bottom 4-Tab Mobile Navigation */}
-      <nav className="fixed bottom-0 inset-x-0 z-40 bg-stone-900/95 backdrop-blur border-t border-stone-800 grid grid-cols-4 p-2 gap-1 max-w-3xl mx-auto">
+      <nav className="fixed bottom-0 inset-x-0 z-40 bg-stone-900/95 backdrop-blur border-t border-stone-800 grid grid-cols-4 p-2 pb-safe gap-1 max-w-3xl mx-auto">
         <button
           type="button"
           onClick={() => setActiveTab("tables")}
