@@ -101,6 +101,26 @@ export async function PATCH(
       return NextResponse.json({ order: appended });
     }
 
+    // Açık masa adisyonundan kalem iptali veya adet azaltma
+    if (body.action === "remove_order_item") {
+      const { removeItemFromOrder } = await import("@/lib/db");
+      const { pushCatalogToCloud } = await import("@/lib/cloud-sync");
+      const updatedOrder = removeItemFromOrder(
+        id,
+        String(body.itemId || ""),
+        Boolean(body.decrementOnly)
+      );
+      if (!updatedOrder) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      await syncActivityWithCloud();
+      await pushCatalogToCloud();
+      return NextResponse.json({ order: updatedOrder });
+    }
+
     const updated = updateOrderStatus(
       id,
       body.status,

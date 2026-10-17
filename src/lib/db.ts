@@ -1405,12 +1405,16 @@ export function appendItemsToOrder(
       : extraNote.trim()
     : existing.orderNote || null;
 
+  // Eğer sipariş 'ready' durumundaysa ve yeni ürün eklendiyse tekrar mutfak hazırlığına ('accepted') çek
+  const nextStatus = existing.status === "ready" ? "accepted" : existing.status;
+
   const updatedAt = new Date().toISOString();
   db.prepare(`
     UPDATE orders
-    SET itemsJson = ?, subtotal = ?, totalAmount = ?, orderNote = ?, updatedAt = ?
+    SET status = ?, itemsJson = ?, subtotal = ?, totalAmount = ?, orderNote = ?, updatedAt = ?
     WHERE id = ?
   `).run(
+    nextStatus,
     JSON.stringify(mergedItems),
     nextSubtotal,
     nextTotal,
@@ -1420,6 +1424,78 @@ export function appendItemsToOrder(
   );
 
   adjustMenuStockForItems(newItems, "decrement");
+
+  return getOrderById(orderId);
+}
+
+/** Açık adisyondaki bir ürünü iptal eder veya adedini 1 azaltır (stok iadesi ile) */
+export function removeItemFromOrder(
+  orderId: string,
+  itemId: string,
+  decrementOnly = false
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+
+  const targetItem = existing.items.find((i) => i.id === itemId);
+  if (!targetItem) return existing;
+
+  let nextItems: Order["items"] = [];
+  let restoredQty = targetItem.quantity;
+
+  if (decrementOnly && targetItem.quantity > 1) {
+    restoredQty = 1;
+    const newQty = targetItem.quantity - 1;
+    nextItems = existing.items.map((i) =>
+      i.id === itemId
+        ? {
+            ...i,
+            quantity: newQty,
+            totalPrice: Number((i.unitPrice * newQty).toFixed(2)),
+          }
+        : i
+    );
+  } else {
+    nextItems = existing.items.filter((i) => i.id !== itemId);
+  }
+
+  adjustMenuStockForItems(
+    [{ ...targetItem, quantity: restoredQty }],
+    "restore"
+  );
+
+  const updatedAt = new Date().toISOString();
+
+  if (nextItems.length === 0) {
+    db.prepare(`
+      UPDATE orders
+      SET status = 'rejected', itemsJson = '[]', subtotal = 0, totalAmount = 0, rejectReason = 'Garson tarafından kalemler iptal edildi', updatedAt = ?
+      WHERE id = ?
+    `).run(updatedAt, orderId);
+    return getOrderById(orderId);
+  }
+
+  const nextSubtotal = nextItems.reduce(
+    (sum, i) => sum + Number(i.totalPrice || 0),
+    0
+  );
+  const nextTotal = Math.max(
+    0,
+    nextSubtotal - (existing.discountAmount || 0) + (existing.deliveryFee || 0)
+  );
+
+  db.prepare(`
+    UPDATE orders
+    SET itemsJson = ?, subtotal = ?, totalAmount = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(
+    JSON.stringify(nextItems),
+    nextSubtotal,
+    nextTotal,
+    updatedAt,
+    orderId
+  );
 
   return getOrderById(orderId);
 }
