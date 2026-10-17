@@ -3,8 +3,10 @@ import { getOrders, getSettings, updateSettings } from "@/lib/db";
 import { syncActivityWithCloud } from "@/lib/cloud-sync";
 import {
   DEFAULT_SAMBAPOS_CONFIG,
+  fetchSambaPosCatalog,
   getResolvedPosConfig,
   sendOrderToSambaPos,
+  syncSiteMenuToSambaPos,
   testSambaPosConnection,
 } from "@/lib/sambapos";
 
@@ -47,7 +49,9 @@ export async function POST(req: NextRequest) {
         ...(body.sambaPos || {}),
       };
       const nextPosConfig = {
-        activeProvider: nextSamba.enabled ? ("sambapos" as const) : ("none" as const),
+        activeProvider: nextSamba.enabled
+          ? ("sambapos" as const)
+          : ("none" as const),
         sambaPos: nextSamba,
       };
       const updatedSettings = updateSettings({
@@ -71,7 +75,76 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result);
     }
 
-    // 3) Tek Bir Siparişi Manuel Olarak SambaPOS'a Aktarma (veya Tekrar Gönderme)
+    // 3) SambaPOS Mevcut Ürün Kataloğunu & Site Ürün Eşleşme Durumunu Çekme
+    if (body.action === "fetch_samba_catalog") {
+      const catalog = await fetchSambaPosCatalog(
+        body.sambaPos || body.sambaPosConfig
+      );
+      return NextResponse.json(catalog);
+    }
+
+    // 4) Sitedeki Ürünleri (Tümünü veya Seçileni) SambaPOS'a Aktarma & Eşitleme
+    if (body.action === "sync_menu_to_samba") {
+      if (role !== "admin") {
+        return NextResponse.json(
+          { error: "Sadece yönetici menü aktarımı yapabilir" },
+          { status: 403 }
+        );
+      }
+      const result = await syncSiteMenuToSambaPos({
+        itemIds: Array.isArray(body.itemIds) ? body.itemIds : undefined,
+        updatePrices: body.updatePrices !== false,
+        syncScreenMenu: body.syncScreenMenu !== false,
+        customConfig: body.sambaPos || body.sambaPosConfig,
+      });
+      return NextResponse.json(result);
+    }
+
+    // 5) Tekil Ürün Eşleştirmesini (Site Ürünü -> SambaPOS Ürün Adı) Kaydetme
+    if (body.action === "save_product_mapping") {
+      if (role !== "admin") {
+        return NextResponse.json(
+          { error: "Sadece yönetici ürün eşleştirmesi değiştirebilir" },
+          { status: 403 }
+        );
+      }
+      const currentSamba = {
+        ...DEFAULT_SAMBAPOS_CONFIG,
+        ...(settings.posIntegrationConfig?.sambaPos || {}),
+      };
+      const nextMappings: Record<string, string> = {
+        ...(currentSamba.productMappings || {}),
+        ...(body.productMappings || {}),
+      };
+      if (body.siteItemId !== undefined) {
+        const val = String(body.sambaProductName || "").trim();
+        if (val) {
+          nextMappings[String(body.siteItemId)] = val;
+        } else {
+          delete nextMappings[String(body.siteItemId)];
+        }
+      }
+      const nextSamba = {
+        ...currentSamba,
+        productMappings: nextMappings,
+      };
+      const updatedSettings = updateSettings({
+        ...settings,
+        posIntegrationConfig: {
+          activeProvider: nextSamba.enabled ? "sambapos" : "none",
+          sambaPos: nextSamba,
+        },
+      });
+      const catalog = await fetchSambaPosCatalog(nextSamba);
+      return NextResponse.json({
+        ok: true,
+        message: "✅ Ürün eşleştirmesi kaydedildi.",
+        posIntegrationConfig: updatedSettings.posIntegrationConfig,
+        catalog,
+      });
+    }
+
+    // 6) Tek Bir Siparişi Manuel Olarak SambaPOS'a Aktarma (veya Tekrar Gönderme)
     if (body.action === "sync_order") {
       const orderId = String(body.orderId || "").trim();
       if (!orderId) {
@@ -87,7 +160,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(res);
     }
 
-    // 4) Aktarılmamış Tüm Siparişleri Toplu Olarak SambaPOS'a Aktarma
+    // 7) Aktarılmamış Tüm Siparişleri Toplu Olarak SambaPOS'a Aktarma
     if (body.action === "sync_all_pending") {
       const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
       const activeOrders = getOrders().filter(

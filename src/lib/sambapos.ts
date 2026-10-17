@@ -11,17 +11,25 @@
  *      durumlarını Türkçe SambaPOS V5 kurallarına uygun şekilde oluşturur ve ekranı canlı yeniler.
  */
 
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { execFileSync } from "child_process";
 import {
   Order,
+  OrderItem,
   PosIntegrationConfig,
   PosOrderSyncInfo,
   SambaPosConfig,
 } from "@/types";
 import {
+  getCategories,
+  getMenuItems,
   getOrderById,
   getOrders,
   getSettings,
   updateOrderPosSyncInfo,
+  updateSettings,
 } from "@/lib/db";
 
 export const DEFAULT_SAMBAPOS_CONFIG: SambaPosConfig = {
@@ -42,7 +50,24 @@ export const DEFAULT_SAMBAPOS_CONFIG: SambaPosConfig = {
   defaultOrderTagName: "Default",
   fallbackMenuItemName: "Online Sipariş Ürünü",
   autoCreateCustomerEntity: true,
+  productMappings: {},
+  syncToScreenMenu: true,
 };
+
+export function resolveMappedSambaProductName(
+  item: Pick<OrderItem, "menuItemId" | "name">,
+  cfg: SambaPosConfig
+): string {
+  const mappings = cfg.productMappings || {};
+  if (item.menuItemId && mappings[item.menuItemId]?.trim()) {
+    return mappings[item.menuItemId].trim();
+  }
+  const cleanName = (item.name || "").trim();
+  if (cleanName && mappings[cleanName]?.trim()) {
+    return mappings[cleanName].trim();
+  }
+  return cleanName;
+}
 
 export function getResolvedPosConfig(): PosIntegrationConfig {
   const settings = getSettings();
@@ -54,6 +79,10 @@ export function getResolvedPosConfig(): PosIntegrationConfig {
     sambaPos: {
       ...DEFAULT_SAMBAPOS_CONFIG,
       ...(saved?.sambaPos || {}),
+      productMappings: {
+        ...(DEFAULT_SAMBAPOS_CONFIG.productMappings || {}),
+        ...(saved?.sambaPos?.productMappings || {}),
+      },
     },
   };
 }
@@ -198,14 +227,40 @@ async function ensureSambaProductsExist(
   const gStr = (val: string) => JSON.stringify(String(val ?? ""));
   let createdAny = false;
 
-  const itemsToEnsure: Array<{ name: string; price: number }> = [];
+  const categories = getCategories();
+  const menuItems = getMenuItems();
+  const catMap = new Map(categories.map((c) => [c.id, c.name]));
+  const itemGroupMap = new Map(
+    menuItems.map((m) => [
+      m.id,
+      catMap.get(m.categoryId) || "Online Sipariş",
+    ])
+  );
+  const itemNameGroupMap = new Map(
+    menuItems.map((m) => [
+      m.name.trim().toLowerCase(),
+      catMap.get(m.categoryId) || "Online Sipariş",
+    ])
+  );
+
+  const itemsToEnsure: Array<{
+    name: string;
+    price: number;
+    groupCode: string;
+  }> = [];
   for (const item of order.items) {
     const unitPrice = item.isComplimentary
       ? 0
       : Number(item.unitPrice || item.basePrice || 0);
+    const resolvedName = resolveMappedSambaProductName(item, cfg);
+    const groupCode =
+      (item.menuItemId && itemGroupMap.get(item.menuItemId)) ||
+      itemNameGroupMap.get(item.name.trim().toLowerCase()) ||
+      "Online Sipariş";
     itemsToEnsure.push({
-      name: item.name.trim(),
+      name: resolvedName,
       price: Number(unitPrice.toFixed(2)),
+      groupCode,
     });
   }
 
@@ -213,6 +268,7 @@ async function ensureSambaProductsExist(
     itemsToEnsure.push({
       name: "Paket Servis Ücreti",
       price: Number(order.deliveryFee.toFixed(2)),
+      groupCode: "Online Sipariş",
     });
   }
 
@@ -220,6 +276,7 @@ async function ensureSambaProductsExist(
     itemsToEnsure.push({
       name: cfg.fallbackMenuItemName.trim(),
       price: 0,
+      groupCode: "Online Sipariş",
     });
   }
 
@@ -245,7 +302,7 @@ async function ensureSambaProductsExist(
           `mutation {
             addProduct(
               name: ${gStr(prod.name)},
-              groupCode: "Online Sipariş",
+              groupCode: ${gStr(prod.groupCode || "Online Sipariş")},
               portions: [
                 { name: "Normal", price: ${prod.price}, multiplier: 1 }
               ]
@@ -548,12 +605,13 @@ export function buildSambaPosAddTicketMutation(
   const fallbackName = (cfg.fallbackMenuItemName || "").trim();
 
   const ordersGraphQL = order.items.map((item) => {
+    const mappedItemName = resolveMappedSambaProductName(item, cfg);
     const targetItemName =
-      useFallbackItem && fallbackName ? fallbackName : item.name.trim();
+      useFallbackItem && fallbackName ? fallbackName : mappedItemName;
 
     const tagEntries: string[] = [];
 
-    if (useFallbackItem && fallbackName && item.name !== fallbackName) {
+    if (targetItemName.toLowerCase() !== item.name.trim().toLowerCase()) {
       tagEntries.push(
         `{ tagName: ${gStr(defaultTagGroup)}, tag: ${gStr(`Ürün: ${item.name}`)}, price: 0, quantity: 1 }`
       );
@@ -970,3 +1028,568 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
     isAutoSyncRunning = false;
   }
 }
+
+export interface SambaProductSummary {
+  id: number;
+  name: string;
+  groupCode: string;
+  price: number;
+  portions: Array<{ id: number; name: string; price: number }>;
+}
+
+export interface SiteSambaMenuComparisonItem {
+  siteItemId: string;
+  siteItemName: string;
+  categoryId: string;
+  categoryName: string;
+  sitePrice: number;
+  available: boolean;
+  mappedSambaName: string;
+  targetSambaName: string;
+  status: "matched" | "price_diff" | "missing";
+  sambaProductId: number | null;
+  sambaGroupCode: string | null;
+  sambaPrice: number | null;
+}
+
+export interface SambaPosCatalogResponse {
+  ok: boolean;
+  message?: string;
+  sambaProducts: SambaProductSummary[];
+  items: SiteSambaMenuComparisonItem[];
+  stats: {
+    totalSiteItems: number;
+    matchedCount: number;
+    priceDiffCount: number;
+    missingCount: number;
+    totalSambaProducts: number;
+  };
+}
+
+/**
+ * SambaPOS'taki mevcut tüm ürünleri (`getProducts`) çeker ve sitedeki menü ürünleriyle
+ * birebir karşılaştırarak eşleşme / fiyat farkı / eksiklik durumunu döndürür.
+ */
+export async function fetchSambaPosCatalog(
+  customCfg?: Partial<SambaPosConfig>
+): Promise<SambaPosCatalogResponse> {
+  const cfg: SambaPosConfig = {
+    ...getResolvedPosConfig().sambaPos,
+    ...(customCfg || {}),
+  };
+
+  const categories = getCategories();
+  const menuItems = getMenuItems();
+  const catMap = new Map(categories.map((c) => [c.id, c.name]));
+
+  try {
+    const accessToken = await authenticateSambaPos(cfg);
+    const gqlRes = await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `query {
+        getProducts {
+          id
+          name
+          groupCode
+          portions {
+            id
+            name
+            price
+          }
+        }
+      }`
+    );
+
+    const rawProducts = (gqlRes.data?.getProducts || []) as Array<{
+      id: number;
+      name: string;
+      groupCode?: string;
+      portions?: Array<{ id: number; name: string; price: number }>;
+    }>;
+
+    const sambaProducts: SambaProductSummary[] = rawProducts
+      .filter((p) => p && p.name)
+      .map((p) => {
+        const portions = Array.isArray(p.portions) ? p.portions : [];
+        const normalPortion =
+          portions.find((pt) => pt.name?.toLowerCase() === "normal") ||
+          portions[0];
+        return {
+          id: Number(p.id || 0),
+          name: String(p.name).trim(),
+          groupCode: String(p.groupCode || "").trim(),
+          price: Number(normalPortion?.price ?? 0),
+          portions,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "tr"));
+
+    const sambaByLowerName = new Map<string, SambaProductSummary>();
+    for (const sp of sambaProducts) {
+      sambaByLowerName.set(sp.name.toLowerCase(), sp);
+    }
+
+    let matchedCount = 0;
+    let priceDiffCount = 0;
+    let missingCount = 0;
+
+    const items: SiteSambaMenuComparisonItem[] = menuItems.map((item) => {
+      const categoryName = catMap.get(item.categoryId) || "Online Sipariş";
+      const customMapped = (
+        cfg.productMappings?.[item.id] ||
+        cfg.productMappings?.[item.name.trim()] ||
+        ""
+      ).trim();
+      const targetSambaName = customMapped || item.name.trim();
+      const found = sambaByLowerName.get(targetSambaName.toLowerCase());
+
+      if (!found) {
+        missingCount++;
+        return {
+          siteItemId: item.id,
+          siteItemName: item.name,
+          categoryId: item.categoryId,
+          categoryName,
+          sitePrice: Number(item.price || 0),
+          available: Boolean(item.available),
+          mappedSambaName: customMapped,
+          targetSambaName,
+          status: "missing",
+          sambaProductId: null,
+          sambaGroupCode: null,
+          sambaPrice: null,
+        };
+      }
+
+      const sitePrice = Number(Number(item.price || 0).toFixed(2));
+      const sambaPrice = Number(Number(found.price || 0).toFixed(2));
+      const isPriceEqual = Math.abs(sitePrice - sambaPrice) < 0.01;
+
+      if (isPriceEqual) {
+        matchedCount++;
+      } else {
+        priceDiffCount++;
+      }
+
+      return {
+        siteItemId: item.id,
+        siteItemName: item.name,
+        categoryId: item.categoryId,
+        categoryName,
+        sitePrice,
+        available: Boolean(item.available),
+        mappedSambaName: customMapped,
+        targetSambaName: found.name,
+        status: isPriceEqual ? "matched" : "price_diff",
+        sambaProductId: found.id,
+        sambaGroupCode: found.groupCode || null,
+        sambaPrice,
+      };
+    });
+
+    return {
+      ok: true,
+      message: `✅ SambaPOS'ta ${sambaProducts.length} kayıtlı ürün bulundu. Sitedeki ${menuItems.length} üründen ${matchedCount + priceDiffCount} tanesi eşleşiyor.`,
+      sambaProducts,
+      items,
+      stats: {
+        totalSiteItems: menuItems.length,
+        matchedCount,
+        priceDiffCount,
+        missingCount,
+        totalSambaProducts: sambaProducts.length,
+      },
+    };
+  } catch (err) {
+    const fallbackItems: SiteSambaMenuComparisonItem[] = menuItems.map(
+      (item) => {
+        const customMapped = (
+          cfg.productMappings?.[item.id] ||
+          cfg.productMappings?.[item.name.trim()] ||
+          ""
+        ).trim();
+        return {
+          siteItemId: item.id,
+          siteItemName: item.name,
+          categoryId: item.categoryId,
+          categoryName: catMap.get(item.categoryId) || "Online Sipariş",
+          sitePrice: Number(item.price || 0),
+          available: Boolean(item.available),
+          mappedSambaName: customMapped,
+          targetSambaName: customMapped || item.name.trim(),
+          status: "missing",
+          sambaProductId: null,
+          sambaGroupCode: null,
+          sambaPrice: null,
+        };
+      }
+    );
+
+    return {
+      ok: false,
+      message:
+        err instanceof Error
+          ? err.message
+          : "SambaPOS ürün listesi çekilemedi.",
+      sambaProducts: [],
+      items: fallbackItems,
+      stats: {
+        totalSiteItems: menuItems.length,
+        matchedCount: 0,
+        priceDiffCount: 0,
+        missingCount: menuItems.length,
+        totalSambaProducts: 0,
+      },
+    };
+  }
+}
+
+/**
+ * Kasa PC üzerinde yerel SambaPOS SQL Server veritabanı (`SambaSettings.txt`) erişilebilir ise,
+ * aktarılan kategorileri ve ürünleri SambaPOS'un dokunmatik POS Menü ekranına da (`ScreenMenuCategories`
+ * ve `ScreenMenuItems`) otomatik olarak ekler.
+ */
+function syncLocalSambaScreenMenu(
+  entries: Array<{ categoryName: string; productName: string }>
+): number {
+  if (entries.length === 0) return 0;
+  try {
+    const settingsPath =
+      "C:\\ProgramData\\SambaPOS\\SambaPOS5\\SambaSettings.txt";
+    let server = "localhost";
+    let database = "YILDIZHANPOS5";
+
+    if (fs.existsSync(settingsPath)) {
+      const xml = fs.readFileSync(settingsPath, "utf-8");
+      const dsMatch = xml.match(/Data Source=([^;<]+)/i);
+      const dbMatch = xml.match(/Database=([^;<]+)/i);
+      if (dsMatch?.[1]?.trim()) server = dsMatch[1].trim();
+      if (dbMatch?.[1]?.trim()) database = dbMatch[1].trim();
+    }
+
+    const escSql = (s: string) => String(s || "").replace(/'/g, "''");
+    const sqlLines: string[] = [
+      "SET NOCOUNT ON;",
+      "DECLARE @menuId INT = (SELECT TOP 1 Id FROM ScreenMenus ORDER BY Id);",
+      "DECLARE @catId INT;",
+      "DECLARE @prodId INT;",
+      "IF @menuId IS NOT NULL BEGIN",
+    ];
+
+    for (const entry of entries) {
+      const cat = escSql(entry.categoryName || "Online Sipariş");
+      const prod = escSql(entry.productName);
+      sqlLines.push(`
+        SET @catId = (SELECT TOP 1 Id FROM ScreenMenuCategories WHERE ScreenMenuId = @menuId AND Name = N'${cat}');
+        IF @catId IS NULL BEGIN
+          INSERT INTO ScreenMenuCategories (
+            Name, Header, Appearance, SortOrder, ScreenMenuId, MostUsedItemsCategory,
+            ColumnCount, MenuItemButtonHeight, MenuItemButtonColor, MenuItemFontSize,
+            WrapText, PageCount, SortAlphabetically, MainButtonHeight, MainButtonColor,
+            MainFontSize, SubButtonHeight, SubButtonRows, SubButtonColorDef,
+            NumeratorType, NumeratorValues, AlphaButtonValues, ImagePath, NumberPadPercent, MaxItems
+          ) VALUES (
+            N'${cat}', NULL, 0, 0, @menuId, 0,
+            0, 0, N'Green', 24.0,
+            1, 1, 0, 0, N'Orange',
+            26.0, 75, 1, N'',
+            2, NULL, NULL, NULL, 45, 0
+          );
+          SET @catId = SCOPE_IDENTITY();
+        END
+        SET @prodId = (SELECT TOP 1 Id FROM MenuItems WHERE Name = N'${prod}');
+        IF @prodId IS NOT NULL AND @catId IS NOT NULL BEGIN
+          IF NOT EXISTS (SELECT 1 FROM ScreenMenuItems WHERE ScreenMenuCategoryId = @catId AND MenuItemId = @prodId) BEGIN
+            INSERT INTO ScreenMenuItems (
+              Name, Header, Appearance, ScreenMenuCategoryId, MenuItemId, SortOrder,
+              AutoSelect, ButtonColor, Quantity, ImagePath, FontSize, SubMenuTag,
+              ItemPortion, OrderTags, OrderStates, AutomationCommand, AutomationCommandValue,
+              DisablePortionSelection, GroupTag
+            ) VALUES (
+              N'${prod}', NULL, 0, @catId, @prodId, 0,
+              0, NULL, 1, NULL, 1.0, N'',
+              NULL, NULL, NULL, NULL, NULL,
+              0, NULL
+            );
+          END
+        END
+      `);
+    }
+
+    sqlLines.push("END");
+
+    const tmpSqlFile = path.join(
+      os.tmpdir(),
+      `sambapos_menu_sync_${Date.now()}.sql`
+    );
+    // Write with UTF-16LE BOM so sqlcmd preserves all Turkish Unicode characters natively
+    const utf16Content = "\uFEFF" + sqlLines.join("\r\n");
+    fs.writeFileSync(tmpSqlFile, utf16Content, { encoding: "utf16le" });
+
+    try {
+      execFileSync(
+        "sqlcmd",
+        ["-S", server, "-C", "-E", "-d", database, "-i", tmpSqlFile],
+        { timeout: 10000, stdio: "ignore" }
+      );
+      return entries.length;
+    } finally {
+      try {
+        fs.unlinkSync(tmpSqlFile);
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Sitedeki ürünleri (tümünü veya seçilenleri) kategorileri ve fiyatlarıyla birlikte
+ * SambaPOS V5'e aktarır / eşitler:
+ * 1) SambaPOS'ta olmayan ürünleri GraphQL `addProduct` ile kendi kategorisi altında oluşturur.
+ * 2) SambaPOS'ta zaten kayıtlı olan ürünlerin fiyatlarını `updateProductPrice` ile sitedeki fiyata günceller.
+ * 3) İsteğe bağlı olarak SambaPOS dokunmatik POS menü ekranına (`ScreenMenuCategories` / `ScreenMenuItems`) da ekler.
+ * 4) `postResetProductCacheMessage` ile SambaPOS ekran önbelleğini anında yeniler.
+ */
+export async function syncSiteMenuToSambaPos(options?: {
+  itemIds?: string[];
+  updatePrices?: boolean;
+  syncScreenMenu?: boolean;
+  customConfig?: Partial<SambaPosConfig>;
+}): Promise<{
+  ok: boolean;
+  message: string;
+  createdCount: number;
+  updatedCount: number;
+  totalProcessed: number;
+  catalog?: SambaPosCatalogResponse;
+}> {
+  const settings = getSettings();
+  const cfg: SambaPosConfig = {
+    ...getResolvedPosConfig().sambaPos,
+    ...(options?.customConfig || {}),
+  };
+
+  try {
+    const accessToken = await authenticateSambaPos(cfg);
+    const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+
+    // Mevcut SambaPOS ürünlerini çek
+    const prodRes = await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `query {
+        getProducts {
+          id
+          name
+          groupCode
+          portions {
+            id
+            name
+            price
+          }
+        }
+      }`
+    );
+
+    const existingList = (prodRes.data?.getProducts || []) as Array<{
+      id: number;
+      name: string;
+      groupCode?: string;
+      portions?: Array<{ id: number; name: string; price: number }>;
+    }>;
+
+    const existingMap = new Map<
+      string,
+      {
+        id: number;
+        name: string;
+        groupCode: string;
+        portions: Array<{ id: number; name: string; price: number }>;
+      }
+    >();
+    for (const p of existingList) {
+      if (p?.name) {
+        existingMap.set(p.name.trim().toLowerCase(), {
+          id: Number(p.id || 0),
+          name: p.name.trim(),
+          groupCode: String(p.groupCode || "").trim(),
+          portions: Array.isArray(p.portions) ? p.portions : [],
+        });
+      }
+    }
+
+    const categories = getCategories();
+    const allSiteItems = getMenuItems();
+    const catMap = new Map(categories.map((c) => [c.id, c.name]));
+
+    const filterIds =
+      Array.isArray(options?.itemIds) && options.itemIds.length > 0
+        ? new Set(options.itemIds)
+        : null;
+
+    const targetItems = filterIds
+      ? allSiteItems.filter((m) => filterIds.has(m.id))
+      : allSiteItems;
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    const screenMenuEntries: Array<{
+      categoryName: string;
+      productName: string;
+    }> = [];
+
+    for (const item of targetItems) {
+      const categoryName = catMap.get(item.categoryId) || "Online Sipariş";
+      const customMapped = (
+        cfg.productMappings?.[item.id] ||
+        cfg.productMappings?.[item.name.trim()] ||
+        ""
+      ).trim();
+      const targetSambaName = customMapped || item.name.trim();
+      const price = Number(Number(item.price || 0).toFixed(2));
+
+      if (!targetSambaName) continue;
+
+      const existing = existingMap.get(targetSambaName.toLowerCase());
+
+      if (!existing || !existing.id) {
+        // Ürün SambaPOS'ta yok -> Yeni ürün olarak ekle
+        const addRes = await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation {
+            addProduct(
+              name: ${gStr(targetSambaName)},
+              groupCode: ${gStr(categoryName)},
+              portions: [
+                { name: "Normal", price: ${price}, multiplier: 1 }
+              ]
+            ) {
+              id
+              name
+            }
+          }`
+        );
+        if (!addRes.errors || addRes.errors.length === 0) {
+          createdCount++;
+          existingMap.set(targetSambaName.toLowerCase(), {
+            id: Number(
+              (addRes.data?.addProduct as { id?: number })?.id || 99999
+            ),
+            name: targetSambaName,
+            groupCode: categoryName,
+            portions: [{ id: 1, name: "Normal", price }],
+          });
+          screenMenuEntries.push({
+            categoryName,
+            productName: targetSambaName,
+          });
+        }
+      } else {
+        // Ürün SambaPOS'ta zaten var -> Fiyatını güncelle
+        const portionName =
+          existing.portions.find((pt) => pt.name?.toLowerCase() === "normal")
+            ?.name ||
+          existing.portions[0]?.name ||
+          "Normal";
+
+        if (options?.updatePrices !== false) {
+          await executeSambaGraphQL(
+            cfg,
+            accessToken,
+            `mutation {
+              updateProductPrice(
+                name: ${gStr(existing.name)},
+                portion: ${gStr(portionName)},
+                price: ${price},
+                priceTag: "",
+                notifyClients: false
+              )
+            }`
+          );
+          updatedCount++;
+        }
+        screenMenuEntries.push({
+          categoryName,
+          productName: existing.name,
+        });
+      }
+    }
+
+    // Paket Servis Ücreti kalemini de kontrol et ve yoksa ekle
+    if (!filterIds && !existingMap.has("paket servis ücreti")) {
+      const delFee = Number(Number(settings.deliveryFee || 0).toFixed(2));
+      await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `mutation {
+          addProduct(
+            name: "Paket Servis Ücreti",
+            groupCode: "Online Sipariş",
+            portions: [
+              { name: "Normal", price: ${delFee}, multiplier: 1 }
+            ]
+          ) {
+            id
+            name
+          }
+        }`
+      ).catch(() => {});
+    }
+
+    // POS Dokunmatik Menü ekranına da (ScreenMenuCategories & ScreenMenuItems) ekle
+    const shouldSyncScreenMenu =
+      options?.syncScreenMenu ?? cfg.syncToScreenMenu !== false;
+    if (shouldSyncScreenMenu && screenMenuEntries.length > 0) {
+      syncLocalSambaScreenMenu(screenMenuEntries);
+    }
+
+    // SambaPOS Ürün Önbelleğini (Product Cache) yenile
+    await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `mutation { postResetProductCacheMessage { id } }`
+    ).catch(() => {});
+
+    // Son menü senkronizasyon tarihini kaydet
+    const nowIso = new Date().toISOString();
+    const nextSamba: SambaPosConfig = {
+      ...cfg,
+      lastMenuSyncedAt: nowIso,
+    };
+    updateSettings({
+      ...settings,
+      posIntegrationConfig: {
+        activeProvider: nextSamba.enabled ? "sambapos" : "none",
+        sambaPos: nextSamba,
+      },
+    });
+
+    const updatedCatalog = await fetchSambaPosCatalog(nextSamba);
+
+    return {
+      ok: true,
+      message: `✅ Sitedeki ${targetItems.length} ürün SambaPOS'a başarıyla aktarıldı! (${createdCount} yeni ürün eklendi, ${updatedCount} ürünün fiyatı eşitlendi)`,
+      createdCount,
+      updatedCount,
+      totalProcessed: targetItems.length,
+      catalog: updatedCatalog,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message:
+        err instanceof Error
+          ? `⚠️ Menü Aktarım Hatası: ${err.message}`
+          : "Sitedeki ürünler SambaPOS'a aktarılırken hata oluştu.",
+      createdCount: 0,
+      updatedCount: 0,
+      totalProcessed: 0,
+    };
+  }
+}
+

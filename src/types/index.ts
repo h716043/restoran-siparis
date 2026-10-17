@@ -324,6 +324,9 @@ export interface SambaPosConfig {
   defaultOrderTagName: string; // Örn: "Default" (Porsiyon/Ekstra/Not için Order Tag grubu)
   fallbackMenuItemName?: string; // Örn: "Online Sipariş" (SambaPOS menüsünde ürün eşleşmezse yedek kalem)
   autoCreateCustomerEntity: boolean; // Paket serviste müşteri bilgilerini SambaPOS varlığı olarak ekle
+  productMappings?: Record<string, string>; // Site Ürün ID veya Adı -> SambaPOS Ürün Adı özel eşleştirmesi
+  syncToScreenMenu?: boolean; // Ürünleri aktarırken SambaPOS POS dokunmatik menü ekranına da (ScreenMenus) ekle
+  lastMenuSyncedAt?: string; // Son menü aktarım/eşitleme zamanı
 }
 
 export interface PosIntegrationConfig {

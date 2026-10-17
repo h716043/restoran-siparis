@@ -126,6 +126,45 @@ export default function AdminDashboardPage() {
     null
   );
   const [posBulkSyncing, setPosBulkSyncing] = useState(false);
+  const [posCatalogLoading, setPosCatalogLoading] = useState(false);
+  const [posMenuSyncing, setPosMenuSyncing] = useState(false);
+  const [posSyncingItemId, setPosSyncingItemId] = useState<string | null>(null);
+  const [posMenuFilterCat, setPosMenuFilterCat] = useState<string>("all");
+  const [posMenuFilterStatus, setPosMenuFilterStatus] = useState<
+    "all" | "matched" | "price_diff" | "missing"
+  >("all");
+  const [posMenuSearch, setPosMenuSearch] = useState<string>("");
+  const [sambaCatalog, setSambaCatalog] = useState<{
+    ok: boolean;
+    message?: string;
+    sambaProducts: Array<{
+      id: number;
+      name: string;
+      groupCode: string;
+      price: number;
+    }>;
+    items: Array<{
+      siteItemId: string;
+      siteItemName: string;
+      categoryId: string;
+      categoryName: string;
+      sitePrice: number;
+      available: boolean;
+      mappedSambaName: string;
+      targetSambaName: string;
+      status: "matched" | "price_diff" | "missing";
+      sambaProductId: number | null;
+      sambaGroupCode: string | null;
+      sambaPrice: number | null;
+    }>;
+    stats: {
+      totalSiteItems: number;
+      matchedCount: number;
+      priceDiffCount: number;
+      missingCount: number;
+      totalSambaProducts: number;
+    };
+  } | null>(null);
 
   // Rapor ve Z Raporu Filtreleri
   const [reportPeriod, setReportPeriod] = useState<
@@ -508,6 +547,121 @@ export default function AdminDashboardPage() {
       setPosBulkSyncing(false);
     }
   };
+
+  const handleFetchSambaCatalog = async (showBanner = false) => {
+    setPosCatalogLoading(true);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "fetch_samba_catalog",
+          sambaPos: sambaConfig,
+        }),
+      });
+      const data = await res.json();
+      if (data && Array.isArray(data.items)) {
+        setSambaCatalog(data);
+        if (showBanner && data.message) {
+          setPosTestStatus({
+            ok: Boolean(data.ok),
+            message: data.message,
+          });
+        }
+      }
+    } catch {
+      // ignore background fetch error
+    } finally {
+      setPosCatalogLoading(false);
+    }
+  };
+
+  const handleSyncMenuToSamba = async (options?: {
+    itemIds?: string[];
+    updatePrices?: boolean;
+  }) => {
+    const singleId =
+      options?.itemIds && options.itemIds.length === 1
+        ? options.itemIds[0]
+        : null;
+    if (singleId) {
+      setPosSyncingItemId(singleId);
+    } else {
+      setPosMenuSyncing(true);
+    }
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_menu_to_samba",
+          itemIds: options?.itemIds,
+          updatePrices: options?.updatePrices !== false,
+          syncScreenMenu: sambaConfig.syncToScreenMenu !== false,
+          sambaPos: sambaConfig,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      if (data.catalog) {
+        setSambaCatalog(data.catalog);
+      } else {
+        await handleFetchSambaCatalog(false);
+      }
+      if (data.ok) {
+        showToast(data.message || "Ürünler SambaPOS'a aktarıldı!");
+        await loadData();
+      }
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "Ürünler SambaPOS'a aktarılırken hata oluştu.",
+      });
+    } finally {
+      setPosSyncingItemId(null);
+      setPosMenuSyncing(false);
+    }
+  };
+
+  const handleSaveProductMapping = async (
+    siteItemId: string,
+    sambaProductName: string
+  ) => {
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_product_mapping",
+          siteItemId,
+          sambaProductName,
+        }),
+      });
+      const data = await res.json();
+      if (data.posIntegrationConfig && settings) {
+        setSettings({
+          ...settings,
+          posIntegrationConfig: data.posIntegrationConfig,
+        });
+      }
+      if (data.catalog) {
+        setSambaCatalog(data.catalog);
+      }
+      showToast("✅ SambaPOS ürün eşleştirmesi kaydedildi!");
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "pos") {
+      handleFetchSambaCatalog(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Tarih Aralığına Göre Sipariş Filtreleme (Z Raporu ve İstatistikler)
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -5990,6 +6144,57 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
+            {/* 🍽️ SambaPOS Menü Eşleştirme & Ürünleri SambaPOS'a Aktar (Hızlı Erişim) */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                  <RefreshCw className="w-4 h-4 text-indigo-600" />
+                  <span>
+                    🍽️ SambaPOS Menü Eşleştirme & Sitedeki Ürünleri SambaPOS&apos;a Aktar
+                  </span>
+                </div>
+                {sambaConfig.lastMenuSyncedAt && (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                    Son Aktarım:{" "}
+                    {new Date(sambaConfig.lastMenuSyncedAt).toLocaleString(
+                      "tr-TR"
+                    )}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Web sitenizdeki tüm ürünleri ({items.length} ürün ve{" "}
+                {categories.length} kategori) tek tıkla SambaPOS V5 ürün
+                listesine ve dokunmatik POS menü ekranına aktarabilir veya
+                birebir ürün eşleştirmesi yapabilirsiniz.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={posMenuSyncing}
+                  onClick={() => handleSyncMenuToSamba({ updatePrices: true })}
+                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 ${posMenuSyncing ? "animate-spin" : ""}`}
+                  />
+                  <span>
+                    {posMenuSyncing
+                      ? "Sitedeki Ürünler SambaPOS'a Aktarılıyor..."
+                      : `🚀 Sitedeki Tüm Ürünleri Şimdi SambaPOS'a Aktar (${items.length} Ürün)`}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("pos")}
+                  className="inline-flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer"
+                >
+                  <span>🔄 Detaylı Menü Eşleştirme Tablosunu Aç &rarr;</span>
+                </button>
+              </div>
+            </div>
+
             <button
               type="submit"
               className="inline-flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-6 py-3 rounded-xl transition cursor-pointer"
@@ -6462,12 +6667,433 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               )}
             </div>
 
+            {/* 3. MENÜ EŞLEŞTİRME & SİTEDEKİ ÜRÜNLERİ SAMBAPOS'A AKTARMA */}
+            <div className="bg-white p-6 rounded-2xl border-2 border-indigo-200 shadow-xs space-y-5">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
+                    🔄 Otomatik Ürün & Kategori Eşitleme
+                  </div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    3. Menü Eşleştirme & Sitedeki Ürünleri SambaPOS&apos;a Aktarma
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Sitedeki tüm ürünleri kategorileri ve fiyatlarıyla birlikte tek tıkla <strong>SambaPOS Ürün Listesine</strong> ve <strong>POS Dokunmatik Menü Ekranına</strong> aktarabilir veya mevcut SambaPOS ürünleriyle birebir eşleştirebilirsiniz.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleFetchSambaCatalog(true)}
+                    disabled={posCatalogLoading || posMenuSyncing}
+                    className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-extrabold px-3.5 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${posCatalogLoading ? "animate-spin" : ""}`}
+                    />
+                    {posCatalogLoading
+                      ? "Sorgulanıyor..."
+                      : "🔍 SambaPOS Ürünlerini Sorgula"}
+                  </button>
+
+                  {sambaCatalog && sambaCatalog.stats.missingCount > 0 && (
+                    <button
+                      type="button"
+                      disabled={posMenuSyncing}
+                      onClick={() => {
+                        const missingIds = sambaCatalog.items
+                          .filter((x) => x.status === "missing")
+                          .map((x) => x.siteItemId);
+                        handleSyncMenuToSamba({
+                          itemIds: missingIds,
+                          updatePrices: false,
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      ➕ Sadece Eksik ({sambaCatalog.stats.missingCount}) Ürünü Ekle
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={posMenuSyncing}
+                    onClick={() =>
+                      handleSyncMenuToSamba({ updatePrices: true })
+                    }
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${posMenuSyncing ? "animate-spin" : ""}`}
+                    />
+                    {posMenuSyncing
+                      ? "SambaPOS'a Aktarılıyor..."
+                      : `🚀 Sitedeki Tüm Ürünleri SambaPOS'a Aktar & Eşitle (${items.length})`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Canlı Eşleşme İstatistik Kutuları */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                  <div className="text-[11px] font-bold text-slate-500">
+                    📦 Sitedeki Menü Ürünleri
+                  </div>
+                  <div className="text-lg font-black text-slate-900 mt-0.5">
+                    {items.length} Ürün
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {categories.length} Kategori • SambaPOS Toplam:{" "}
+                    {sambaCatalog?.stats.totalSambaProducts ?? "..."}
+                  </div>
+                </div>
+
+                <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3">
+                  <div className="text-[11px] font-bold text-emerald-700">
+                    ✅ Tam Eşleşen (İsim + Fiyat)
+                  </div>
+                  <div className="text-lg font-black text-emerald-900 mt-0.5">
+                    {sambaCatalog?.stats.matchedCount ?? 0} Ürün
+                  </div>
+                  <div className="text-[10px] text-emerald-700">
+                    SambaPOS&apos;ta hazır ve güncel
+                  </div>
+                </div>
+
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3">
+                  <div className="text-[11px] font-bold text-amber-800">
+                    🔄 Fiyatı Farklı Olan
+                  </div>
+                  <div className="text-lg font-black text-amber-900 mt-0.5">
+                    {sambaCatalog?.stats.priceDiffCount ?? 0} Ürün
+                  </div>
+                  <div className="text-[10px] text-amber-700">
+                    Tek tıkla site fiyatına eşitlenir
+                  </div>
+                </div>
+
+                <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-3">
+                  <div className="text-[11px] font-bold text-rose-700">
+                    ⚠️ SambaPOS&apos;ta Eksik Olan
+                  </div>
+                  <div className="text-lg font-black text-rose-900 mt-0.5">
+                    {sambaCatalog?.stats.missingCount ?? 0} Ürün
+                  </div>
+                  <div className="text-[10px] text-rose-700">
+                    Aktar butonuna basınca otomatik açılır
+                  </div>
+                </div>
+              </div>
+
+              {/* Seçenek: POS Dokunmatik Menü Ekranına da Ekle */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50/60 border border-indigo-200/80 rounded-xl px-4 py-3">
+                <label className="flex items-center gap-2.5 text-xs font-extrabold text-indigo-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sambaConfig.syncToScreenMenu !== false}
+                    onChange={(e) =>
+                      updateSambaConfigField({
+                        syncToScreenMenu: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 accent-indigo-600 rounded"
+                  />
+                  <span>
+                    🖥️ Aktarılan ürünleri ve kategorileri SambaPOS&apos;un dokunmatik <strong>POS Menü Ekranına da (Buton Olarak)</strong> otomatik ekle
+                  </span>
+                </label>
+
+                {sambaConfig.lastMenuSyncedAt && (
+                  <span className="text-[11px] font-bold text-indigo-700">
+                    Son Menü Aktarımı:{" "}
+                    {new Date(sambaConfig.lastMenuSyncedAt).toLocaleString(
+                      "tr-TR"
+                    )}
+                  </span>
+                )}
+              </div>
+
+              {/* Filtre ve Arama Çubuğu */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  value={posMenuSearch}
+                  onChange={(e) => setPosMenuSearch(e.target.value)}
+                  placeholder="🔎 Ürün veya kategori ara..."
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white"
+                />
+
+                <select
+                  value={posMenuFilterCat}
+                  onChange={(e) => setPosMenuFilterCat(e.target.value)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white font-semibold"
+                >
+                  <option value="all">📂 Tüm Kategoriler ({categories.length})</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={posMenuFilterStatus}
+                  onChange={(e) =>
+                    setPosMenuFilterStatus(
+                      e.target.value as
+                        | "all"
+                        | "matched"
+                        | "price_diff"
+                        | "missing"
+                    )
+                  }
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white font-semibold"
+                >
+                  <option value="all">📊 Tüm Durumlar ({items.length})</option>
+                  <option value="matched">
+                    ✅ Tam Eşleşenler ({sambaCatalog?.stats.matchedCount ?? 0})
+                  </option>
+                  <option value="price_diff">
+                    🔄 Fiyatı Farklı Olanlar ({sambaCatalog?.stats.priceDiffCount ?? 0})
+                  </option>
+                  <option value="missing">
+                    ⚠️ SambaPOS&apos;ta Eksik Olanlar ({sambaCatalog?.stats.missingCount ?? 0})
+                  </option>
+                </select>
+              </div>
+
+              {/* SambaPOS Mevcut Ürünler Datalist (Özel Eşleştirme İçin Otomatik Tamamlama) */}
+              <datalist id="sambapos-existing-products-list">
+                {(sambaCatalog?.sambaProducts || []).map((sp) => (
+                  <option key={sp.id} value={sp.name}>
+                    {sp.groupCode} • {sp.price.toFixed(2)} {settings.currency}
+                  </option>
+                ))}
+              </datalist>
+
+              {/* Birebir Ürün Eşleştirme ve Aktarım Tablosu */}
+              <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[480px] overflow-y-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-slate-700 font-extrabold">
+                    <tr>
+                      <th className="py-2.5 px-3">Sitedeki Ürün & Kategori</th>
+                      <th className="py-2.5 px-3">Site Fiyatı</th>
+                      <th className="py-2.5 px-3">
+                        SambaPOS Ürün Karşılığı (Boş = Kendi Adıyla Aktarır)
+                      </th>
+                      <th className="py-2.5 px-3">SambaPOS Durumu & Fiyatı</th>
+                      <th className="py-2.5 px-3 text-right">Tekil İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(
+                      sambaCatalog?.items ||
+                      items.map((it) => {
+                        const catName =
+                          categories.find((c) => c.id === it.categoryId)
+                            ?.name || "Online Sipariş";
+                        const mapped =
+                          sambaConfig.productMappings?.[it.id] || "";
+                        return {
+                          siteItemId: it.id,
+                          siteItemName: it.name,
+                          categoryId: it.categoryId,
+                          categoryName: catName,
+                          sitePrice: it.price,
+                          available: it.available,
+                          mappedSambaName: mapped,
+                          targetSambaName: mapped || it.name,
+                          status: "missing" as const,
+                          sambaProductId: null,
+                          sambaGroupCode: null,
+                          sambaPrice: null,
+                        };
+                      })
+                    )
+                      .filter((row) => {
+                        if (
+                          posMenuFilterCat !== "all" &&
+                          row.categoryId !== posMenuFilterCat
+                        ) {
+                          return false;
+                        }
+                        if (
+                          posMenuFilterStatus !== "all" &&
+                          row.status !== posMenuFilterStatus
+                        ) {
+                          return false;
+                        }
+                        if (posMenuSearch.trim()) {
+                          const q = posMenuSearch.trim().toLowerCase();
+                          return (
+                            row.siteItemName.toLowerCase().includes(q) ||
+                            row.categoryName.toLowerCase().includes(q) ||
+                            row.targetSambaName.toLowerCase().includes(q)
+                          );
+                        }
+                        return true;
+                      })
+                      .map((row) => {
+                        const currentMapping =
+                          sambaConfig.productMappings?.[row.siteItemId] ??
+                          row.mappedSambaName ??
+                          "";
+                        return (
+                          <tr
+                            key={row.siteItemId}
+                            className="hover:bg-slate-50/90"
+                          >
+                            <td className="py-2.5 px-3">
+                              <div className="font-extrabold text-slate-900">
+                                {row.siteItemName}
+                              </div>
+                              <div className="inline-block text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md mt-0.5">
+                                {row.categoryName}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3 font-black text-slate-900 whitespace-nowrap">
+                              {row.sitePrice.toFixed(2)} {settings.currency}
+                            </td>
+
+                            <td className="py-2.5 px-3 min-w-[230px]">
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  list="sambapos-existing-products-list"
+                                  value={currentMapping}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    updateSambaConfigField({
+                                      productMappings: {
+                                        ...(sambaConfig.productMappings || {}),
+                                        [row.siteItemId]: val,
+                                      },
+                                    });
+                                  }}
+                                  onBlur={(e) =>
+                                    handleSaveProductMapping(
+                                      row.siteItemId,
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder={`Otomatik: ${row.siteItemName}`}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:border-indigo-500 focus:outline-none"
+                                />
+                                {currentMapping && (
+                                  <button
+                                    type="button"
+                                    title="Özel eşleştirmeyi sıfırla (Kendi adını kullan)"
+                                    onClick={() =>
+                                      handleSaveProductMapping(
+                                        row.siteItemId,
+                                        ""
+                                      )
+                                    }
+                                    className="text-slate-400 hover:text-rose-600 font-bold px-1.5 py-1 rounded cursor-pointer"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3">
+                              {row.status === "matched" ? (
+                                <div className="space-y-0.5">
+                                  <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    ✅ SambaPOS&apos;ta Kayıtlı
+                                  </span>
+                                  <div className="text-[10px] text-slate-500">
+                                    Grup: <strong>{row.sambaGroupCode || "-"}</strong> • Fiyat:{" "}
+                                    <strong>
+                                      {(row.sambaPrice ?? 0).toFixed(2)}{" "}
+                                      {settings.currency}
+                                    </strong>
+                                  </div>
+                                </div>
+                              ) : row.status === "price_diff" ? (
+                                <div className="space-y-0.5">
+                                  <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    🔄 Fiyat Farklı
+                                  </span>
+                                  <div className="text-[10px] text-amber-800">
+                                    SambaPOS:{" "}
+                                    <strong>
+                                      {(row.sambaPrice ?? 0).toFixed(2)}{" "}
+                                      {settings.currency}
+                                    </strong>{" "}
+                                    &rarr; Site:{" "}
+                                    <strong>
+                                      {row.sitePrice.toFixed(2)}{" "}
+                                      {settings.currency}
+                                    </strong>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  <span className="inline-flex items-center gap-1 bg-rose-100 text-rose-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    ⚠️ SambaPOS&apos;ta Yok
+                                  </span>
+                                  <div className="text-[10px] text-slate-500">
+                                    Aktarılınca <strong>{row.categoryName}</strong> grubuna eklenecek
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                disabled={
+                                  posSyncingItemId === row.siteItemId ||
+                                  posMenuSyncing
+                                }
+                                onClick={() =>
+                                  handleSyncMenuToSamba({
+                                    itemIds: [row.siteItemId],
+                                    updatePrices: true,
+                                  })
+                                }
+                                className={`inline-flex items-center gap-1 text-[11px] font-extrabold px-3 py-1.5 rounded-lg transition cursor-pointer disabled:opacity-50 ${
+                                  row.status === "matched"
+                                    ? "bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700"
+                                    : row.status === "price_diff"
+                                    ? "bg-amber-500 hover:bg-amber-600 text-white"
+                                    : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                                }`}
+                              >
+                                <RefreshCw
+                                  className={`w-3 h-3 ${
+                                    posSyncingItemId === row.siteItemId
+                                      ? "animate-spin"
+                                      : ""
+                                  }`}
+                                />
+                                {posSyncingItemId === row.siteItemId
+                                  ? "Aktarılıyor..."
+                                  : row.status === "matched"
+                                  ? "🔄 Tekrar Eşitle"
+                                  : row.status === "price_diff"
+                                  ? "💰 Fiyatı Eşitle"
+                                  : "📤 SambaPOS'a Aktar"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Canlı Sipariş Aktarım Tablosu & Tek Tıkla Manuel Aktarım */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    📋 Son Siparişlerin SambaPOS Aktarım Durumu
+                    4. 📋 Son Siparişlerin SambaPOS Aktarım Durumu
                   </h3>
                   <p className="text-xs text-slate-500">
                     Aktarılmayan veya hata veren siparişleri buradan tek tıkla SambaPOS&apos;a gönderebilirsiniz.
