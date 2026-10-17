@@ -22,15 +22,16 @@ function resolveTursoCredentials(): {
   token: string;
 } | null {
   const settings = getSettings();
+  const isNewFirma = process.env.IS_NEW_FIRMA_PACKAGE === "true";
   const rawUrl = (
     process.env.TURSO_DATABASE_URL ||
     settings.cloudSyncConfig?.tursoUrl ||
-    DEFAULT_TURSO_URL
+    (isNewFirma ? "" : DEFAULT_TURSO_URL)
   ).trim();
   const token = (
     process.env.TURSO_AUTH_TOKEN ||
     settings.cloudSyncConfig?.tursoAuthToken ||
-    DEFAULT_TURSO_TOKEN
+    (isNewFirma ? "" : DEFAULT_TURSO_TOKEN)
   ).trim();
 
   // Eğer yerel ayarlarda açıkça devre dışı bırakılmışsa (enabled === false) ve Netlify'da değilsek kullanma
