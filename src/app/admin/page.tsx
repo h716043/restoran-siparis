@@ -262,6 +262,20 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     loadData();
+    const timer = setInterval(async () => {
+      try {
+        const ordRes = await fetch("/api/orders");
+        if (ordRes.ok) {
+          const ordData = await ordRes.json();
+          if (Array.isArray(ordData.orders)) {
+            setOrders(ordData.orders);
+          }
+        }
+      } catch {
+        // ignore background poll error
+      }
+    }, 5000);
+    return () => clearInterval(timer);
   }, []);
 
   const showToast = (msg: string) => {
@@ -542,6 +556,32 @@ export default function AdminDashboardPage() {
       setPosTestStatus({
         ok: false,
         message: "Toplu SambaPOS aktarımı sırasında hata oluştu.",
+      });
+    } finally {
+      setPosBulkSyncing(false);
+    }
+  };
+
+  const handleSyncStatusesFromSambaPos = async () => {
+    setPosBulkSyncing(true);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_from_samba",
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      await loadData();
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "SambaPOS kurye ve teslimat durumları eşitlenirken hata oluştu.",
       });
     } finally {
       setPosBulkSyncing(false);
@@ -7093,25 +7133,38 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    4. 📋 Son Siparişlerin SambaPOS Aktarım Durumu
+                    4. 📋 Son Siparişlerin SambaPOS Aktarım &amp; Kurye/Teslimat Durumu
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Aktarılmayan veya hata veren siparişleri buradan tek tıkla SambaPOS&apos;a gönderebilirsiniz.
+                    SambaPOS&apos;ta kurye ataması veya &quot;Teslim Edildi / Ödendi&quot; yapıldığında sitede otomatik güncellenir.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleBulkSyncPendingToPos}
-                  disabled={posBulkSyncing}
-                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw
-                    className={`w-4 h-4 ${posBulkSyncing ? "animate-spin" : ""}`}
-                  />
-                  {posBulkSyncing
-                    ? "Aktarılıyor..."
-                    : "🔄 Aktarılmamış Tüm Siparişleri Şimdi SambaPOS'a Gönder"}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSyncStatusesFromSambaPos}
+                    disabled={posBulkSyncing}
+                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${posBulkSyncing ? "animate-spin" : ""}`}
+                    />
+                    📥 SambaPOS&apos;tan Kurye &amp; Teslimat Durumlarını Eşitle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkSyncPendingToPos}
+                    disabled={posBulkSyncing}
+                    className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${posBulkSyncing ? "animate-spin" : ""}`}
+                    />
+                    {posBulkSyncing
+                      ? "Aktarılıyor..."
+                      : "🔄 Aktarılmamış Siparişleri Gönder"}
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -7121,7 +7174,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       <th className="py-2.5 px-3">Sipariş</th>
                       <th className="py-2.5 px-3">Müşteri / Masa</th>
                       <th className="py-2.5 px-3">Tutar</th>
-                      <th className="py-2.5 px-3">Durum</th>
+                      <th className="py-2.5 px-3">Durum &amp; Kurye</th>
                       <th className="py-2.5 px-3">SambaPOS Aktarım Durumu</th>
                       <th className="py-2.5 px-3 text-right">İşlem</th>
                     </tr>
@@ -7158,9 +7211,36 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                             {ord.totalAmount.toFixed(2)} {settings.currency}
                           </td>
                           <td className="py-2.5 px-3">
-                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
-                              {ord.status}
-                            </span>
+                            <div className="flex flex-col gap-1 items-start">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                  ord.status === "completed"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : ord.status === "ready"
+                                    ? "bg-indigo-100 text-indigo-800"
+                                    : ord.status === "accepted"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : ord.status === "rejected"
+                                    ? "bg-rose-100 text-rose-800"
+                                    : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                {ord.status === "completed"
+                                  ? "🎉 Teslim Edildi"
+                                  : ord.status === "ready"
+                                  ? "🛵 Kuryede / Hazır"
+                                  : ord.status === "accepted"
+                                  ? "🔥 Hazırlanıyor"
+                                  : ord.status === "rejected"
+                                  ? "❌ İptal"
+                                  : "⏳ Bekliyor"}
+                              </span>
+                              {ord.courierName && (
+                                <span className="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-800 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
+                                  🛵 {ord.courierName}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-2.5 px-3">
                             {sync?.status === "synced" ? (

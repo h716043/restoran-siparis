@@ -194,6 +194,16 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // 8) SambaPOS'ta Kurye Atanan veya Teslim Edilen Siparişleri Siteye Çekme
+    if (body.action === "sync_from_samba") {
+      const { syncOrderStatusesFromSambaPos } = await import("@/lib/sambapos");
+      const res = await syncOrderStatusesFromSambaPos({
+        customConfig: body.sambaPos || body.sambaPosConfig,
+        force: true,
+      });
+      return NextResponse.json(res);
+    }
+
     return NextResponse.json({ error: "Geçersiz işlem" }, { status: 400 });
   } catch (err) {
     console.error("POST /api/pos-sync error:", err);

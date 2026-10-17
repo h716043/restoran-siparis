@@ -24,6 +24,7 @@ import { autoSyncOrdersWithPosIfNeeded } from "@/lib/sambapos";
 export async function GET(req: NextRequest) {
   try {
     await pullActivityFromCloud();
+    await autoSyncOrdersWithPosIfNeeded().catch(() => {});
     const settings = getSettings();
 
     // TV Müşteri Sıra Çağrı Ekranı (/tv) için şifresiz, kişisel veri içermeyen özet akış + Digital Signage kampanya bandı

@@ -5,6 +5,10 @@ import {
   pullActivityFromCloud,
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
+import {
+  autoSyncOrdersWithPosIfNeeded,
+  syncSiteOrderUpdateToSambaPos,
+} from "@/lib/sambapos";
 
 export async function GET(
   _req: NextRequest,
@@ -12,6 +16,7 @@ export async function GET(
 ) {
   try {
     await pullActivityFromCloud();
+    await autoSyncOrdersWithPosIfNeeded().catch(() => {});
     const { id } = await context.params;
     const order = getOrderById(id);
     if (!order) {
@@ -221,8 +226,13 @@ export async function PATCH(
     }
 
     if (updated.status === "accepted") {
-      const { autoSyncOrdersWithPosIfNeeded } = await import("@/lib/sambapos");
       await autoSyncOrdersWithPosIfNeeded().catch(() => {});
+    } else if (
+      updated.status === "ready" ||
+      updated.status === "completed" ||
+      Boolean(body.courierName)
+    ) {
+      await syncSiteOrderUpdateToSambaPos(updated).catch(() => {});
     }
 
     await syncActivityWithCloud();

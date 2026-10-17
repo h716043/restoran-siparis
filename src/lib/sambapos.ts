@@ -29,8 +29,11 @@ import {
   getOrders,
   getSettings,
   updateOrderPosSyncInfo,
+  updateOrderStatus,
   updateSettings,
 } from "@/lib/db";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { syncActivityWithCloud } from "@/lib/cloud-sync";
 
 export const DEFAULT_SAMBAPOS_CONFIG: SambaPosConfig = {
   enabled: false,
@@ -975,10 +978,445 @@ export async function sendOrderToSambaPos(
 }
 
 let isAutoSyncRunning = false;
+let lastReverseSyncMs = 0;
 
 /**
- * Kasa PC üzerinde (yerelde) çalışırken, hem yerel hem de Netlify/Turso buluttan
- * yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS'a aktarır.
+ * SambaPOS V5 içerisindeki fişlerde (Tickets) yapılan:
+ * 1) Kurye / Paketçi atamasını (`Paketçiler` varlığı veya `Paketçi Adı` durumu ve `Paket = Yolda` durumu)
+ * 2) Teslim Edildi / Ödendi işlemini (`Paket = Teslim Edildi`, `Durum = Ödendi` veya `isClosed && remainingAmount <= 0`)
+ * canlı olarak okuyup sitedeki siparişin kuryesini (`courierName`) ve durumunu (`ready` / `completed`) otomatik günceller.
+ */
+export async function syncOrderStatusesFromSambaPos(options?: {
+  customConfig?: Partial<SambaPosConfig>;
+  force?: boolean;
+}): Promise<{
+  ok: boolean;
+  updatedCount: number;
+  message: string;
+}> {
+  if (
+    process.env.NETLIFY === "true" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true"
+  ) {
+    return {
+      ok: false,
+      updatedCount: 0,
+      message: "SambaPOS ters yönlü senkronizasyon sadece Kasa PC'de çalışır.",
+    };
+  }
+
+  const settings = getSettings();
+  const cfg: SambaPosConfig = {
+    ...getResolvedPosConfig().sambaPos,
+    ...(options?.customConfig || {}),
+  };
+
+  if (cfg.mode !== "graphql") {
+    return {
+      ok: false,
+      updatedCount: 0,
+      message: "SambaPOS ters senkronizasyon GraphQL modunda çalışır.",
+    };
+  }
+
+  const allOrders = getOrders();
+  const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
+  const recentOrders = allOrders.filter(
+    (o) =>
+      o.status !== "rejected" && new Date(o.createdAt).getTime() >= cutoffMs
+  );
+
+  // Henüz tamamlanmamış veya kuryesi atanmamış ya da SambaPOS'a aktarılmış sipariş var mı?
+  const hasRelevantOrders = recentOrders.some(
+    (o) =>
+      o.status !== "completed" ||
+      (o.orderType === "delivery" && !o.courierName) ||
+      o.posSyncInfo?.status === "synced"
+  );
+
+  if (!options?.force && !hasRelevantOrders) {
+    return {
+      ok: true,
+      updatedCount: 0,
+      message: "Güncellenecek açık sipariş bulunmuyor.",
+    };
+  }
+
+  try {
+    const accessToken = await authenticateSambaPos(cfg);
+
+    const startDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    const gqlRes = await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `query {
+        getTickets(start: "${startDate}", end: "${endDate}") {
+          id
+          number
+          isClosed
+          remainingAmount
+          totalAmount
+          note
+          entities {
+            name
+            type
+            typeId
+          }
+          states {
+            stateName
+            state
+          }
+        }
+        getEntities(type: "Paketçiler", take: 100) {
+          name
+        }
+      }`
+    );
+
+    // 1) SambaPOS'taki "Paketçiler" listesini sitedeki kurye listesiyle (settings.couriers) eşitle
+    const sambaCouriers = (
+      (gqlRes.data?.getEntities as Array<{ name?: string }>) || []
+    )
+      .map((e) => (e?.name || "").trim())
+      .filter(Boolean);
+
+    let settingsChanged = false;
+    const currentCouriers = [...(settings.couriers || [])];
+    const currentCourierPins = { ...(settings.courierPins || {}) };
+
+    for (const sc of sambaCouriers) {
+      if (
+        !currentCouriers.some((c) => c.toLowerCase() === sc.toLowerCase())
+      ) {
+        currentCouriers.push(sc);
+        if (!currentCourierPins[sc]) {
+          const digits = sc.replace(/\D/g, "");
+          currentCourierPins[sc] = digits
+            ? digits.repeat(4).slice(0, 4)
+            : "1111";
+        }
+        settingsChanged = true;
+      }
+    }
+
+    if (settingsChanged) {
+      updateSettings({
+        ...settings,
+        couriers: currentCouriers,
+        courierPins: currentCourierPins,
+      });
+    }
+
+    // 2) SambaPOS Fişlerini (Tickets) Sitedeki Siparişlerle Eşleştir ve Durum / Kurye Güncelle
+    const tickets = (gqlRes.data?.getTickets || []) as Array<{
+      id: number;
+      number: string;
+      isClosed: boolean;
+      remainingAmount: number;
+      totalAmount: number;
+      note?: string;
+      entities?: Array<{ name: string; type: string; typeId?: number }>;
+      states?: Array<{ stateName: string; state: string }>;
+    }>;
+
+    // Sipariş eşleştirme haritaları
+    const ticketByOrderNumber = new Map<number, (typeof tickets)[number]>();
+    const ticketByNumber = new Map<string, (typeof tickets)[number]>();
+    const ticketById = new Map<string, (typeof tickets)[number]>();
+
+    for (const t of tickets) {
+      if (!t) continue;
+      if (t.number) ticketByNumber.set(String(t.number).trim(), t);
+      if (t.id) ticketById.set(String(t.id).trim(), t);
+      if (t.note) {
+        const m = t.note.match(/Online Sipari[şs]\s*#(\d+)/i);
+        if (m?.[1]) {
+          ticketByOrderNumber.set(Number(m[1]), t);
+        }
+      }
+    }
+
+    let updatedCount = 0;
+
+    for (const ord of recentOrders) {
+      const extId = (ord.posSyncInfo?.externalTicketId || "").trim();
+      const matchedTicket =
+        ticketByOrderNumber.get(ord.orderNumber) ||
+        (extId ? ticketByNumber.get(extId) || ticketById.get(extId) : undefined);
+
+      if (!matchedTicket) continue;
+
+      const entities = Array.isArray(matchedTicket.entities)
+        ? matchedTicket.entities
+        : [];
+      const states = Array.isArray(matchedTicket.states)
+        ? matchedTicket.states
+        : [];
+
+      // Fişteki Kuryeyi (Paketçiler varlığı veya Paketçi Adı durumu) bul
+      const courierEntity = entities.find((e) => {
+        const tName = (e.type || "").toLowerCase();
+        return (
+          Number(e.typeId) === 3 ||
+          tName.includes("paket") ||
+          tName.includes("kurye")
+        );
+      });
+      const courierState = states.find((s) => {
+        const sName = (s.stateName || "").toLowerCase();
+        return sName.includes("paketçi") || sName.includes("kurye");
+      });
+
+      const sambaCourierName = (
+        courierEntity?.name ||
+        courierState?.state ||
+        ""
+      ).trim();
+
+      // Fişteki Paket ve Ödeme Durumlarını oku
+      const paketState = (
+        states.find((s) => (s.stateName || "").toLowerCase() === "paket")
+          ?.state || ""
+      ).trim();
+      const durumState = (
+        states.find((s) => (s.stateName || "").toLowerCase() === "durum")
+          ?.state || ""
+      ).trim();
+      const statusState = (
+        states.find((s) => (s.stateName || "").toLowerCase() === "status")
+          ?.state || ""
+      ).trim();
+
+      const isDeliveredInSamba =
+        paketState.toLowerCase() === "teslim edildi" ||
+        durumState.toLowerCase() === "ödendi" ||
+        (Boolean(matchedTicket.isClosed) &&
+          Number(matchedTicket.remainingAmount ?? 0) <= 0 &&
+          Number(matchedTicket.totalAmount ?? 0) > 0);
+
+      const isOutForDeliveryOrReadyInSamba =
+        !isDeliveredInSamba &&
+        (paketState.toLowerCase() === "yolda" ||
+          Boolean(sambaCourierName) ||
+          statusState.toLowerCase() === "hazır");
+
+      let nextStatus = ord.status;
+      if (isDeliveredInSamba) {
+        nextStatus = "completed";
+      } else if (
+        isOutForDeliveryOrReadyInSamba &&
+        ord.status !== "completed"
+      ) {
+        nextStatus = "ready";
+      }
+
+      const nextCourier = sambaCourierName || ord.courierName || undefined;
+      const statusChanged = nextStatus !== ord.status;
+      const courierChanged =
+        Boolean(sambaCourierName) && sambaCourierName !== (ord.courierName || "");
+
+      if (!statusChanged && !courierChanged) {
+        continue;
+      }
+
+      const updatedOrder = updateOrderStatus(
+        ord.id,
+        nextStatus,
+        undefined,
+        undefined,
+        nextCourier
+      );
+
+      if (updatedOrder) {
+        updatedCount++;
+
+        // Eğer posSyncInfo içinde henüz externalTicketId yoksa onu da kaydet
+        if (ord.posSyncInfo?.status !== "synced") {
+          updateOrderPosSyncInfo(ord.id, {
+            provider: "sambapos",
+            status: "synced",
+            externalTicketId: String(
+              matchedTicket.number || matchedTicket.id
+            ),
+            syncedAt: new Date().toISOString(),
+          });
+        }
+
+        // Müşteriye otomatik WhatsApp bildirimi gönder (Durum değiştiyse)
+        const digits = (updatedOrder.customerPhone || "").replace(/\D/g, "");
+        if (
+          statusChanged &&
+          settings.whatsappConfig?.sendOrderUpdates !== false &&
+          digits.length >= 10
+        ) {
+          if (updatedOrder.status === "ready") {
+            const courierNote = updatedOrder.courierName
+              ? `\n🛵 Kurye: *${updatedOrder.courierName}*`
+              : "";
+            const msg =
+              updatedOrder.orderType === "delivery"
+                ? `🛵 *${settings.name}*\n\nMerhaba *${updatedOrder.customerName}*, *#${updatedOrder.orderNumber}* numaralı siparişiniz kuryemize teslim edildi ve adresinize doğru yola çıktı!${courierNote}`
+                : `🔔 *${settings.name}*\n\nMerhaba *${updatedOrder.customerName}*, *#${updatedOrder.orderNumber}* numaralı siparişiniz hazır!`;
+            await sendWhatsAppMessage(
+              updatedOrder.customerPhone,
+              msg,
+              "order_status"
+            ).catch(() => {});
+          } else if (updatedOrder.status === "completed") {
+            const msg = `🎉 *${settings.name}*\n\n*#${updatedOrder.orderNumber}* numaralı siparişiniz teslim edildi. Bizi tercih ettiğiniz için teşekkür eder, afiyet olsun dileriz! ❤️`;
+            await sendWhatsAppMessage(
+              updatedOrder.customerPhone,
+              msg,
+              "order_status"
+            ).catch(() => {});
+          }
+        }
+      }
+    }
+
+    if (updatedCount > 0 || settingsChanged) {
+      await syncActivityWithCloud().catch(() => {});
+    }
+
+    return {
+      ok: true,
+      updatedCount,
+      message:
+        updatedCount > 0
+          ? `✅ SambaPOS'tan ${updatedCount} siparişin kurye / teslimat durumu siteye aktarıldı!`
+          : "SambaPOS ile sitedeki tüm sipariş durumları güncel.",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      updatedCount: 0,
+      message:
+        err instanceof Error
+          ? err.message
+          : "SambaPOS durum kontrolü sırasında hata oluştu.",
+    };
+  }
+}
+
+/**
+ * Siteden (/kitchen, /admin veya /courier ekranından) bir siparişe kurye atandığında veya
+ * "Teslim Edildi" yapıldığında, ilgili fişi SambaPOS tarafında da günceller.
+ */
+export async function syncSiteOrderUpdateToSambaPos(
+  order: Order
+): Promise<void> {
+  if (
+    process.env.NETLIFY === "true" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true"
+  ) {
+    return;
+  }
+
+  const cfg = getResolvedPosConfig().sambaPos;
+  if (!cfg.enabled || cfg.mode !== "graphql") return;
+  if (order.posSyncInfo?.status !== "synced") return;
+
+  try {
+    const accessToken = await authenticateSambaPos(cfg);
+    const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+
+    const startDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    const gqlRes = await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `query {
+        getTickets(start: "${startDate}", end: "${endDate}") {
+          id
+          number
+          note
+        }
+      }`
+    );
+
+    const tickets = (gqlRes.data?.getTickets || []) as Array<{
+      id: number;
+      number: string;
+      note?: string;
+    }>;
+
+    const extId = (order.posSyncInfo?.externalTicketId || "").trim();
+    const matched = tickets.find((t) => {
+      if (t.note && t.note.includes(`Online Sipariş #${order.orderNumber}`)) {
+        return true;
+      }
+      return (
+        extId &&
+        (String(t.number).trim() === extId || String(t.id).trim() === extId)
+      );
+    });
+
+    if (!matched?.id) return;
+
+    const ticketDbId = Number(matched.id);
+    const userName = cfg.userName || cfg.username || "Administrator";
+
+    if (order.status === "ready" && order.orderType === "delivery") {
+      await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `mutation {
+          s1: updateStateOfTicket(
+            ticketId: ${ticketDbId},
+            stateName: "Paket",
+            state: "Yolda",
+            userName: ${gStr(userName)}
+          )
+          ${
+            order.courierName
+              ? `s2: updateStateOfTicket(
+            ticketId: ${ticketDbId},
+            stateName: "Paketçi Adı",
+            state: ${gStr(order.courierName)},
+            userName: ${gStr(userName)}
+          )`
+              : ""
+          }
+          r: postTicketRefreshMessage(id: ${ticketDbId}) { id }
+        }`
+      ).catch(() => {});
+    } else if (order.status === "completed" && order.orderType === "delivery") {
+      await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `mutation {
+          s1: updateStateOfTicket(
+            ticketId: ${ticketDbId},
+            stateName: "Paket",
+            state: "Teslim Edildi",
+            userName: ${gStr(userName)}
+          )
+          r: postTicketRefreshMessage(id: ${ticketDbId}) { id }
+        }`
+      ).catch(() => {});
+    }
+  } catch {
+    // ignore background sync error
+  }
+}
+
+/**
+ * Kasa PC üzerinde (yerelde) çalışırken:
+ * 1) Hem yerel hem de Netlify/Turso buluttan yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS'a aktarır.
+ * 2) SambaPOS'ta kurye ataması veya "Teslim Edildi / Ödendi" yapılan siparişleri otomatik olarak sitede de günceller.
  */
 export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
   if (
@@ -992,35 +1430,45 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
 
   const posCfg = getResolvedPosConfig();
   const sambaCfg = posCfg.sambaPos;
-  if (!sambaCfg.enabled || sambaCfg.syncTrigger === "manual") {
+  if (!sambaCfg.enabled) {
     return;
   }
 
   isAutoSyncRunning = true;
   try {
-    const allOrders = getOrders();
-    const cutoffMs = Date.now() - 12 * 60 * 60 * 1000;
-    const candidates = allOrders.filter((o) => {
-      if (o.posSyncInfo?.status === "synced") return false;
-      if (o.posSyncInfo?.status === "failed") return false;
-      const createdMs = new Date(o.createdAt).getTime();
-      if (createdMs < cutoffMs) return false;
+    // A) Site -> SambaPOS (Yeni siparişleri SambaPOS'a gönder)
+    if (sambaCfg.syncTrigger !== "manual") {
+      const allOrders = getOrders();
+      const cutoffMs = Date.now() - 12 * 60 * 60 * 1000;
+      const candidates = allOrders.filter((o) => {
+        if (o.posSyncInfo?.status === "synced") return false;
+        if (o.posSyncInfo?.status === "failed") return false;
+        const createdMs = new Date(o.createdAt).getTime();
+        if (createdMs < cutoffMs) return false;
 
-      if (sambaCfg.syncTrigger === "on_created") {
-        return o.status !== "rejected";
-      }
-      if (sambaCfg.syncTrigger === "on_accepted") {
-        return (
-          o.status === "accepted" ||
-          o.status === "ready" ||
-          o.status === "completed"
-        );
-      }
-      return false;
-    });
+        if (sambaCfg.syncTrigger === "on_created") {
+          return o.status !== "rejected";
+        }
+        if (sambaCfg.syncTrigger === "on_accepted") {
+          return (
+            o.status === "accepted" ||
+            o.status === "ready" ||
+            o.status === "completed"
+          );
+        }
+        return false;
+      });
 
-    for (const ord of candidates) {
-      await sendOrderToSambaPos(ord);
+      for (const ord of candidates) {
+        await sendOrderToSambaPos(ord);
+      }
+    }
+
+    // B) SambaPOS -> Site (SambaPOS'ta kurye atanan veya teslim edilen siparişleri sitede güncelle)
+    const now = Date.now();
+    if (now - lastReverseSyncMs >= 2500) {
+      lastReverseSyncMs = now;
+      await syncOrderStatusesFromSambaPos();
     }
   } catch (e) {
     console.warn("autoSyncOrdersWithPosIfNeeded warning:", e);
