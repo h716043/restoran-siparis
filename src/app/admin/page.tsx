@@ -181,6 +181,13 @@ export default function AdminDashboardPage() {
   const [newZoneFee, setNewZoneFee] = useState(0);
   const [newZoneMinutes, setNewZoneMinutes] = useState("25-35 dk");
 
+  // 🏷️ Toplu Fiyat Güncelleme Aracı State'leri
+  const [bulkCategoryId, setBulkCategoryId] = useState("all");
+  const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
+  const [bulkValue, setBulkValue] = useState<number>(10);
+  const [bulkRounding, setBulkRounding] = useState<"none" | "nearest_5" | "nearest_10">("nearest_5");
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+
   const loadData = async () => {
     const [menuRes, profRes, ordRes, crmRes] = await Promise.all([
       fetch("/api/menu"),
@@ -441,7 +448,22 @@ export default function AdminDashboardPage() {
   const totalExpensesAmount = periodExpenses
     .filter((e) => e.category !== "cash_float")
     .reduce((s, e) => s + e.amount, 0);
-  const netProfit = totalRevenue - totalExpensesAmount;
+
+  // 📦 Satılan Ürünlerin Toplam Maliyet Hesabı (costPrice bazlı)
+  const totalProductCost = validOrders.reduce((orderSum, ord) => {
+    const itemsCost = ord.items.reduce((itemSum, oi) => {
+      const matchedMenu = items.find(
+        (m) => m.id === oi.menuItemId || m.name === oi.name
+      );
+      const unitCost = matchedMenu?.costPrice
+        ? Number(matchedMenu.costPrice)
+        : 0;
+      return itemSum + unitCost * (oi.quantity || 1);
+    }, 0);
+    return orderSum + itemsCost;
+  }, 0);
+
+  const netProfit = totalRevenue - totalProductCost - totalExpensesAmount;
   const netCashInDrawer = totalCashFloat + cashTotal - totalExpensesAmount;
 
   // 🛵 Kurye Tahsilat & Gün Sonu Hesaplaşma Özeti
@@ -1255,16 +1277,20 @@ export default function AdminDashboardPage() {
 
               <div className="bg-white p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-xs space-y-1">
                 <div className="flex items-center justify-between text-xs font-bold uppercase text-emerald-700">
-                  <span>Seçili Dönem NET KÂR</span>
+                  <span>Seçili Dönem GERÇEK NET KÂR</span>
                   <TrendingUp className="w-4 h-4 text-emerald-600" />
                 </div>
                 <div className="text-2xl font-black text-emerald-700">
                   {netProfit.toFixed(2)} {settings?.currency || "₺"}
                 </div>
-                <p className="text-xs text-slate-500">
-                  Giderler: -{totalExpensesAmount.toFixed(2)}{" "}
-                  {settings?.currency || "₺"} • Kasadaki Net Nakit:{" "}
-                  {netCashInDrawer.toFixed(2)} {settings?.currency || "₺"}
+                <p className="text-[11px] text-slate-600 leading-snug">
+                  Ürün Maliyeti: -{totalProductCost.toFixed(2)}{" "}
+                  {settings?.currency || "₺"} • Giderler: -
+                  {totalExpensesAmount.toFixed(2)} {settings?.currency || "₺"}
+                </p>
+                <p className="text-[11px] font-bold text-emerald-800">
+                  Kasadaki Net Nakit: {netCashInDrawer.toFixed(2)}{" "}
+                  {settings?.currency || "₺"}
                 </p>
               </div>
 
@@ -2445,6 +2471,120 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+              {/* 🏷️ Toplu Fiyat Güncelleme (Zam / İndirim) Aracı */}
+              <div className="bg-gradient-to-r from-orange-50/70 via-amber-50/50 to-white p-4 rounded-2xl border border-orange-200 shadow-xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                      🏷️ Toplu Fiyat Güncelleme (Tek Tıkla Zam / İndirim)
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Tüm menüye veya seçili kategoriye yüzdelik (%) ya da sabit tutar (₺) bazında toplu fiyat güncellemesi uygulayın.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-end">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Hedef Kategori
+                    </label>
+                    <select
+                      value={bulkCategoryId}
+                      onChange={(e) => setBulkCategoryId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white"
+                    >
+                      <option value="all">Tüm Kategoriler ({items.length} Ürün)</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({items.filter((i) => i.categoryId === c.id).length})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      İşlem Türü
+                    </label>
+                    <select
+                      value={bulkMode}
+                      onChange={(e) =>
+                        setBulkMode(e.target.value as "percent" | "fixed")
+                      }
+                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white"
+                    >
+                      <option value="percent">Yüzde Oranı (%)</option>
+                      <option value="fixed">Sabit Tutar ({settings?.currency || "₺"})</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Değer (+ Zam / - İndirim)
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={bulkValue}
+                      onChange={(e) => setBulkValue(Number(e.target.value))}
+                      placeholder="Örn: 10 veya -10"
+                      className="w-full px-3 py-2 text-xs font-extrabold border border-slate-300 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Fiyat Yuvarlama
+                    </label>
+                    <select
+                      value={bulkRounding}
+                      onChange={(e) =>
+                        setBulkRounding(
+                          e.target.value as "none" | "nearest_5" | "nearest_10"
+                        )
+                      }
+                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white"
+                    >
+                      <option value="nearest_5">En Yakın 5 ₺&apos;ye Yuvarla</option>
+                      <option value="nearest_10">En Yakın 10 ₺&apos;ye Yuvarla</option>
+                      <option value="none">Yuvarlama Yapma (Tam Kuruş)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      disabled={bulkUpdating || !bulkValue}
+                      onClick={async () => {
+                        if (!bulkValue) return;
+                        setBulkUpdating(true);
+                        try {
+                          const res = await fetch("/api/menu", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              type: "bulk_update_prices",
+                              categoryId: bulkCategoryId,
+                              mode: bulkMode,
+                              value: Number(bulkValue),
+                              rounding: bulkRounding,
+                            }),
+                          });
+                          if (res.ok) {
+                            const d = await res.json();
+                            await loadData();
+                            showToast(
+                              `🏷️ ${d.updatedCount || 0} ürünün fiyatı başarıyla güncellendi!`
+                            );
+                          }
+                        } finally {
+                          setBulkUpdating(false);
+                        }
+                      }}
+                      className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-black transition cursor-pointer shadow-xs"
+                    >
+                      {bulkUpdating ? "Uygulanıyor..." : "⚡ Fiyatları Güncelle"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-3">
                 {items
                   .filter((it) =>
@@ -2489,6 +2629,23 @@ export default function AdminDashboardPage() {
                               <span>
                                 {item.price.toFixed(2)} {settings?.currency}
                               </span>
+                              {item.costPrice !== undefined &&
+                                item.costPrice > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    Maliyet: {item.costPrice.toFixed(2)}{" "}
+                                    {settings?.currency} • Kâr:{" "}
+                                    {(item.price - item.costPrice).toFixed(2)}{" "}
+                                    {settings?.currency} (%
+                                    {item.price > 0
+                                      ? Math.round(
+                                          ((item.price - item.costPrice) /
+                                            item.price) *
+                                            100
+                                        )
+                                      : 0}
+                                    )
+                                  </span>
+                                )}
                               <span>•</span>
                               <span className="text-xs font-normal text-slate-500">
                                 {item.modifierGroups.length} Opsiyon Grubu
@@ -5057,6 +5214,48 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   );
                 })}
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    TV Alt Kayan Yazı Hızı
+                  </label>
+                  <select
+                    value={settings.tvTickerSpeed || "normal"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        tvTickerSpeed: e.target.value as
+                          | "slow"
+                          | "normal"
+                          | "fast",
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white font-semibold"
+                  >
+                    <option value="slow">🐢 Yavaş (135 Saniye - Çok Rahat Okuma)</option>
+                    <option value="normal">🚶 Normal (85 Saniye - İdeal Hız)</option>
+                    <option value="fast">⚡ Hızlı (50 Saniye - Dinamik Akış)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    TV Özel Alt Duyuru / Wi-Fi / Kampanya Yazısı (İsteğe Bağlı)
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.tvCustomNote || ""}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        tvCustomNote: e.target.value,
+                      })
+                    }
+                    placeholder="Örn: Ücretsiz Wi-Fi Şifremiz: Lezzet2026 • Afiyet Olsun!"
+                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Kurye Listesi & Her Kuryeye Özel Şifre Yönetimi */}
@@ -5607,10 +5806,10 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Fiyat ({settings?.currency}) *
+                  Satış Fiyatı ({settings?.currency}) *
                 </label>
                 <input
                   type="number"
@@ -5624,6 +5823,28 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     })
                   }
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-emerald-700 mb-1">
+                  Birim Maliyet ({settings?.currency} - Opsiyonel)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={editingItem.costPrice ?? ""}
+                  onChange={(e) =>
+                    setEditingItem({
+                      ...editingItem,
+                      costPrice:
+                        e.target.value === ""
+                          ? undefined
+                          : Number(e.target.value),
+                    })
+                  }
+                  placeholder="Örn: 85"
+                  className="w-full px-3 py-2 text-sm border border-emerald-200 bg-emerald-50/30 rounded-xl"
                 />
               </div>
               <div>
@@ -6365,10 +6586,30 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
             </div>
           )}
 
+          <div className="pt-1 space-y-1 text-xs border-b border-dashed border-black pb-2 mb-2">
+            <div className="flex justify-between font-bold">
+              <span>BRÜT CİRO:</span>
+              <span>
+                {totalRevenue.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Satılan Ürün Maliyeti:</span>
+              <span>
+                -{totalProductCost.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Günlük Kasa Giderleri:</span>
+              <span>
+                -{totalExpensesAmount.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          </div>
           <div className="pt-1 font-black flex justify-between text-sm">
-            <span>NET GENEL CİRO:</span>
+            <span>GERÇEK NET KÂR:</span>
             <span>
-              {totalRevenue.toFixed(2)} {settings?.currency}
+              {netProfit.toFixed(2)} {settings?.currency}
             </span>
           </div>
           <div className="text-center pt-3 text-[10px]">

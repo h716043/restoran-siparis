@@ -11,6 +11,7 @@ import {
   createReservation,
   updateReservationStatus,
   resetDailyMenuStocks,
+  bulkUpdateMenuPrices,
 } from "@/lib/db";
 import {
   pullActivityFromCloud,
@@ -138,6 +139,17 @@ export async function POST(req: NextRequest) {
       );
       await pushCatalogToCloud();
       return NextResponse.json({ items: refreshedItems });
+    }
+
+    if (body.type === "bulk_update_prices") {
+      const updatedItems = bulkUpdateMenuPrices({
+        categoryId: body.categoryId || "all",
+        mode: body.mode === "fixed" ? "fixed" : "percent",
+        value: Number(body.value || 0),
+        rounding: body.rounding || "nearest_5",
+      });
+      await pushCatalogToCloud();
+      return NextResponse.json({ items: updatedItems });
     }
 
     if (body.type === "category") {

@@ -1850,49 +1850,106 @@ function CustomerMenuContent() {
         </div>
       )}
 
-      {/* Kompakt Aktif Sipariş Canlı Takip Çubuğu */}
+      {/* Canlı Sipariş Takip & Kurye Zaman Çizelgesi Kartı */}
       {bannerActiveOrder && (
         <div className="max-w-7xl mx-auto w-full px-4 mt-3">
-          <div className="bg-orange-50 border border-orange-300 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className="bg-orange-600 text-white font-black px-2 py-0.5 rounded-md">
-                #{bannerActiveOrder.orderNumber}
-              </span>
-              {bannerActiveOrder.scheduledTime && (
-                <span className="bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> {bannerActiveOrder.scheduledTime}
+          <div className="bg-gradient-to-r from-orange-50 via-amber-50/70 to-white border-2 border-orange-300 rounded-2xl p-3.5 shadow-sm space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="bg-orange-600 text-white font-black px-2.5 py-1 rounded-lg">
+                  CANLI TAKİP • #{bannerActiveOrder.orderNumber}
                 </span>
+                {bannerActiveOrder.scheduledTime && (
+                  <span className="bg-indigo-600 text-white font-bold px-2.5 py-1 rounded-lg flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> {bannerActiveOrder.scheduledTime}
+                  </span>
+                )}
+                {bannerActiveOrder.courierName && (
+                  <span className="bg-emerald-600 text-white font-extrabold px-2.5 py-1 rounded-lg inline-flex items-center gap-1 shadow-2xs">
+                    🛵 Kuryeniz: {bannerActiveOrder.courierName}
+                  </span>
+                )}
+                <span className="font-extrabold text-slate-900">
+                  {bannerActiveOrder.status === "pending" &&
+                    "⏳ Siparişiniz restorana iletildi, onay bekleniyor..."}
+                  {bannerActiveOrder.status === "accepted" &&
+                    `👨‍🍳 Mutfakta özenle hazırlanıyor (~${
+                      bannerActiveOrder.estimatedMinutes ||
+                      settings?.estimatedPrepMinutes
+                    } dk)`}
+                  {bannerActiveOrder.status === "ready" &&
+                    (bannerActiveOrder.orderType === "delivery"
+                      ? `🛵 Siparişiniz yola çıktı! ${
+                          bannerActiveOrder.courierName
+                            ? `Kuryemiz ${bannerActiveOrder.courierName} adresinize geliyor.`
+                            : "Kuryemiz adresinize geliyor."
+                        }`
+                      : "🍽️ Siparişiniz servise / teslime hazır!")}
+                </span>
+              </div>
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountTab("active_orders");
+                    setAccountModalOpen(true);
+                  }}
+                  className="font-extrabold text-xs bg-white hover:bg-orange-100 text-orange-700 border border-orange-300 px-3 py-1.5 rounded-xl transition cursor-pointer"
+                >
+                  Sipariş Detayı →
+                </button>
               )}
-              <span className="font-bold text-slate-900">
-                {bannerActiveOrder.status === "pending" &&
-                  "Siparişiniz restorana iletildi, onay bekleniyor..."}
-                {bannerActiveOrder.status === "accepted" &&
-                  `Siparişiniz Hazırlanıyor (~${
-                    bannerActiveOrder.estimatedMinutes ||
-                    settings?.estimatedPrepMinutes
-                  } dk)`}
-                {bannerActiveOrder.status === "ready" &&
-                  (bannerActiveOrder.orderType === "delivery"
-                    ? `Siparişiniz yola çıktı! ${
-                        bannerActiveOrder.courierName
-                          ? `Kurye (${bannerActiveOrder.courierName}) geliyor.`
-                          : "Kuryemiz geliyor."
-                      }`
-                    : "Siparişiniz servise / teslime hazır!")}
-              </span>
             </div>
-            {currentUser && (
-              <button
-                type="button"
-                onClick={() => {
-                  setAccountTab("active_orders");
-                  setAccountModalOpen(true);
-                }}
-                className="font-bold text-orange-700 hover:underline"
-              >
-                Detayları Gör →
-              </button>
-            )}
+
+            {/* 4 Adımlı Canlı Sipariş Zaman Çizelgesi */}
+            {(() => {
+              const stepIdx =
+                bannerActiveOrder.status === "pending"
+                  ? 1
+                  : bannerActiveOrder.status === "accepted"
+                  ? 2
+                  : bannerActiveOrder.status === "ready"
+                  ? 3
+                  : 4;
+              const steps = [
+                { id: 1, label: "1. Sipariş Alındı", icon: "📝" },
+                { id: 2, label: "2. Mutfakta Hazırlanıyor", icon: "👨‍🍳" },
+                {
+                  id: 3,
+                  label:
+                    bannerActiveOrder.orderType === "delivery"
+                      ? bannerActiveOrder.courierName
+                        ? `3. Kurye Yolda (${bannerActiveOrder.courierName})`
+                        : "3. Kurye Yolda"
+                      : "3. Teslime Hazır",
+                  icon: bannerActiveOrder.orderType === "delivery" ? "🛵" : "🍽️",
+                },
+                { id: 4, label: "4. Teslim Edildi", icon: "✅" },
+              ];
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  {steps.map((st) => {
+                    const active = stepIdx >= st.id;
+                    const isCurrent = stepIdx === st.id;
+                    return (
+                      <div
+                        key={st.id}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition ${
+                          isCurrent
+                            ? "bg-orange-600 text-white border-orange-600 shadow-xs"
+                            : active
+                            ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                            : "bg-white/70 text-slate-400 border-slate-200"
+                        }`}
+                      >
+                        <span>{st.icon}</span>
+                        <span className="truncate">{st.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2669,20 +2726,66 @@ function CustomerMenuContent() {
                           </span>
                         </div>
 
-                        <div className="text-sm font-bold text-slate-900">
-                          {ord.status === "pending" &&
-                            "⏳ Restoran onayı bekleniyor..."}
-                          {ord.status === "accepted" &&
-                            `👨‍🍳 Hazırlanıyor (Tahmini Süre: ${
-                              ord.estimatedMinutes ||
-                              settings?.estimatedPrepMinutes
-                            } dk)`}
-                          {ord.status === "ready" &&
-                            (ord.orderType === "delivery"
-                              ? `🛵 Kuryemiz${
-                                  ord.courierName ? ` (${ord.courierName})` : ""
-                                } yola çıktı, adresinize geliyor!`
-                              : "🍽️ Siparişiniz servise / teslime hazır!")}
+                        <div className="text-sm font-bold text-slate-900 flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            {ord.status === "pending" &&
+                              "⏳ Restoran onayı bekleniyor..."}
+                            {ord.status === "accepted" &&
+                              `👨‍🍳 Hazırlanıyor (Tahmini Süre: ${
+                                ord.estimatedMinutes ||
+                                settings?.estimatedPrepMinutes
+                              } dk)`}
+                            {ord.status === "ready" &&
+                              (ord.orderType === "delivery"
+                                ? `🛵 Kuryemiz${
+                                    ord.courierName ? ` (${ord.courierName})` : ""
+                                  } yola çıktı, adresinize geliyor!`
+                                : "🍽️ Siparişiniz servise / teslime hazır!")}
+                          </span>
+                          {ord.courierName && (
+                            <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-emerald-600 text-white px-2.5 py-1 rounded-lg">
+                              🛵 Atanan Kurye: {ord.courierName}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 4 Adımlı Görsel Sipariş Durum Çubuğu */}
+                        <div className="grid grid-cols-4 gap-1.5 text-[11px] font-bold">
+                          {[
+                            { s: 1, t: "1. Alındı" },
+                            { s: 2, t: "2. Mutfakta" },
+                            {
+                              s: 3,
+                              t:
+                                ord.orderType === "delivery"
+                                  ? "3. Yolda"
+                                  : "3. Hazır",
+                            },
+                            { s: 4, t: "4. Teslim" },
+                          ].map((st) => {
+                            const curStep =
+                              ord.status === "pending"
+                                ? 1
+                                : ord.status === "accepted"
+                                ? 2
+                                : ord.status === "ready"
+                                ? 3
+                                : 4;
+                            return (
+                              <div
+                                key={st.s}
+                                className={`text-center py-1.5 px-2 rounded-lg border ${
+                                  curStep === st.s
+                                    ? "bg-orange-600 text-white border-orange-600"
+                                    : curStep > st.s
+                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                    : "bg-white text-slate-400 border-slate-200"
+                                }`}
+                              >
+                                {st.t}
+                              </div>
+                            );
+                          })}
                         </div>
 
                         <div className="bg-white rounded-xl p-3 border border-slate-200/80 space-y-1 text-xs">

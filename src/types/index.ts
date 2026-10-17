@@ -35,6 +35,8 @@ export interface MenuItem {
   name: string;
   description: string;
   price: number;
+  /** Ürün birim maliyeti (TL) — Z raporunda gerçek net kâr hesabı için (isteğe bağlı) */
+  costPrice?: number;
   imageUrl: string;
   available: boolean;
   popular?: boolean;
@@ -93,6 +95,10 @@ export interface Order {
   orderType: OrderType;
   status: OrderStatus;
   tableNumber?: string;
+  /** Masadaki kişi / kuver sayısı (ekmek, meze, servis açılışı için) */
+  guestCount?: number;
+  /** Mutfak ekranında en üste sabitlenen Acil / VIP sipariş mi? */
+  isPriority?: boolean;
   userId?: string;
   customerName: string;
   customerPhone: string;
@@ -213,7 +219,7 @@ export interface Coupon {
 export interface TableCall {
   id: string;
   tableNumber: string;
-  type: "waiter" | "bill_cash" | "bill_card";
+  type: "waiter" | "bill_cash" | "bill_card" | "kitchen_pickup";
   status: "pending" | "resolved";
   createdAt: string;
 }
@@ -318,6 +324,8 @@ export interface RestaurantSettings {
   waiterPins?: Record<string, string>; // Her garsonun kendine özel giriş şifresi / PIN kodu
   defaultDailyStocks?: Record<string, number>; // Ürün bazlı sabah varsayılan günlük porsiyon stok şablonu
   tvDisplayOrderTypes?: OrderType[]; // TV Sıra Çağrı ekranında (/tv) hangi sipariş türlerinin gösterileceği (delivery, pickup, dine_in)
+  tvTickerSpeed?: "slow" | "normal" | "fast"; // TV alt kayan yazı hızı
+  tvCustomNote?: string; // TV alt bandında gösterilecek özel duyuru (Wi-Fi şifresi vb.)
   whatsappConfig?: WhatsAppConfig;
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;

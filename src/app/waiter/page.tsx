@@ -65,6 +65,7 @@ export default function WaiterTerminalPage() {
   // Cart & Modifier Modal for Waiter POS
   const [cart, setCart] = useState<OrderItem[]>([]);
   const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
+  const [guestCount, setGuestCount] = useState<number>(2);
   const [orderNote, setOrderNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -566,6 +567,7 @@ export default function WaiterTerminalPage() {
         body: JSON.stringify({
           orderType: "dine_in",
           tableNumber: selectedTable,
+          guestCount: guestCount > 0 ? guestCount : undefined,
           customerName: `Masa ${selectedTable} (${staffLabel})`,
           customerPhone: "05000000000",
           paymentMethod: "pos_at_table",
@@ -1063,7 +1065,36 @@ export default function WaiterTerminalPage() {
       )}
 
       {/* Main Content */}
-      <main className="max-w-3xl mx-auto p-3">
+      <main className="max-w-3xl mx-auto p-3 space-y-3">
+        {/* Mutfaktan Garsona Acil Tezgah Çağrısı Banner */}
+        {tableRequests
+          .filter((req) => req.type === "kitchen_pickup")
+          .map((req) => (
+            <div
+              key={req.id}
+              className="bg-gradient-to-r from-red-600 via-amber-500 to-red-600 text-stone-950 rounded-2xl p-3.5 shadow-2xl border-2 border-white/80 flex flex-wrap items-center justify-between gap-2 animate-pulse"
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">👨‍🍳🔔</span>
+                <div>
+                  <div className="text-xs sm:text-sm font-black uppercase tracking-wide">
+                    ŞEF MUTFAK TEZGAHINA ÇAĞIRIYOR!
+                  </div>
+                  <div className="text-xs font-extrabold">
+                    {req.tableNumber} — Yemek sıcak, hemen teslim alın!
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleResolveRequest(req.id)}
+                className="px-3.5 py-2 rounded-xl bg-stone-950 text-amber-300 hover:bg-stone-900 font-black text-xs shadow cursor-pointer"
+              >
+                ✓ Tezgahtan Aldım
+              </button>
+            </div>
+          ))}
+
         {/* =========================================================
             TAB 1: SALON & MASALAR (CANLI MASA HARİTASI)
            ========================================================= */}
@@ -1256,7 +1287,12 @@ export default function WaiterTerminalPage() {
                               {formatCurrency(totalBill)}
                             </div>
                             <div className="text-[11px] text-stone-300 flex items-center justify-between">
-                              <span>{totalItemCount} ürün</span>
+                              <span>
+                                {totalItemCount} ürün
+                                {tableOrders[0]?.guestCount
+                                  ? ` • 👥 ${tableOrders[0].guestCount} Kişi`
+                                  : ""}
+                              </span>
                               <span className="text-stone-400">
                                 ⏱️ {elapsedMins} dk
                               </span>
@@ -1331,6 +1367,27 @@ export default function WaiterTerminalPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                {/* Kuver / Kişi Sayısı Hızlı Seçici */}
+                <div className="flex items-center gap-1 bg-stone-950 border border-stone-800 rounded-xl px-2 py-1">
+                  <span className="text-[11px] font-bold text-stone-400 mr-0.5">
+                    👥 Kuver:
+                  </span>
+                  {[1, 2, 3, 4, 5, 6].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setGuestCount(cnt)}
+                      className={`w-6 h-6 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                        guestCount === cnt
+                          ? "bg-amber-500 text-stone-950"
+                          : "bg-stone-900 text-stone-400 hover:text-white"
+                      }`}
+                    >
+                      {cnt === 6 ? "6+" : cnt}
+                    </button>
+                  ))}
                 </div>
 
                 <input
@@ -2239,10 +2296,14 @@ export default function WaiterTerminalPage() {
                   >
                     <div>
                       <div className="text-sm font-black text-white">
-                        Masa {req.tableNumber}
+                        {req.type === "kitchen_pickup"
+                          ? `👨‍🍳 Mutfak Tezgahı (${req.tableNumber})`
+                          : `Masa ${req.tableNumber}`}
                       </div>
                       <div className="text-xs text-red-200 font-semibold">
-                        {req.type === "bill_cash"
+                        {req.type === "kitchen_pickup"
+                          ? "🔔 Şef Tezgaha Çağırıyor (Yemek Hazır / Soğuyor)"
+                          : req.type === "bill_cash"
                           ? "💵 Hesap İstiyor (Nakit)"
                           : req.type === "bill_card"
                           ? "💳 Hesap İstiyor (Kart / POS)"
@@ -2250,19 +2311,21 @@ export default function WaiterTerminalPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTable(String(req.tableNumber));
-                          setBillPaymentMethod(
-                            req.type === "bill_card" ? "card" : "cash"
-                          );
-                          setActiveTab("bill");
-                        }}
-                        className="px-3 py-2 rounded-xl bg-amber-500 text-stone-950 font-black text-xs"
-                      >
-                        🧾 Adisyona Git
-                      </button>
+                      {req.type !== "kitchen_pickup" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTable(String(req.tableNumber));
+                            setBillPaymentMethod(
+                              req.type === "bill_card" ? "card" : "cash"
+                            );
+                            setActiveTab("bill");
+                          }}
+                          className="px-3 py-2 rounded-xl bg-amber-500 text-stone-950 font-black text-xs"
+                        >
+                          🧾 Adisyona Git
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleResolveRequest(req.id)}

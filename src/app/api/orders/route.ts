@@ -65,6 +65,8 @@ export async function GET(req: NextRequest) {
         slogan: settings.slogan,
         currency: settings.currency || "₺",
         tvDisplayOrderTypes: allowedTvTypes,
+        tvTickerSpeed: settings.tvTickerSpeed || "normal",
+        tvCustomNote: settings.tvCustomNote ?? "",
         announcementBar: settings.announcementBar || null,
         happyHourConfig: settings.happyHourConfig || null,
         featuredItems,
@@ -365,6 +367,8 @@ export async function POST(req: NextRequest) {
     const order = createOrder({
       orderType: body.orderType,
       tableNumber: body.tableNumber,
+      guestCount: body.guestCount ? Number(body.guestCount) : undefined,
+      isPriority: Boolean(body.isPriority),
       userId: customerRecord?.id || body.userId,
       customerName: body.customerName || "Misafir",
       customerPhone: body.customerPhone || "-",

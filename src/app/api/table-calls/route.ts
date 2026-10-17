@@ -25,7 +25,11 @@ export async function POST(req: NextRequest) {
     await pullActivityFromCloud(true);
     const body = await req.json();
     const tableNumber = String(body.tableNumber || "").trim();
-    const type = body.type as "waiter" | "bill_cash" | "bill_card";
+    const type = body.type as
+      | "waiter"
+      | "bill_cash"
+      | "bill_card"
+      | "kitchen_pickup";
 
     if (!tableNumber || !type) {
       return NextResponse.json(

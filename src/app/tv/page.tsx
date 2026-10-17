@@ -36,6 +36,10 @@ export default function TvOrderQueuePage() {
   const [tvOrderTypes, setTvOrderTypes] = useState<
     Array<"dine_in" | "pickup" | "delivery">
   >(["pickup", "dine_in", "delivery"]);
+  const [tvTickerSpeed, setTvTickerSpeed] = useState<"slow" | "normal" | "fast">(
+    "normal"
+  );
+  const [tvCustomNote, setTvCustomNote] = useState<string>("");
   const [announcementText, setAnnouncementText] = useState<string>("");
   const [happyHourSummary, setHappyHourSummary] = useState<string>("");
   const [featuredItems, setFeaturedItems] = useState<
@@ -79,6 +83,16 @@ export default function TvOrderQueuePage() {
       if (data.currency) setCurrency(data.currency);
       if (Array.isArray(data.tvDisplayOrderTypes)) {
         setTvOrderTypes(data.tvDisplayOrderTypes);
+      }
+      if (
+        data.tvTickerSpeed === "slow" ||
+        data.tvTickerSpeed === "normal" ||
+        data.tvTickerSpeed === "fast"
+      ) {
+        setTvTickerSpeed(data.tvTickerSpeed);
+      }
+      if (typeof data.tvCustomNote === "string") {
+        setTvCustomNote(data.tvCustomNote);
       }
       if (data.announcementBar?.enabled && data.announcementBar?.text) {
         setAnnouncementText(
@@ -428,7 +442,17 @@ export default function TvOrderQueuePage() {
         </div>
 
         <div className="flex-1 overflow-hidden relative ml-4">
-          <div className="animate-tv-marquee items-center">
+          <div
+            className="animate-tv-marquee items-center"
+            style={{
+              animationDuration:
+                tvTickerSpeed === "slow"
+                  ? "135s"
+                  : tvTickerSpeed === "fast"
+                  ? "50s"
+                  : "85s",
+            }}
+          >
             {[0, 1].map((halfIdx) => (
               <div
                 key={halfIdx}
@@ -443,6 +467,12 @@ export default function TvOrderQueuePage() {
                     ) : (
                       <span className="inline-flex items-center gap-2 bg-orange-500/20 border border-orange-500/40 text-orange-200 text-sm sm:text-base font-black px-4 py-1.5 rounded-xl whitespace-nowrap">
                         🍽️ {restaurantName} — {slogan} • Sıcak & Taze Lezzetler!
+                      </span>
+                    )}
+
+                    {tvCustomNote && (
+                      <span className="inline-flex items-center gap-2 bg-sky-500/20 border border-sky-500/40 text-sky-200 text-sm sm:text-base font-black px-4 py-1.5 rounded-xl whitespace-nowrap">
+                        {tvCustomNote}
                       </span>
                     )}
 

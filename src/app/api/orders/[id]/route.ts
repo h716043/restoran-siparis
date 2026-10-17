@@ -119,6 +119,20 @@ export async function PATCH(
       return NextResponse.json({ order: toggled });
     }
 
+    // Mutfak ekranında siparişi Acil / Öncelikli (VIP) olarak sabitleme veya kaldırma
+    if (body.action === "toggle_priority") {
+      const { toggleOrderPriority } = await import("@/lib/db");
+      const toggled = toggleOrderPriority(id);
+      if (!toggled) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      await syncActivityWithCloud();
+      return NextResponse.json({ order: toggled });
+    }
+
     // Açık masa adisyonuna sonradan ürün ekleme
     if (body.action === "append_items") {
       const { appendItemsToOrder } = await import("@/lib/db");

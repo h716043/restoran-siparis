@@ -82,6 +82,7 @@ export default function KitchenTabletPage() {
   const [posModalOpen, setPosModalOpen] = useState(false);
   const [posOrderType, setPosOrderType] = useState<OrderType>("delivery");
   const [posTableNumber, setPosTableNumber] = useState<string>("1");
+  const [posGuestCount, setPosGuestCount] = useState<number>(2);
   const [posPhone, setPosPhone] = useState<string>("");
   const [posName, setPosName] = useState<string>("");
   const [posAddress, setPosAddress] = useState<string>("");
@@ -428,6 +429,42 @@ export default function KitchenTabletPage() {
     }
   };
 
+  // Mutfak Ekranında Siparişi "Acil / Öncelikli (VIP)" Olarak En Üste Sabitleme
+  const handleToggleOrderPriority = async (orderId: string) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId ? { ...o, isPriority: !o.isPriority } : o
+      )
+    );
+    try {
+      await fetch(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_priority" }),
+      });
+      fetchOrders();
+    } catch (e) {
+      console.error("Öncelik değiştirilemedi:", e);
+    }
+  };
+
+  // Mutfaktan Garsona Tek Tuşla "Tezgaha Gel / Yemek Soğuyor" Çağrı Zili
+  const handleCallWaiterToKitchen = async (label: string) => {
+    try {
+      await fetch("/api/table-calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableNumber: label,
+          type: "kitchen_pickup",
+        }),
+      });
+      fetchOrders();
+    } catch (e) {
+      console.error("Garson tezgaha çağrılamadı:", e);
+    }
+  };
+
   const handlePosSubmitOrder = async (andPrint: boolean) => {
     if (posCart.length === 0) return;
     setPosSubmitting(true);
@@ -475,6 +512,10 @@ export default function KitchenTabletPage() {
           isStaffPosOrder: true,
           orderType: posOrderType,
           tableNumber: posOrderType === "dine_in" ? posTableNumber : undefined,
+          guestCount:
+            posOrderType === "dine_in" && posGuestCount > 0
+              ? posGuestCount
+              : undefined,
           customerName:
             posName.trim() ||
             (posOrderType === "dine_in"
@@ -894,14 +935,16 @@ export default function KitchenTabletPage() {
     });
   };
 
-  const pendingOrders = orders.filter(
-    (o) => o.status === "pending" && matchesStationFilter(o)
-  );
-  const preparingOrders = orders.filter(
-    (o) =>
-      (o.status === "accepted" || o.status === "ready") &&
-      matchesStationFilter(o)
-  );
+  const pendingOrders = orders
+    .filter((o) => o.status === "pending" && matchesStationFilter(o))
+    .sort((a, b) => Number(Boolean(b.isPriority)) - Number(Boolean(a.isPriority)));
+  const preparingOrders = orders
+    .filter(
+      (o) =>
+        (o.status === "accepted" || o.status === "ready") &&
+        matchesStationFilter(o)
+    )
+    .sort((a, b) => Number(Boolean(b.isPriority)) - Number(Boolean(a.isPriority)));
   const completedOrders = orders.filter((o) => o.status === "completed");
   const rejectedOrders = orders.filter((o) => o.status === "rejected");
   const pendingTableCalls = tableCalls.filter((c) => c.status === "pending");
@@ -944,6 +987,17 @@ export default function KitchenTabletPage() {
         </div>
 
         <div className="relative flex items-center gap-2">
+          {/* Mutfaktan Garsona Tek Tuşla Tezgah Çağrı Zili */}
+          <button
+            type="button"
+            onClick={() => handleCallWaiterToKitchen("Mutfak Tezgahı")}
+            className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2.5 rounded-xl transition shadow-lg cursor-pointer"
+            title="Garsonların ekranında sesli/titreşimli 'Şef Tezgaha Çağırıyor' uyarısı çalar"
+          >
+            <Bell className="w-4 h-4" />
+            <span>🔔 Garsonu Tezgaha Çağır</span>
+          </button>
+
           {/* TEK BUTON ALTINDA TOPLANMIŞ HIZLI İŞLEMLER & MENÜ */}
           <button
             type="button"
@@ -1405,7 +1459,11 @@ export default function KitchenTabletPage() {
                   return (
                     <div
                       key={order.id}
-                      className="bg-slate-900 border-2 border-amber-500 rounded-2xl p-5 shadow-xl space-y-4"
+                      className={`bg-slate-900 border-2 rounded-2xl p-5 shadow-xl space-y-4 ${
+                        order.isPriority
+                          ? "border-rose-500 ring-2 ring-rose-500/40"
+                          : "border-amber-500"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
                         <div>
@@ -1413,8 +1471,25 @@ export default function KitchenTabletPage() {
                             <span className="text-lg font-black text-amber-400">
                               #{order.orderNumber}
                             </span>
+                            {order.isPriority && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-black bg-rose-600 text-white px-2.5 py-0.5 rounded-full animate-pulse">
+                                🚨 ACİL / ÖNCELİKLİ
+                              </span>
+                            )}
                             {renderOrderTypeBadge(order)}
                             {renderSlaTimerBadge(order.createdAt)}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleOrderPriority(order.id)}
+                              className={`text-[11px] font-extrabold px-2 py-0.5 rounded-lg border transition cursor-pointer ${
+                                order.isPriority
+                                  ? "bg-rose-600 text-white border-rose-400"
+                                  : "bg-slate-800 hover:bg-rose-600/30 text-slate-300 border-slate-700"
+                              }`}
+                              title="Siparişi Acil/VIP Olarak En Üste Sabitle"
+                            >
+                              {order.isPriority ? "🚨 Acil ✓" : "🚨 Acil Sabitle"}
+                            </button>
                             {order.scheduledTime && (
                               <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-full">
                                 <Clock className="w-3.5 h-3.5" /> İLERİ SAAT:{" "}
@@ -1763,7 +1838,9 @@ export default function KitchenTabletPage() {
                     <div
                       key={order.id}
                       className={`bg-slate-900 rounded-2xl p-5 space-y-4 border ${
-                        isLate
+                        order.isPriority
+                          ? "border-2 border-rose-500 ring-2 ring-rose-500/40 shadow-lg shadow-rose-950/30"
+                          : isLate
                           ? "border-2 border-red-500 shadow-lg shadow-red-950/30"
                           : "border-slate-800"
                       }`}
@@ -1774,6 +1851,11 @@ export default function KitchenTabletPage() {
                             <span className="text-lg font-black text-white">
                               #{order.orderNumber}
                             </span>
+                            {order.isPriority && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-black bg-rose-600 text-white px-2.5 py-0.5 rounded-full animate-pulse">
+                                🚨 ACİL / ÖNCELİKLİ
+                              </span>
+                            )}
                             {renderOrderTypeBadge(order)}
                             {renderSlaTimerBadge(order.createdAt)}
                             {order.scheduledTime && (
@@ -1813,13 +1895,39 @@ export default function KitchenTabletPage() {
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleOrderPriority(order.id)}
+                            className={`text-[11px] font-extrabold px-2.5 py-1.5 rounded-xl border transition cursor-pointer ${
+                              order.isPriority
+                                ? "bg-rose-600 text-white border-rose-400"
+                                : "bg-slate-800 hover:bg-rose-600/30 text-slate-300 border-slate-700"
+                            }`}
+                            title="Siparişi Acil/VIP Olarak En Üste Sabitle"
+                          >
+                            {order.isPriority ? "🚨 Acil ✓" : "🚨 Acil"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCallWaiterToKitchen(
+                                order.orderType === "dine_in" && order.tableNumber
+                                  ? `Masa ${order.tableNumber} (#${order.orderNumber})`
+                                  : `Sipariş #${order.orderNumber}`
+                              )
+                            }
+                            className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 px-2.5 py-1.5 rounded-xl border border-amber-500/40 transition cursor-pointer"
+                            title="Garsonu bu siparişi tezgahtan alması için çağır"
+                          >
+                            🔔 Garson Çağır
+                          </button>
                           <button
                             onClick={() => handlePrint(order)}
-                            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl border border-slate-700 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer"
                           >
                             <Printer className="w-4 h-4 text-orange-400" />
-                            80mm Fiş Yazdır
+                            Fiş
                           </button>
                         </div>
                       </div>
@@ -3518,24 +3626,47 @@ export default function KitchenTabletPage() {
                   </div>
 
                   {posOrderType === "dine_in" ? (
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                        Masa Seçin
-                      </label>
-                      <select
-                        value={posTableNumber}
-                        onChange={(e) => setPosTableNumber(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
-                      >
-                        {Array.from(
-                          { length: settings?.tableCount || 15 },
-                          (_, i) => String(i + 1)
-                        ).map((n) => (
-                          <option key={n} value={n}>
-                            Masa {n}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="space-y-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          Masa Seçin
+                        </label>
+                        <select
+                          value={posTableNumber}
+                          onChange={(e) => setPosTableNumber(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                        >
+                          {Array.from(
+                            { length: settings?.tableCount || 15 },
+                            (_, i) => String(i + 1)
+                          ).map((n) => (
+                            <option key={n} value={n}>
+                              Masa {n}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          👥 Masadaki Kişi Sayısı (Kuver)
+                        </label>
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {[1, 2, 3, 4, 5, 6].map((cnt) => (
+                            <button
+                              key={cnt}
+                              type="button"
+                              onClick={() => setPosGuestCount(cnt)}
+                              className={`py-1.5 rounded-lg text-xs font-black border transition cursor-pointer ${
+                                posGuestCount === cnt
+                                  ? "bg-purple-600 border-purple-400 text-white"
+                                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              {cnt === 6 ? "6+" : `${cnt} Kişi`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-2.5">
@@ -3746,7 +3877,11 @@ export default function KitchenTabletPage() {
             </div>
             <p className="mt-1 font-bold text-xs">
               {selectedOrderForPrint.orderType === "dine_in"
-                ? `🍽️ MASA SİPARİŞİ — MASA ${selectedOrderForPrint.tableNumber}`
+                ? `🍽️ MASA SİPARİŞİ — MASA ${selectedOrderForPrint.tableNumber}${
+                    selectedOrderForPrint.guestCount
+                      ? ` (${selectedOrderForPrint.guestCount} KİŞİ / KUVER)`
+                      : ""
+                  }`
                 : selectedOrderForPrint.orderType === "pickup"
                 ? "🛍️ GEL-AL (RESTORANDAN TESLİM)"
                 : "🛵 ADRESE PAKET SERVİS"}
@@ -3931,7 +4066,7 @@ export default function KitchenTabletPage() {
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+      <span className="inline-flex items-center gap-1 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
         ⏱️ {mins} dk
       </span>
     );
@@ -3942,6 +4077,7 @@ export default function KitchenTabletPage() {
       return (
         <span className="inline-flex items-center gap-1 text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2.5 py-0.5 rounded-full">
           <QrCode className="w-3.5 h-3.5" /> Masa {order.tableNumber}
+          {order.guestCount ? ` • 👥 ${order.guestCount} Kişi` : ""}
         </span>
       );
     }

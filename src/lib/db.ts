@@ -49,7 +49,7 @@ const DB_PATH = path.join(DATA_DIR, "restaurant.sqlite");
 
 const globalForDb = globalThis as unknown as {
   sqliteDb?: DatabaseSync;
-  schemaMigratedV10?: boolean;
+  schemaMigratedV11?: boolean;
 };
 
 export function getDb(): DatabaseSync {
@@ -58,10 +58,10 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     globalForDb.sqliteDb = db;
-    globalForDb.schemaMigratedV10 = true;
-  } else if (!globalForDb.schemaMigratedV10) {
+    globalForDb.schemaMigratedV11 = true;
+  } else if (!globalForDb.schemaMigratedV11) {
     initSchema(globalForDb.sqliteDb);
-    globalForDb.schemaMigratedV10 = true;
+    globalForDb.schemaMigratedV11 = true;
   }
   return globalForDb.sqliteDb;
 }
@@ -248,7 +248,10 @@ function initSchema(db: DatabaseSync) {
     "ALTER TABLE orders ADD COLUMN reviewText TEXT;",
     "ALTER TABLE orders ADD COLUMN reviewedAt TEXT;",
     "ALTER TABLE orders ADD COLUMN splitPaymentJson TEXT;",
+    "ALTER TABLE orders ADD COLUMN guestCount INTEGER DEFAULT NULL;",
+    "ALTER TABLE orders ADD COLUMN isPriority INTEGER DEFAULT 0;",
     "ALTER TABLE menu_items ADD COLUMN dailyStock INTEGER DEFAULT NULL;",
+    "ALTER TABLE menu_items ADD COLUMN costPrice REAL DEFAULT 0;",
     "ALTER TABLE users ADD COLUMN loyaltyPoints REAL DEFAULT 0;",
   ];
   for (const sql of alterCols) {
@@ -843,6 +846,14 @@ export function getSettings(): RestaurantSettings {
     parsed.tvDisplayOrderTypes = ["pickup", "dine_in", "delivery"];
     updated = true;
   }
+  if (!parsed.tvTickerSpeed) {
+    parsed.tvTickerSpeed = "normal";
+    updated = true;
+  }
+  if (parsed.tvCustomNote === undefined) {
+    parsed.tvCustomNote = "📶 Ücretsiz Wi-Fi Şifremiz: Lezzet2026 • Afiyet Olsun!";
+    updated = true;
+  }
   if (!Array.isArray(parsed.reservations)) {
     parsed.reservations = [];
     updated = true;
@@ -889,6 +900,7 @@ export function getMenuItems(): MenuItem[] {
     name: string;
     description: string;
     price: number;
+    costPrice?: number | null;
     imageUrl: string;
     available: number;
     popular: number;
@@ -902,6 +914,10 @@ export function getMenuItems(): MenuItem[] {
     name: r.name,
     description: r.description,
     price: r.price,
+    costPrice:
+      r.costPrice !== null && r.costPrice !== undefined
+        ? Number(r.costPrice)
+        : 0,
     imageUrl: r.imageUrl,
     available: Boolean(r.available),
     popular: Boolean(r.popular),
@@ -925,18 +941,21 @@ export function saveMenuItem(item: MenuItem): MenuItem {
   if (normalizedStock !== null && normalizedStock <= 0) {
     item.available = false;
   }
+  const normalizedCost = Math.max(0, Number(item.costPrice || 0));
+  item.costPrice = normalizedCost;
 
   const existing = db.prepare("SELECT id FROM menu_items WHERE id = ?").get(item.id);
   if (existing) {
     db.prepare(`
       UPDATE menu_items
-      SET categoryId = ?, name = ?, description = ?, price = ?, imageUrl = ?, available = ?, popular = ?, dailyStock = ?, modifierGroupsJson = ?
+      SET categoryId = ?, name = ?, description = ?, price = ?, costPrice = ?, imageUrl = ?, available = ?, popular = ?, dailyStock = ?, modifierGroupsJson = ?
       WHERE id = ?
     `).run(
       item.categoryId,
       item.name,
       item.description,
       item.price,
+      normalizedCost,
       item.imageUrl,
       item.available ? 1 : 0,
       item.popular ? 1 : 0,
@@ -948,14 +967,15 @@ export function saveMenuItem(item: MenuItem): MenuItem {
     const id = item.id || `item-${Date.now()}`;
     item.id = id;
     db.prepare(`
-      INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, dailyStock, modifierGroupsJson)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO menu_items (id, categoryId, name, description, price, costPrice, imageUrl, available, popular, dailyStock, modifierGroupsJson)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       item.categoryId,
       item.name,
       item.description,
       item.price,
+      normalizedCost,
       item.imageUrl,
       item.available ? 1 : 0,
       item.popular ? 1 : 0,
@@ -972,6 +992,41 @@ export function saveMenuItem(item: MenuItem): MenuItem {
     updateSettings(s);
   }
   return item;
+}
+
+/** Tüm menüde veya seçili kategoride toplu yüzdelik/sabit fiyat artışı veya indirimi uygular */
+export function bulkUpdateMenuPrices(params: {
+  categoryId?: string;
+  mode: "percent" | "fixed";
+  value: number;
+  rounding?: "none" | "nearest_5" | "nearest_10";
+}): MenuItem[] {
+  const db = getDb();
+  const items = getMenuItems();
+  const applyPriceChange = (oldPrice: number) => {
+    let next =
+      params.mode === "percent"
+        ? oldPrice * (1 + params.value / 100)
+        : oldPrice + params.value;
+    next = Math.max(5, next);
+    if (params.rounding === "nearest_5") {
+      next = Math.round(next / 5) * 5;
+    } else if (params.rounding === "nearest_10") {
+      next = Math.round(next / 10) * 10;
+    } else {
+      next = Math.round(next);
+    }
+    return Math.max(5, next);
+  };
+
+  for (const item of items) {
+    if (params.categoryId && params.categoryId !== "all" && item.categoryId !== params.categoryId) {
+      continue;
+    }
+    const newPrice = applyPriceChange(item.price);
+    db.prepare("UPDATE menu_items SET price = ? WHERE id = ?").run(newPrice, item.id);
+  }
+  return getMenuItems();
 }
 
 /** Sabah / Vardiya başında günlük sınırlı ürünleri varsayılan porsiyon stoklarına yeniler ve satışa açar */
@@ -1045,6 +1100,8 @@ export function getOrders(): Order[] {
     orderType: Order["orderType"];
     status: Order["status"];
     tableNumber: string | null;
+    guestCount?: number | null;
+    isPriority?: number | null;
     userId: string | null;
     customerName: string;
     customerPhone: string;
@@ -1079,6 +1136,8 @@ export function getOrders(): Order[] {
     orderType: r.orderType,
     status: r.status,
     tableNumber: r.tableNumber || undefined,
+    guestCount: r.guestCount ? Number(r.guestCount) : undefined,
+    isPriority: Boolean(r.isPriority),
     userId: r.userId || undefined,
     customerName: r.customerName,
     customerPhone: r.customerPhone,
@@ -1128,6 +1187,8 @@ export function getOrderById(id: string): Order | null {
     orderType: Order["orderType"];
     status: Order["status"];
     tableNumber: string | null;
+    guestCount?: number | null;
+    isPriority?: number | null;
     userId: string | null;
     customerName: string;
     customerPhone: string;
@@ -1163,6 +1224,8 @@ export function getOrderById(id: string): Order | null {
     orderType: r.orderType,
     status: r.status,
     tableNumber: r.tableNumber || undefined,
+    guestCount: r.guestCount ? Number(r.guestCount) : undefined,
+    isPriority: Boolean(r.isPriority),
     userId: r.userId || undefined,
     customerName: r.customerName,
     customerPhone: r.customerPhone,
@@ -1218,19 +1281,21 @@ export function createOrder(
 
   db.prepare(`
     INSERT INTO orders (
-      id, orderNumber, orderType, status, tableNumber, userId,
+      id, orderNumber, orderType, status, tableNumber, guestCount, isPriority, userId,
       customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
       scheduledTime, orderNote, paymentMethod, splitPaymentJson, subtotal, discountAmount, couponCode,
       deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
       loyaltyPointsEarned, loyaltyPointsUsed,
       itemsJson, createdAt, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     order.id,
     order.orderNumber,
     order.orderType,
     order.status,
     order.tableNumber || null,
+    order.guestCount ? Number(order.guestCount) : null,
+    order.isPriority ? 1 : 0,
     order.userId || null,
     order.customerName,
     order.customerPhone,
@@ -1260,6 +1325,21 @@ export function createOrder(
   adjustMenuStockForItems(order.items, "decrement");
 
   return order;
+}
+
+/** Mutfak ekranında siparişi Acil / Öncelikli (VIP) olarak en üste sabitler veya kaldırır */
+export function toggleOrderPriority(orderId: string): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+  const nextPriority = existing.isPriority ? 0 : 1;
+  const updatedAt = new Date().toISOString();
+  db.prepare("UPDATE orders SET isPriority = ?, updatedAt = ? WHERE id = ?").run(
+    nextPriority,
+    updatedAt,
+    orderId
+  );
+  return getOrderById(orderId);
 }
 
 export function submitOrderReview(
