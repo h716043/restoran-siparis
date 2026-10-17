@@ -116,6 +116,7 @@ export default function KitchenTabletPage() {
   const [splitCardAmount, setSplitCardAmount] = useState<string>("");
   const [tableExtraDiscount, setTableExtraDiscount] = useState<string>("0");
   const [tableActionLoading, setTableActionLoading] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const knownPendingIds = useRef<Set<string>>(new Set());
 
@@ -837,132 +838,194 @@ export default function KitchenTabletPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* KASA POS / TELEFON SİPARİŞİ OLUŞTUR */}
+        <div className="relative flex items-center gap-2">
+          {/* TEK BUTON ALTINDA TOPLANMIŞ HIZLI İŞLEMLER & MENÜ */}
           <button
-            onClick={() => {
-              setPosOrderType("delivery");
-              setPosModalOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-2 rounded-xl transition shadow-md cursor-pointer"
-          >
-            <PlusCircle className="w-4 h-4" />
-            ➕ Kasa POS / Telefon Siparişi
-          </button>
-
-          {/* Kurye Cep Ekranı Kısayolu */}
-          <Link
-            href="/courier"
-            target="_blank"
-            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-orange-300 border border-slate-700 px-3 py-2 rounded-xl transition"
-          >
-            <Truck className="w-4 h-4" />
-            Kurye Ekranı
-          </Link>
-
-          {/* TV Müşteri Sıra Çağrı Ekranı Kısayolu */}
-          <Link
-            href="/tv"
-            target="_blank"
-            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-3 py-2 rounded-xl transition"
-          >
-            📺 TV Sıra Ekranı
-          </Link>
-
-          {/* Simülasyon: Masa Rezervasyonu */}
-          <button
-            onClick={createTestReservation}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white px-3 py-2 rounded-xl transition shadow-sm"
-          >
-            <CalendarDays className="w-4 h-4" />
-            Test: Rezervasyon
-          </button>
-
-          {/* Simülasyon: Masa Çağrısı */}
-          <button
-            onClick={createTestTableCall}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded-xl transition shadow-sm"
-          >
-            <HandPlatter className="w-4 h-4" />
-            Test: Masa Çağrısı
-          </button>
-
-          {/* Hızlı Test Siparişi Butonu */}
-          <button
-            onClick={createTestOrder}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl transition shadow-sm"
-          >
-            <PlusCircle className="w-4 h-4" />
-            Test: Sipariş Gönder
-          </button>
-
-          {/* Onayda Otomatik Termal Fiş Yazdır Aç/Kapat */}
-          <button
-            onClick={() => {
-              const next = !autoPrintOnAccept;
-              setAutoPrintOnAccept(next);
-              try {
-                localStorage.setItem(
-                  "restoran_auto_print_receipt",
-                  next ? "1" : "0"
-                );
-              } catch {
-                // ignore
-              }
-            }}
-            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl transition cursor-pointer ${
-              autoPrintOnAccept
-                ? "bg-orange-600/20 text-orange-300 border border-orange-500/40"
-                : "bg-slate-800 text-slate-400 border border-slate-700"
-            }`}
-            title="Açık olduğunda, yeni siparişi kabul ettiğiniz anda 80mm adisyon fişi otomatik yazdırılır"
-          >
-            <Printer className="w-4 h-4" />
-            {autoPrintOnAccept ? "Oto-Fiş: AÇIK" : "Oto-Fiş: KAPALI"}
-          </button>
-
-          {/* Ses Aç/Kapat */}
-          <button
-            onClick={() => {
-              const next = !soundEnabled;
-              setSoundEnabled(next);
-              if (next) soundAlert.playOrderRing();
-            }}
-            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl transition ${
-              soundEnabled
-                ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30"
-                : "bg-red-600/20 text-red-400 border border-red-500/30"
-            }`}
-          >
-            {soundEnabled ? (
-              <>
-                <Volume2 className="w-4 h-4" /> Sesli Zil: AÇIK
-              </>
-            ) : (
-              <>
-                <VolumeX className="w-4 h-4" /> Sesli Zil: KAPALI
-              </>
-            )}
-          </button>
-
-          <Link
-            href="/admin"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl border border-slate-700"
+            type="button"
+            onClick={() => setHeaderMenuOpen((prev) => !prev)}
+            className="inline-flex items-center gap-2 text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white px-4 py-2.5 rounded-xl transition shadow-lg cursor-pointer"
           >
             <Settings className="w-4 h-4" />
-            Yönetim Paneli
-          </Link>
-
-          <button
-            onClick={async () => {
-              await fetch("/api/staff-auth", { method: "DELETE" });
-              window.location.href = "/staff-login?target=kitchen";
-            }}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold bg-red-500/20 hover:bg-red-500/30 text-red-300 px-3 py-2 rounded-xl border border-red-500/30 transition"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            Kilitle
+            <span>⚡ Hızlı İşlemler & Menü</span>
+            <span className="text-[10px] bg-black/25 px-1.5 py-0.5 rounded-md">
+              {headerMenuOpen ? "▲" : "▾"}
+            </span>
           </button>
+
+          {headerMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setHeaderMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 space-y-3">
+                {/* 1. Kasa POS Sipariş Girişi */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      setPosOrderType("delivery");
+                      setPosModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-2.5 rounded-xl transition shadow-md cursor-pointer"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    ➕ Kasa POS / Telefon Siparişi
+                  </button>
+                </div>
+
+                {/* 2. Ekranlar & Paneller */}
+                <div className="space-y-1.5 border-t border-slate-800 pt-2.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+                    Ekranlar & Paneller
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Link
+                      href="/courier"
+                      target="_blank"
+                      onClick={() => setHeaderMenuOpen(false)}
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-orange-300 border border-slate-700 px-2.5 py-2 rounded-xl transition"
+                    >
+                      <Truck className="w-3.5 h-3.5 shrink-0" />
+                      <span>Kurye Ekranı</span>
+                    </Link>
+                    <Link
+                      href="/tv"
+                      target="_blank"
+                      onClick={() => setHeaderMenuOpen(false)}
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-2.5 py-2 rounded-xl transition"
+                    >
+                      <span>📺 TV Ekranı</span>
+                    </Link>
+                    <Link
+                      href="/admin"
+                      onClick={() => setHeaderMenuOpen(false)}
+                      className="col-span-2 flex items-center justify-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl transition"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Yönetim Paneli (/admin)</span>
+                    </Link>
+                  </div>
+                </div>
+
+                {/* 3. Ses & Yazıcı Ayarları */}
+                <div className="space-y-1.5 border-t border-slate-800 pt-2.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+                    Tablet Ses & Yazıcı Ayarları
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !soundEnabled;
+                        setSoundEnabled(next);
+                        if (next) soundAlert.playOrderRing();
+                      }}
+                      className={`flex items-center justify-center gap-1.5 text-xs font-bold px-2.5 py-2 rounded-xl border transition cursor-pointer ${
+                        soundEnabled
+                          ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30"
+                          : "bg-red-600/20 text-red-400 border-red-500/30"
+                      }`}
+                    >
+                      {soundEnabled ? (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5" /> Zil: AÇIK
+                        </>
+                      ) : (
+                        <>
+                          <VolumeX className="w-3.5 h-3.5" /> Zil: KAPALI
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !autoPrintOnAccept;
+                        setAutoPrintOnAccept(next);
+                        try {
+                          localStorage.setItem(
+                            "restoran_auto_print_receipt",
+                            next ? "1" : "0"
+                          );
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      className={`flex items-center justify-center gap-1.5 text-xs font-bold px-2.5 py-2 rounded-xl border transition cursor-pointer ${
+                        autoPrintOnAccept
+                          ? "bg-orange-600/20 text-orange-300 border-orange-500/40"
+                          : "bg-slate-800 text-slate-400 border-slate-700"
+                      }`}
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      {autoPrintOnAccept ? "Oto-Fiş: AÇIK" : "Oto-Fiş: KAPALI"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Test & Simülasyon Araçları */}
+                <div className="space-y-1.5 border-t border-slate-800 pt-2.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+                    Hızlı Test & Simülasyon
+                  </div>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHeaderMenuOpen(false);
+                        createTestOrder();
+                      }}
+                      className="flex items-center justify-center gap-1.5 text-xs font-semibold bg-indigo-600/25 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-500/30 px-3 py-2 rounded-xl transition cursor-pointer"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      Test: Örnek Sipariş Gönder
+                    </button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          createTestTableCall();
+                        }}
+                        className="flex items-center justify-center gap-1 text-[11px] font-semibold bg-purple-600/25 hover:bg-purple-600 text-purple-200 hover:text-white border border-purple-500/30 px-2.5 py-2 rounded-xl transition cursor-pointer"
+                      >
+                        <HandPlatter className="w-3.5 h-3.5" />
+                        Test: Masa Çağrısı
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          createTestReservation();
+                        }}
+                        className="flex items-center justify-center gap-1 text-[11px] font-semibold bg-amber-600/25 hover:bg-amber-600 text-amber-200 hover:text-white border border-amber-500/30 px-2.5 py-2 rounded-xl transition cursor-pointer"
+                      >
+                        <CalendarDays className="w-3.5 h-3.5" />
+                        Test: Rezervasyon
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. Güvenlik / Çıkış */}
+                <div className="border-t border-slate-800 pt-2.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch("/api/staff-auth", { method: "DELETE" });
+                      window.location.href = "/staff-login?target=kitchen";
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs font-bold bg-red-500/20 hover:bg-red-600 text-red-300 hover:text-white px-3 py-2 rounded-xl border border-red-500/30 transition cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    Ekranı Kilitle / Çıkış Yap
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
