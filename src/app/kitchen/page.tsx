@@ -110,11 +110,14 @@ export default function KitchenTabletPage() {
   );
   const [transferTargetTable, setTransferTargetTable] = useState<string>("1");
   const [tablePaymentMode, setTablePaymentMode] = useState<
-    "cash" | "card" | "split"
+    "cash" | "card" | "split" | "credit"
   >("cash");
   const [splitCashAmount, setSplitCashAmount] = useState<string>("");
   const [splitCardAmount, setSplitCardAmount] = useState<string>("");
   const [tableExtraDiscount, setTableExtraDiscount] = useState<string>("0");
+  const [tableCreditAccountId, setTableCreditAccountId] = useState<string>("");
+  const [tableCreditCustomerName, setTableCreditCustomerName] =
+    useState<string>("");
   const [tableActionLoading, setTableActionLoading] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
@@ -534,12 +537,22 @@ export default function KitchenTabletPage() {
     }
   };
 
-  // Parçalı / Nakit / Kart Tahsilat ile Masa Hesabını Kapatma
+  // Parçalı / Nakit / Kart / Cari Tahsilat ile Masa Hesabını Kapatma
   const handleCloseTableWithPaymentModal = async (
     tableNum: string,
     tableOrders: Order[],
     andPrint: boolean
   ) => {
+    const selectedAcc = (settings?.creditAccounts || []).find(
+      (a) => a.id === tableCreditAccountId
+    );
+    const creditName =
+      selectedAcc?.customerName || tableCreditCustomerName.trim();
+    if (tablePaymentMode === "credit" && !creditName) {
+      alert("Lütfen veresiye/cari yazılacak müşteri adını seçin veya yazın.");
+      return;
+    }
+
     setTableActionLoading(true);
     try {
       const rawTotal = tableOrders.reduce((s, o) => s + o.totalAmount, 0);
@@ -548,13 +561,13 @@ export default function KitchenTabletPage() {
       const cashVal =
         tablePaymentMode === "cash"
           ? finalPayable
-          : tablePaymentMode === "card"
+          : tablePaymentMode === "card" || tablePaymentMode === "credit"
           ? 0
           : Math.max(0, Number(splitCashAmount || 0));
       const cardVal =
         tablePaymentMode === "card"
           ? finalPayable
-          : tablePaymentMode === "cash"
+          : tablePaymentMode === "cash" || tablePaymentMode === "credit"
           ? 0
           : Math.max(0, Number(splitCardAmount || 0));
 
@@ -574,10 +587,14 @@ export default function KitchenTabletPage() {
                 ? "cash"
                 : tablePaymentMode === "card"
                 ? "card_at_door"
+                : tablePaymentMode === "credit"
+                ? "credit"
                 : "pos_at_table",
             cashAmount: cashVal,
             cardAmount: cardVal,
             discountAmount: extraDisc,
+            creditAccountId: selectedAcc?.id || undefined,
+            creditAccountName: creditName || undefined,
           }),
         }),
         ...tableCalls
@@ -882,6 +899,14 @@ export default function KitchenTabletPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <Link
+                      href="/waiter"
+                      target="_blank"
+                      onClick={() => setHeaderMenuOpen(false)}
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 px-2.5 py-2 rounded-xl transition"
+                    >
+                      <span>📱 Garson Ekranı</span>
+                    </Link>
+                    <Link
                       href="/courier"
                       target="_blank"
                       onClick={() => setHeaderMenuOpen(false)}
@@ -901,10 +926,10 @@ export default function KitchenTabletPage() {
                     <Link
                       href="/admin"
                       onClick={() => setHeaderMenuOpen(false)}
-                      className="col-span-2 flex items-center justify-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl transition"
+                      className="flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-2 rounded-xl transition"
                     >
-                      <Settings className="w-3.5 h-3.5" />
-                      <span>Yönetim Paneli (/admin)</span>
+                      <Settings className="w-3.5 h-3.5 shrink-0" />
+                      <span>Yönetim Paneli</span>
                     </Link>
                   </div>
                 </div>
@@ -2284,7 +2309,7 @@ export default function KitchenTabletPage() {
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             <button
                               type="button"
                               onClick={() => setTablePaymentMode("cash")}
@@ -2305,7 +2330,7 @@ export default function KitchenTabletPage() {
                                   : "bg-slate-900 border-slate-800 text-slate-300"
                               }`}
                             >
-                              💳 Tamamı Kart (POS)
+                              💳 Tamamı Kart
                             </button>
                             <button
                               type="button"
@@ -2323,9 +2348,68 @@ export default function KitchenTabletPage() {
                                   : "bg-slate-900 border-slate-800 text-slate-300"
                               }`}
                             >
-                              ⚖️ Parçalı (Nakit + Kart)
+                              ⚖️ Parçalı Hesap
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTablePaymentMode("credit")}
+                              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                tablePaymentMode === "credit"
+                                  ? "bg-amber-600 border-amber-400 text-white"
+                                  : "bg-slate-900 border-slate-800 text-slate-300"
+                              }`}
+                            >
+                              🧾 Cari / Veresiye
                             </button>
                           </div>
+
+                          {/* Cariye / Veresiyeye Yaz Detay Kutusu */}
+                          {tablePaymentMode === "credit" && (
+                            <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3.5 space-y-2.5">
+                              <div className="text-xs font-extrabold text-amber-300">
+                                🧾 Cari / Veresiye Defterine Yazılacak Müşteri:
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <select
+                                  value={tableCreditAccountId}
+                                  onChange={(e) => {
+                                    setTableCreditAccountId(e.target.value);
+                                    const found = (
+                                      settings?.creditAccounts || []
+                                    ).find((a) => a.id === e.target.value);
+                                    if (found) {
+                                      setTableCreditCustomerName(
+                                        found.customerName
+                                      );
+                                    }
+                                  }}
+                                  className="bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                                >
+                                  <option value="">
+                                    + Yeni Müşteri Yaz veya Kayıtlı Seç...
+                                  </option>
+                                  {(settings?.creditAccounts || []).map(
+                                    (acc) => (
+                                      <option key={acc.id} value={acc.id}>
+                                        {acc.customerName} (Bakiye:{" "}
+                                        {acc.balance.toFixed(0)}{" "}
+                                        {settings?.currency})
+                                      </option>
+                                    )
+                                  )}
+                                </select>
+                                <input
+                                  type="text"
+                                  value={tableCreditCustomerName}
+                                  onChange={(e) =>
+                                    setTableCreditCustomerName(e.target.value)
+                                  }
+                                  placeholder="Müşteri / Firma Adı Soyadı..."
+                                  className="bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                                />
+                              </div>
+                            </div>
+                          )}
 
                           {/* Masa İskontosu */}
                           <div className="flex items-center justify-between gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">

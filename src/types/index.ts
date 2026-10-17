@@ -7,7 +7,7 @@ export type OrderStatus =
   | "completed"    // Tamamlandı
   | "rejected";    // Reddedildi / İptal
 
-export type PaymentMethod = "cash" | "card_at_door" | "pos_at_table";
+export type PaymentMethod = "cash" | "card_at_door" | "pos_at_table" | "credit";
 
 export interface ModifierOption {
   id: string;
@@ -80,6 +80,9 @@ export interface OrderItem {
 export interface SplitPaymentInfo {
   cashAmount: number;
   cardAmount: number;
+  courierSettled?: boolean;
+  creditAccountId?: string;
+  creditAccountName?: string;
 }
 
 export interface Order {
@@ -222,6 +225,52 @@ export interface LoyaltyConfig {
   minRedeemPoints: number; // Örn: En az 20 TL puan biriktiğinde kullanabilme
 }
 
+/** 1. ÖZELLİK: Günlük Gider Kaydı & Kasa Bozuk Para Avansı */
+export interface CashExpense {
+  id: string;
+  title: string; // Örn: "Manav / Yeşillik Ödemesi", "Kurye Benzin", "Sabah Kasa Avansı"
+  category:
+    | "supplier"
+    | "fuel"
+    | "staff"
+    | "utility"
+    | "cash_float"
+    | "other";
+  amount: number;
+  paymentMethod: "cash" | "card";
+  createdAt: string;
+}
+
+/** 3. ÖZELLİK: Müşteri Veresiye / Cari Hesap (Açık Hesap) Defteri */
+export interface CreditTransaction {
+  id: string;
+  type: "debt" | "payment"; // debt = Borç ekleme (Sipariş), payment = Tahsilat alındı
+  amount: number;
+  description: string;
+  orderNumber?: number;
+  createdAt: string;
+}
+
+export interface CreditAccount {
+  id: string;
+  customerName: string; // Örn: "Ahmet Bey (Yandaki Eczane)"
+  customerPhone: string;
+  companyTitle?: string;
+  balance: number; // Güncel kalan borç (TL)
+  transactions: CreditTransaction[];
+  updatedAt: string;
+}
+
+/** 5. ÖZELLİK: Saatlik Happy Hour / Öğle Menüsü Otomatik İndirim Kuralı */
+export interface HappyHourConfig {
+  enabled: boolean;
+  title: string; // Örn: "Öğle Molası Happy Hour İndirimi"
+  startTime: string; // Örn: "12:00"
+  endTime: string; // Örn: "16:00"
+  discountPercent: number; // Örn: 15 (%15 indirim)
+  categoryIds?: string[]; // Boşsa tüm menüde geçerli
+}
+
 export type StorefrontThemeId =
   | "light-classic"
   | "light-emerald"
@@ -249,6 +298,9 @@ export interface RestaurantSettings {
   storefrontTheme?: StorefrontThemeId; // 3 Açık + 3 Koyu tema seçimi
   allowCustomerThemeSwitch?: boolean; // Müşteri vitrinde kendi temasını değiştirebilsin mi?
   loyaltyConfig?: LoyaltyConfig;
+  happyHourConfig?: HappyHourConfig;
+  cashExpenses?: CashExpense[];
+  creditAccounts?: CreditAccount[];
   announcementBar?: AnnouncementBarConfig;
   deliveryZones?: DeliveryZone[];
   coupons?: Coupon[];
@@ -257,6 +309,7 @@ export interface RestaurantSettings {
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;
 }
+
 
 
 

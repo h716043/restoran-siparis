@@ -770,6 +770,35 @@ export function getSettings(): RestaurantSettings {
     parsed.autoOpenCloseByHours = false;
     updated = true;
   }
+  if (!parsed.happyHourConfig) {
+    parsed.happyHourConfig = {
+      enabled: false,
+      title: "⏱️ Öğle Molası Happy Hour İndirimi",
+      startTime: "12:00",
+      endTime: "16:00",
+      discountPercent: 15,
+      categoryIds: [],
+    };
+    updated = true;
+  }
+  if (!Array.isArray(parsed.cashExpenses)) {
+    parsed.cashExpenses = [];
+    updated = true;
+  }
+  if (!Array.isArray(parsed.creditAccounts)) {
+    parsed.creditAccounts = [
+      {
+        id: "cari-1",
+        customerName: "Ahmet Yılmaz (Yandaki Eczane)",
+        customerPhone: "0532 111 22 33",
+        companyTitle: "Şifa Eczanesi",
+        balance: 0,
+        transactions: [],
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    updated = true;
+  }
   if (updated) {
     db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(JSON.stringify(parsed));
   }
@@ -1481,7 +1510,95 @@ export function transferTableOrders(
   return getOrders();
 }
 
-/** Masanın açık adisyonlarını Nakit / Kart / Parçalı (Alman Usulü) ödeme ile kapatır */
+/** Cari / Veresiye hesabına borç veya tahsilat işlemi kaydeder */
+export function recordCreditAccountTransaction(params: {
+  accountId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  type: "debt" | "payment";
+  amount: number;
+  description: string;
+  orderNumber?: number;
+}) {
+  const settings = getSettings();
+  const accounts = Array.isArray(settings.creditAccounts)
+    ? [...settings.creditAccounts]
+    : [];
+  const now = new Date().toISOString();
+  const amt = Math.max(0, Number(params.amount || 0));
+  if (amt <= 0) return settings;
+
+  let targetIdx = accounts.findIndex((a) => a.id === params.accountId);
+  if (targetIdx === -1 && params.customerName?.trim()) {
+    const newAcc = {
+      id: `cari-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      customerName: params.customerName.trim(),
+      customerPhone: params.customerPhone?.trim() || "",
+      balance: 0,
+      transactions: [],
+      updatedAt: now,
+    };
+    accounts.unshift(newAcc);
+    targetIdx = 0;
+  }
+
+  if (targetIdx !== -1) {
+    const acc = accounts[targetIdx];
+    const tx = {
+      id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      type: params.type,
+      amount: amt,
+      description: params.description,
+      orderNumber: params.orderNumber,
+      createdAt: now,
+    };
+    const nextBalance =
+      params.type === "debt"
+        ? Number((acc.balance + amt).toFixed(2))
+        : Math.max(0, Number((acc.balance - amt).toFixed(2)));
+    accounts[targetIdx] = {
+      ...acc,
+      balance: nextBalance,
+      transactions: [tx, ...(acc.transactions || [])].slice(0, 100),
+      updatedAt: now,
+    };
+    settings.creditAccounts = accounts;
+    updateSettings(settings);
+  }
+  return settings;
+}
+
+/** Kuryenin teslim ettiği paket siparişlerin kasa hesaplaşmasını (tahsilat teslimini) onaylar */
+export function settleCourierOrders(courierName: string): Order[] {
+  const db = getDb();
+  const allOrders = getOrders();
+  const now = new Date().toISOString();
+  const targetOrders = allOrders.filter(
+    (o) =>
+      o.orderType === "delivery" &&
+      o.courierName === courierName &&
+      (o.status === "ready" || o.status === "completed") &&
+      !o.splitPaymentInfo?.courierSettled
+  );
+
+  for (const ord of targetOrders) {
+    const nextSplit = {
+      cashAmount: ord.splitPaymentInfo?.cashAmount || 0,
+      cardAmount: ord.splitPaymentInfo?.cardAmount || 0,
+      ...ord.splitPaymentInfo,
+      courierSettled: true,
+    };
+    db.prepare(`
+      UPDATE orders
+      SET status = 'completed', splitPaymentJson = ?, updatedAt = ?
+      WHERE id = ?
+    `).run(JSON.stringify(nextSplit), now, ord.id);
+  }
+
+  return getOrders();
+}
+
+/** Masanın açık adisyonlarını Nakit / Kart / Parçalı (Alman Usulü) / Cari Veresiye ödeme ile kapatır */
 export function closeTableOrdersWithPayment(
   tableNumber: string,
   paymentData: {
@@ -1489,6 +1606,8 @@ export function closeTableOrdersWithPayment(
     cashAmount?: number;
     cardAmount?: number;
     discountAmount?: number;
+    creditAccountId?: string;
+    creditAccountName?: string;
   }
 ): Order[] {
   const db = getDb();
@@ -1504,23 +1623,29 @@ export function closeTableOrdersWithPayment(
 
   const now = new Date().toISOString();
   const extraDiscount = Math.max(0, Number(paymentData.discountAmount || 0));
+  let totalClosedAmount = 0;
 
   tableActive.forEach((ord, idx) => {
     const applyDisc = idx === 0 ? (ord.discountAmount || 0) + extraDiscount : ord.discountAmount || 0;
     const nextTotal = Math.max(0, ord.subtotal - applyDisc);
-    const splitInfo =
+    totalClosedAmount += nextTotal;
+
+    const splitObj =
       idx === 0 &&
-      paymentData.cashAmount !== undefined &&
-      paymentData.cardAmount !== undefined &&
-      paymentData.cashAmount > 0 &&
-      paymentData.cardAmount > 0
-        ? JSON.stringify({
-            cashAmount: Number(paymentData.cashAmount),
-            cardAmount: Number(paymentData.cardAmount),
-          })
-        : ord.splitPaymentInfo
-        ? JSON.stringify(ord.splitPaymentInfo)
-        : null;
+      ((paymentData.cashAmount !== undefined &&
+        paymentData.cardAmount !== undefined &&
+        paymentData.cashAmount > 0 &&
+        paymentData.cardAmount > 0) ||
+        paymentData.paymentMethod === "credit")
+        ? {
+            cashAmount: Number(paymentData.cashAmount || 0),
+            cardAmount: Number(paymentData.cardAmount || 0),
+            creditAccountId: paymentData.creditAccountId,
+            creditAccountName: paymentData.creditAccountName,
+          }
+        : ord.splitPaymentInfo;
+
+    const splitInfo = splitObj ? JSON.stringify(splitObj) : null;
 
     db.prepare(`
       UPDATE orders
@@ -1535,6 +1660,18 @@ export function closeTableOrdersWithPayment(
       ord.id
     );
   });
+
+  // Eğer Cari / Veresiye seçildiyse otomatik olarak Cari Hesap Defterine borç işle
+  if (paymentData.paymentMethod === "credit" && totalClosedAmount > 0) {
+    recordCreditAccountTransaction({
+      accountId: paymentData.creditAccountId,
+      customerName: paymentData.creditAccountName || `Masa ${cleanTable} Müşterisi`,
+      type: "debt",
+      amount: totalClosedAmount,
+      description: `Masa ${cleanTable} Adisyon Kapama (#${tableActive[0].orderNumber})`,
+      orderNumber: tableActive[0].orderNumber,
+    });
+  }
 
   // O masanın bekleyen garson/hesap çağrılarını kapat
   db.prepare(`

@@ -6,6 +6,8 @@ import {
   getOrders,
   getSettings,
   getUserByPhone,
+  recordCreditAccountTransaction,
+  settleCourierOrders,
   transferTableOrders,
   upsertUserAfterOtp,
 } from "@/lib/db";
@@ -169,6 +171,15 @@ export async function POST(req: NextRequest) {
       scheduledTime: body.scheduledTime || undefined,
       orderNote: body.orderNote,
       paymentMethod: body.paymentMethod || "cash",
+      splitPaymentInfo:
+        body.paymentMethod === "credit"
+          ? {
+              cashAmount: 0,
+              cardAmount: 0,
+              creditAccountId: body.creditAccountId,
+              creditAccountName: body.creditAccountName || body.customerName,
+            }
+          : undefined,
       subtotal: Number(body.subtotal),
       discountAmount: Number(body.discountAmount || 0),
       couponCode: body.couponCode || undefined,
@@ -182,6 +193,19 @@ export async function POST(req: NextRequest) {
       initialStatus: isStaffPosOrder ? "accepted" : "pending",
       items: body.items,
     });
+
+    if (body.paymentMethod === "credit" && Number(body.totalAmount) > 0) {
+      recordCreditAccountTransaction({
+        accountId: body.creditAccountId,
+        customerName: body.creditAccountName || body.customerName || "Veresiye Müşterisi",
+        customerPhone: body.customerPhone,
+        type: "debt",
+        amount: Number(body.totalAmount),
+        description: `Sipariş #${order.orderNumber} (Cari / Veresiye)`,
+        orderNumber: order.orderNumber,
+      });
+    }
+
     await syncActivityWithCloud();
     await pushCatalogToCloud();
     return NextResponse.json({ order }, { status: 201 });
@@ -197,7 +221,6 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     await pullActivityFromCloud(true);
-    const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
     const isAuthorized = role === "admin" || role === "kitchen";
     if (!isAuthorized) {
@@ -228,10 +251,34 @@ export async function PATCH(req: NextRequest) {
             body.discountAmount !== undefined
               ? Number(body.discountAmount)
               : undefined,
+          creditAccountId: body.creditAccountId,
+          creditAccountName: body.creditAccountName,
         }
       );
       await syncActivityWithCloud();
+      if (body.paymentMethod === "credit") {
+        await pushCatalogToCloud();
+      }
       return NextResponse.json({ orders });
+    }
+
+    if (body.action === "settle_courier") {
+      const orders = settleCourierOrders(String(body.courierName || ""));
+      await syncActivityWithCloud();
+      return NextResponse.json({ orders });
+    }
+
+    if (body.action === "credit_transaction") {
+      const updatedSettings = recordCreditAccountTransaction({
+        accountId: body.accountId,
+        customerName: body.customerName,
+        customerPhone: body.customerPhone,
+        type: body.type === "payment" ? "payment" : "debt",
+        amount: Number(body.amount || 0),
+        description: String(body.description || "Cari İşlem"),
+      });
+      await pushCatalogToCloud();
+      return NextResponse.json({ settings: updatedSettings });
     }
 
     return NextResponse.json({ error: "Geçersiz işlem" }, { status: 400 });

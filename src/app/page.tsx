@@ -236,6 +236,36 @@ function CustomerMenuContent() {
   const [activeTheme, setActiveTheme] = useState<ThemeId>("light-classic");
   const [themeModalOpen, setThemeModalOpen] = useState(false);
 
+  // ❤️ Müşteri Favori Ürünleri (localStorage)
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const savedFavs = localStorage.getItem("restoran_favorite_items");
+      if (savedFavs) {
+        const parsed = JSON.parse(savedFavs);
+        if (Array.isArray(parsed)) setFavoriteIds(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const toggleFavoriteItem = (itemId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setFavoriteIds((prev) => {
+      const next = prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId];
+      try {
+        localStorage.setItem("restoran_favorite_items", JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
   const handleSelectTheme = (themeId: ThemeId) => {
     setActiveTheme(themeId);
     applyThemeToDocument(themeId);
@@ -357,6 +387,7 @@ function CustomerMenuContent() {
   useEffect(() => {
     if (
       activeCategory !== "all" &&
+      activeCategory !== "favorites" &&
       categories.length > 0 &&
       !categories.some((c) => c.id === activeCategory)
     ) {
@@ -880,7 +911,25 @@ function CustomerMenuContent() {
     return settings?.deliveryFee || 0;
   }, [orderType, selectedZone, settings, cart.length]);
 
-  // Kupon veya İlk Sipariş İndirimi Hesaplama
+  // ⏱️ Saatlik Happy Hour / Öğle Menüsü Otomatik İndirim Kontrolü
+  const isHappyHourActive = useMemo(() => {
+    const hh = settings?.happyHourConfig;
+    if (!hh || !hh.enabled || !hh.startTime || !hh.endTime || hh.discountPercent <= 0) {
+      return false;
+    }
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const [sH, sM] = hh.startTime.split(":").map(Number);
+    const [eH, eM] = hh.endTime.split(":").map(Number);
+    const startTotal = (sH || 0) * 60 + (sM || 0);
+    const endTotal = (eH || 0) * 60 + (eM || 0);
+    if (endTotal >= startTotal) {
+      return cur >= startTotal && cur <= endTotal;
+    }
+    return cur >= startTotal || cur <= endTotal;
+  }, [settings?.happyHourConfig]);
+
+  // Kupon, İlk Sipariş veya Happy Hour İndirimi Hesaplama
   const isFirstOrderEligible = useMemo(() => {
     return (
       Boolean(currentUser) &&
@@ -901,15 +950,33 @@ function CustomerMenuContent() {
       }
       return Math.min(subtotal, appliedCoupon.discountValue);
     }
+    if (isHappyHourActive && settings?.happyHourConfig) {
+      const hh = settings.happyHourConfig;
+      const eligibleSubtotal =
+        hh.categoryIds && hh.categoryIds.length > 0
+          ? cart.reduce((sum, ci) => {
+              const foundMenu = items.find((m) => m.id === ci.menuItemId);
+              if (foundMenu && hh.categoryIds!.includes(foundMenu.categoryId)) {
+                return sum + ci.totalPrice;
+              }
+              return sum;
+            }, 0)
+          : subtotal;
+      const hhDisc = Math.round((eligibleSubtotal * hh.discountPercent) / 100);
+      if (hhDisc > 0) return hhDisc;
+    }
     if (isFirstOrderEligible) {
       const pct = settings?.firstOrderDiscountPercent || 0;
       return Math.round((subtotal * pct) / 100);
     }
     return 0;
   }, [
-    cart.length,
+    cart,
+    items,
     appliedCoupon,
     subtotal,
+    isHappyHourActive,
+    settings?.happyHourConfig,
     isFirstOrderEligible,
     settings?.firstOrderDiscountPercent,
   ]);
@@ -1015,14 +1082,17 @@ function CustomerMenuContent() {
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const matchesCat =
-        activeCategory === "all" || item.categoryId === activeCategory;
+        activeCategory === "all" ||
+        (activeCategory === "favorites"
+          ? favoriteIds.includes(item.id)
+          : item.categoryId === activeCategory);
       const matchesSearch =
         !searchQuery.trim() ||
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.description.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCat && matchesSearch;
     });
-  }, [items, activeCategory, searchQuery]);
+  }, [items, activeCategory, searchQuery, favoriteIds]);
 
   const isCurrentlyOpen = useMemo(() => {
     if (!settings) return true;
@@ -1524,6 +1594,17 @@ function CustomerMenuContent() {
               >
                 Tüm Menü ({items.length})
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveCategory("favorites")}
+                className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap transition flex items-center gap-1 ${
+                  activeCategory === "favorites"
+                    ? "bg-rose-600 text-white shadow-sm"
+                    : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                }`}
+              >
+                <span>❤️ Favorilerim ({favoriteIds.length})</span>
+              </button>
               {categories.map((cat) => (
                 <button
                   key={cat.id}
@@ -1562,6 +1643,36 @@ function CustomerMenuContent() {
           </div>
         </div>
       </header>
+
+      {/* ⏱️ SAATLİK HAPPY HOUR / ÖĞLE MENÜSÜ OTOMATİK İNDİRİM BARI */}
+      {settings?.happyHourConfig?.enabled && (
+        <div className="max-w-7xl mx-auto w-full px-4 mt-3">
+          <div
+            className={`rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs border shadow-xs ${
+              isHappyHourActive
+                ? "bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white border-orange-600"
+                : "bg-amber-50 text-amber-900 border-amber-200"
+            }`}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2 py-0.5 rounded-full bg-black/20 font-black text-[11px]">
+                ⏱️ {isHappyHourActive ? "ŞU AN AKTİF" : "SAATLİK FIRSAT"}
+              </span>
+              <span className="font-extrabold">
+                {settings.happyHourConfig.title} (
+                {settings.happyHourConfig.startTime} -{" "}
+                {settings.happyHourConfig.endTime})
+              </span>
+              <span>
+                •{" "}
+                {isHappyHourActive
+                  ? `Sepetinizde %${settings.happyHourConfig.discountPercent} Happy Hour indirimi otomatik uygulanıyor!`
+                  : `Belirtilen saatlerde tüm siparişlerde otomatik %${settings.happyHourConfig.discountPercent} indirim!`}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* QR MASALAR İÇİN "GARSON ÇAĞIR" & "HESAP İSTE" CANLI SERVİS BARI */}
       {orderType === "dine_in" && (
@@ -1681,7 +1792,9 @@ function CustomerMenuContent() {
             <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
               <Utensils className="w-8 h-8 text-slate-300 mx-auto" />
               <p className="font-bold text-slate-800 text-sm">
-                Aradığınız kriterlere uygun ürün bulunamadı.
+                {activeCategory === "favorites"
+                  ? "Henüz favorilerinize eklediğiniz bir ürün bulunmuyor. Ürün kartlarındaki ❤️ kalp ikonuna dokunarak favori lezzetlerinizi kaydedebilirsiniz."
+                  : "Aradığınız kriterlere uygun ürün bulunamadı."}
               </p>
               <button
                 type="button"
@@ -1697,7 +1810,10 @@ function CustomerMenuContent() {
           ) : (
             categories
               .filter(
-                (cat) => activeCategory === "all" || cat.id === activeCategory
+                (cat) =>
+                  activeCategory === "all" ||
+                  activeCategory === "favorites" ||
+                  cat.id === activeCategory
               )
               .map((cat) => {
                 const catItems = filteredItems.filter(
@@ -1735,11 +1851,12 @@ function CustomerMenuContent() {
                         const subProductCount = (
                           item.modifierGroups || []
                         ).filter((g) => Boolean(g.productTag)).length;
+                        const isFav = favoriteIds.includes(item.id);
                         return (
                           <div
                             key={item.id}
                             onClick={() => openItemModal(item)}
-                            className={`group bg-white rounded-2xl border p-3.5 flex gap-3.5 transition shadow-sm ${
+                            className={`group bg-white rounded-2xl border p-3.5 flex gap-3.5 transition shadow-sm relative ${
                               item.available
                                 ? "border-slate-200/80 hover:border-orange-400 hover:shadow-md cursor-pointer"
                                 : "border-red-200 bg-slate-50/80 opacity-65 cursor-not-allowed"
@@ -1748,6 +1865,22 @@ function CustomerMenuContent() {
                             <div className="flex-1 flex flex-col justify-between min-w-0">
                               <div>
                                 <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleFavoriteItem(item.id, e)}
+                                    title={
+                                      isFav
+                                        ? "Favorilerden Çıkar"
+                                        : "Favorilerime Ekle"
+                                    }
+                                    className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md border transition cursor-pointer ${
+                                      isFav
+                                        ? "bg-rose-50 text-rose-600 border-rose-300"
+                                        : "bg-slate-50 text-slate-500 border-slate-200 hover:text-rose-600"
+                                    }`}
+                                  >
+                                    <span>{isFav ? "❤️ Favorim" : "🤍 Favori"}</span>
+                                  </button>
                                   {subProductCount > 0 && (
                                     <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wide bg-orange-600 text-white px-2 py-0.5 rounded-md">
                                       🎁 {subProductCount} Ürünlü Kampanya
@@ -1755,7 +1888,7 @@ function CustomerMenuContent() {
                                   )}
                                   {item.popular && (
                                     <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
-                                      <Flame className="w-3 h-3" /> Popüler
+                                      <Flame className="w-3 h-3" /> Çok Satan
                                     </span>
                                   )}
                                   {!item.available && (

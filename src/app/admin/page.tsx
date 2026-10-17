@@ -47,8 +47,10 @@ import {
   Moon,
 } from "lucide-react";
 import {
+  CashExpense,
   Category,
   Coupon,
+  CreditAccount,
   CustomerUser,
   DeliveryZone,
   MenuItem,
@@ -126,6 +128,22 @@ export default function AdminDashboardPage() {
   const [selectedOrderForPrint, setSelectedOrderForPrint] =
     useState<Order | null>(null);
   const [printingZReport, setPrintingZReport] = useState(false);
+
+  // 💰 Günlük Gider & Kasa Avansı Formu State
+  const [expenseTitle, setExpenseTitle] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseCategory, setExpenseCategory] =
+    useState<CashExpense["category"]>("supplier");
+
+  // 🧾 Veresiye / Cari Hesap Defteri State
+  const [newCreditCustomerName, setNewCreditCustomerName] = useState("");
+  const [newCreditCustomerPhone, setNewCreditCustomerPhone] = useState("");
+  const [selectedCreditAccId, setSelectedCreditAccId] = useState("");
+  const [creditTxAmount, setCreditTxAmount] = useState("");
+  const [creditTxType, setCreditTxType] = useState<"debt" | "payment">(
+    "payment"
+  );
+  const [creditTxNote, setCreditTxNote] = useState("");
 
   // Menü Stok Filtresi
   const [menuStockFilter, setMenuStockFilter] = useState<
@@ -393,6 +411,214 @@ export default function AdminDashboardPage() {
   const tablePosTotal = validOrders
     .filter((o) => o.paymentMethod === "pos_at_table")
     .reduce((s, o) => s + o.totalAmount, 0);
+  const creditTotal = validOrders
+    .filter((o) => o.paymentMethod === "credit")
+    .reduce((s, o) => s + o.totalAmount, 0);
+
+  // 💰 Giderler, Kasa Avansı & Net Kâr Hesaplaması
+  const allExpenses = settings?.cashExpenses || [];
+  const periodExpenses = allExpenses.filter((exp) => {
+    const dStr = exp.createdAt.slice(0, 10);
+    if (reportPeriod === "today") return dStr === todayStr;
+    if (reportPeriod === "yesterday") return dStr === yesterdayStr;
+    if (reportPeriod === "week") return dStr >= weekAgoStr;
+    if (reportPeriod === "month") return dStr.startsWith(monthPrefix);
+    if (reportPeriod === "custom") {
+      return dStr >= customStartDate && dStr <= customEndDate;
+    }
+    return true;
+  });
+  const totalCashFloat = periodExpenses
+    .filter((e) => e.category === "cash_float")
+    .reduce((s, e) => s + e.amount, 0);
+  const totalExpensesAmount = periodExpenses
+    .filter((e) => e.category !== "cash_float")
+    .reduce((s, e) => s + e.amount, 0);
+  const netProfit = totalRevenue - totalExpensesAmount;
+  const netCashInDrawer = totalCashFloat + cashTotal - totalExpensesAmount;
+
+  // 🛵 Kurye Tahsilat & Gün Sonu Hesaplaşma Özeti
+  const courierSettlementList = (settings?.couriers || []).map((cName) => {
+    const cOrders = validOrders.filter((o) => o.courierName === cName);
+    const unsettledOrders = cOrders.filter(
+      (o) => !o.splitPaymentInfo?.courierSettled
+    );
+    const cashUnsettled = unsettledOrders
+      .filter((o) => o.paymentMethod === "cash")
+      .reduce((s, o) => s + o.totalAmount, 0);
+    const cardUnsettled = unsettledOrders
+      .filter((o) => o.paymentMethod === "card_at_door")
+      .reduce((s, o) => s + o.totalAmount, 0);
+    return {
+      courierName: cName,
+      totalCount: cOrders.length,
+      unsettledCount: unsettledOrders.length,
+      cashUnsettled,
+      cardUnsettled,
+      totalUnsettled: cashUnsettled + cardUnsettled,
+    };
+  });
+
+  // 📊 Saatlik Yoğunluk Isı Haritası (08:00 - 23:00) & Popüler Ekstralar
+  const hourlyStats = Array.from({ length: 16 }, (_, idx) => {
+    const hour = idx + 8; // 08..23
+    const matched = validOrders.filter(
+      (o) => new Date(o.createdAt).getHours() === hour
+    );
+    return {
+      hourLabel: `${String(hour).padStart(2, "0")}:00`,
+      count: matched.length,
+      revenue: matched.reduce((s, o) => s + o.totalAmount, 0),
+    };
+  });
+  const maxHourlyCount = Math.max(1, ...hourlyStats.map((h) => h.count));
+
+  const modifierSalesMap: Record<string, number> = {};
+  for (const ord of validOrders) {
+    for (const it of ord.items) {
+      for (const mod of it.selectedModifiers || []) {
+        const key = mod.optionName;
+        modifierSalesMap[key] = (modifierSalesMap[key] || 0) + it.quantity;
+      }
+    }
+  }
+  const topModifiers = Object.entries(modifierSalesMap)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  const handleAddCashExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!settings || !expenseTitle.trim() || !expenseAmount) return;
+    const amt = Math.max(0, Number(expenseAmount));
+    if (amt <= 0) return;
+    const newExp: CashExpense = {
+      id: `exp-${Date.now()}`,
+      title: expenseTitle.trim(),
+      amount: amt,
+      category: expenseCategory,
+      paymentMethod: "cash",
+      createdAt: new Date().toISOString(),
+    };
+    const nextSettings: RestaurantSettings = {
+      ...settings,
+      cashExpenses: [newExp, ...(settings.cashExpenses || [])],
+    };
+    setExpenseTitle("");
+    setExpenseAmount("");
+    await persistSettings(nextSettings, "Kasa gider/avans kaydı eklendi!");
+  };
+
+  const handleDeleteCashExpense = async (expId: string) => {
+    if (!settings) return;
+    const nextSettings: RestaurantSettings = {
+      ...settings,
+      cashExpenses: (settings.cashExpenses || []).filter((e) => e.id !== expId),
+    };
+    await persistSettings(nextSettings, "Gider kaydı silindi.");
+  };
+
+  const handleSettleCourier = async (courierName: string) => {
+    const res = await fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "settle_courier",
+        courierName,
+      }),
+    });
+    if (res.ok) {
+      showToast(`✅ ${courierName} kurye hesabı teslim alındı olarak işaretlendi!`);
+      loadData();
+    }
+  };
+
+  const handleCreateNewCreditAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCreditCustomerName.trim()) return;
+    const res = await fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "credit_transaction",
+        customerName: newCreditCustomerName.trim(),
+        customerPhone: newCreditCustomerPhone.trim(),
+        amount: 0,
+        txType: "debt",
+        description: "Cari hesap açılışı",
+      }),
+    });
+    if (res.ok) {
+      setNewCreditCustomerName("");
+      setNewCreditCustomerPhone("");
+      showToast("Yeni cari/veresiye hesabı açıldı!");
+      loadData();
+    }
+  };
+
+  const handleAddCreditTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const acc = (settings?.creditAccounts || []).find(
+      (a) => a.id === selectedCreditAccId
+    );
+    if (!acc || !creditTxAmount) return;
+    const amt = Math.max(0, Number(creditTxAmount));
+    if (amt <= 0) return;
+    const res = await fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "credit_transaction",
+        accountId: acc.id,
+        customerName: acc.customerName,
+        customerPhone: acc.customerPhone,
+        amount: amt,
+        txType: creditTxType,
+        description:
+          creditTxNote.trim() ||
+          (creditTxType === "payment" ? "Borç Tahsilatı" : "Veresiye Borç"),
+      }),
+    });
+    if (res.ok) {
+      setCreditTxAmount("");
+      setCreditTxNote("");
+      showToast(
+        creditTxType === "payment"
+          ? `✅ ${acc.customerName} hesabından tahsilat düşüldü!`
+          : `🧾 ${acc.customerName} hesabına borç eklendi!`
+      );
+      loadData();
+    }
+  };
+
+  const handleSendCreditWhatsApp = (acc: CreditAccount) => {
+    const cleanPhone = (acc.customerPhone || "").replace(/\D/g, "");
+    const phoneWithCountry = cleanPhone.startsWith("0")
+      ? `9${cleanPhone}`
+      : cleanPhone.startsWith("90")
+      ? cleanPhone
+      : `90${cleanPhone}`;
+    const lastTxLines = (acc.transactions || [])
+      .slice(0, 5)
+      .map(
+        (t) =>
+          `• ${new Date(t.createdAt).toLocaleDateString("tr-TR")}: ${
+            t.type === "debt" ? "+" : "-"
+          }${t.amount.toFixed(2)} ${settings?.currency} (${t.description})`
+      )
+      .join("\n");
+    const msg = `Merhaba *${acc.customerName}*,\n*${
+      settings?.name || "Restoran"
+    }* Cari / Açık Hesap Güncel Bakiye Özeti:\n\n💰 *Güncel Kalan Borç Bakiyesi:* *${acc.balance.toFixed(
+      2
+    )} ${settings?.currency}*\n\n📋 *Son Hareketler:*\n${
+      lastTxLines || "Hareket yok"
+    }\n\nTeşekkür eder, iyi günler dileriz.`;
+    window.open(
+      `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(msg)}`,
+      "_blank"
+    );
+  };
 
   // En Çok Satan Ürünler (Seçili Dönem)
   const productSalesMap: Record<
@@ -745,6 +971,14 @@ export default function AdminDashboardPage() {
           </Link>
 
           <Link
+            href="/waiter"
+            target="_blank"
+            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-400 px-3.5 py-2 rounded-xl border border-slate-700 transition"
+          >
+            📱 Garson Ekranı
+          </Link>
+
+          <Link
             href="/courier"
             target="_blank"
             className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3.5 py-2 rounded-xl border border-slate-700 transition"
@@ -1000,7 +1234,7 @@ export default function AdminDashboardPage() {
 
               <div className="bg-white p-5 rounded-2xl border border-orange-200 bg-orange-50/20 shadow-xs space-y-1">
                 <div className="flex items-center justify-between text-xs font-bold uppercase text-orange-700">
-                  <span>Seçili Dönem Cirosu</span>
+                  <span>Seçili Dönem Brüt Ciro</span>
                   <BarChart3 className="w-4 h-4 text-orange-600" />
                 </div>
                 <div className="text-2xl font-black text-slate-900">
@@ -1012,30 +1246,32 @@ export default function AdminDashboardPage() {
                 </p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-                <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-500">
-                  <span>Ortalama Sepet Tutarı</span>
-                  <ShoppingBag className="w-4 h-4 text-blue-600" />
+              <div className="bg-white p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-xs space-y-1">
+                <div className="flex items-center justify-between text-xs font-bold uppercase text-emerald-700">
+                  <span>Seçili Dönem NET KÂR</span>
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
                 </div>
-                <div className="text-2xl font-black text-slate-900">
-                  {avgOrderValue.toFixed(2)} {settings?.currency || "₺"}
+                <div className="text-2xl font-black text-emerald-700">
+                  {netProfit.toFixed(2)} {settings?.currency || "₺"}
                 </div>
                 <p className="text-xs text-slate-500">
-                  Kayıtlı WhatsApp Üyesi: {users.length} kişi
+                  Giderler: -{totalExpensesAmount.toFixed(2)}{" "}
+                  {settings?.currency || "₺"} • Kasadaki Net Nakit:{" "}
+                  {netCashInDrawer.toFixed(2)} {settings?.currency || "₺"}
                 </p>
               </div>
 
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
                 <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-500">
-                  <span>Uygulanan Kupon İndirimi</span>
+                  <span>Ortalama Sepet & İndirim</span>
                   <Tag className="w-4 h-4 text-purple-600" />
                 </div>
-                <div className="text-2xl font-black text-emerald-700">
-                  {totalDiscountGiven.toFixed(2)} {settings?.currency || "₺"}
+                <div className="text-2xl font-black text-slate-900">
+                  {avgOrderValue.toFixed(2)} {settings?.currency || "₺"}
                 </div>
                 <p className="text-xs text-slate-500">
-                  Aktif kupon sayısı:{" "}
-                  {(settings?.coupons || []).filter((c) => c.active).length}
+                  Toplam İndirim: {totalDiscountGiven.toFixed(2)}{" "}
+                  {settings?.currency || "₺"}
                 </p>
               </div>
             </div>
@@ -1099,7 +1335,7 @@ export default function AdminDashboardPage() {
                         {cardTotal.toFixed(2)} {settings?.currency}
                       </span>
                     </div>
-                    <div className="flex justify-between py-2">
+                    <div className="flex justify-between py-2 border-b border-slate-100">
                       <span className="text-slate-600 font-medium">
                         Masada Ödeme (Nakit / POS)
                       </span>
@@ -1107,55 +1343,512 @@ export default function AdminDashboardPage() {
                         {tablePosTotal.toFixed(2)} {settings?.currency}
                       </span>
                     </div>
+                    <div className="flex justify-between py-2">
+                      <span className="text-amber-700 font-bold">
+                        🧾 Cari / Veresiye Defterine Yazılan
+                      </span>
+                      <span className="font-black text-amber-700">
+                        {creditTotal.toFixed(2)} {settings?.currency}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Sağ: En Çok Satan Ürünler */}
-              <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Award className="w-5 h-5 text-orange-600" />
-                    <h3 className="font-bold text-base text-slate-900">
-                      En Çok Satan Ürünler ({reportPeriodLabel})
-                    </h3>
+              {/* Sağ: En Çok Satan Ürünler & Saatlik Yoğunluk Isı Haritası */}
+              <div className="lg:col-span-7 space-y-6">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Award className="w-5 h-5 text-orange-600" />
+                      <h3 className="font-bold text-base text-slate-900">
+                        En Çok Satan Ürünler ({reportPeriodLabel})
+                      </h3>
+                    </div>
+                    <span className="text-xs text-slate-400">
+                      Satış Adedine Göre Sıralı
+                    </span>
                   </div>
-                  <span className="text-xs text-slate-400">
-                    Satış Adedine Göre Sıralı
-                  </span>
+
+                  {topSellingProducts.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-8 text-center">
+                      Seçili tarih aralığında sipariş verisi bulunmuyor.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {topSellingProducts.slice(0, 10).map((prod, idx) => (
+                        <div
+                          key={prod.name}
+                          className="py-3 flex items-center justify-between text-sm"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 font-black text-xs flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                            <span className="font-bold text-slate-900">
+                              {prod.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
+                              {prod.qty} Adet
+                            </span>
+                            <span className="font-extrabold text-emerald-700 w-24 text-right">
+                              {prod.revenue.toFixed(2)} {settings?.currency}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {topModifiers.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100 space-y-2">
+                      <div className="text-xs font-extrabold text-slate-700">
+                        🍽️ En Çok Tercih Edilen Porsiyon & Ekstralar:
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {topModifiers.map((m) => (
+                          <span
+                            key={m.name}
+                            className="text-xs font-bold bg-orange-50 text-orange-800 border border-orange-200 px-2.5 py-1 rounded-lg"
+                          >
+                            {m.name} ({m.count}x)
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {topSellingProducts.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-8 text-center">
-                    Seçili tarih aralığında sipariş verisi bulunmuyor.
-                  </p>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {topSellingProducts.slice(0, 10).map((prod, idx) => (
+                {/* 📊 SAATLİK SİPARİŞ YOĞUNLUK ISI HARİTASI (08:00 - 23:00) */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="font-bold text-base text-slate-900">
+                        📊 Saatlik Sipariş Yoğunluk Isı Haritası (08:00 - 23:00)
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Restoranın en yoğun olduğu saat aralıklarını ve saatlik ciro dağılımını izleyin
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                    {hourlyStats.map((h) => {
+                      const ratio = h.count / maxHourlyCount;
+                      const bgClass =
+                        h.count === 0
+                          ? "bg-slate-50 border-slate-200 text-slate-400"
+                          : ratio >= 0.75
+                          ? "bg-orange-600 border-orange-700 text-white"
+                          : ratio >= 0.4
+                          ? "bg-orange-100 border-orange-300 text-orange-900"
+                          : "bg-amber-50 border-amber-200 text-amber-900";
+                      return (
+                        <div
+                          key={h.hourLabel}
+                          className={`p-2.5 rounded-xl border text-center space-y-0.5 ${bgClass}`}
+                        >
+                          <div className="text-[11px] font-bold">
+                            {h.hourLabel}
+                          </div>
+                          <div className="text-sm font-black">
+                            {h.count} Sipariş
+                          </div>
+                          <div className="text-[10px] opacity-85 font-semibold">
+                            {h.revenue.toFixed(0)} {settings?.currency}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 💰 1. GİDER KAYDI, KASA AVANSI & NET KÂR + 🛵 6. KURYE TAHSİLAT HESAPLAŞMA */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Sol: Gider Kaydı & Kasa Avansı */}
+              <div className="lg:col-span-6 bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      💰 Kasa Gider Kaydı, Başlangıç Avansı & Net Kâr
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Günlük manav, kasap, kurye yakıtı veya kasa başlangıç bozuk para avansını kaydedin
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  onSubmit={handleAddCashExpense}
+                  className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200"
+                >
+                  <select
+                    value={expenseCategory}
+                    onChange={(e) =>
+                      setExpenseCategory(
+                        e.target.value as CashExpense["category"]
+                      )
+                    }
+                    className="sm:col-span-4 px-2.5 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white"
+                  >
+                    <option value="supplier">🥩 Toptancı / Mutfak Alımı</option>
+                    <option value="fuel">⛽ Kurye Yakıt / Motor</option>
+                    <option value="staff">👨‍🍳 Personel Yevmiye / Avans</option>
+                    <option value="utility">💡 Fatura / Kira / Ambalaj</option>
+                    <option value="other">📌 Diğer Gider</option>
+                    <option value="cash_float">💵 Kasa Başlangıç Avansı (+)</option>
+                  </select>
+                  <input
+                    type="text"
+                    required
+                    value={expenseTitle}
+                    onChange={(e) => setExpenseTitle(e.target.value)}
+                    placeholder="Açıklama (Örn: Kasap kıyma alımı)"
+                    className="sm:col-span-5 px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                  />
+                  <div className="sm:col-span-3 flex gap-1.5">
+                    <input
+                      type="number"
+                      min={1}
+                      required
+                      value={expenseAmount}
+                      onChange={(e) => setExpenseAmount(e.target.value)}
+                      placeholder="Tutar"
+                      className="w-full px-2.5 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold rounded-lg cursor-pointer shrink-0"
+                    >
+                      + Ekle
+                    </button>
+                  </div>
+                </form>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                    <div className="text-[10px] font-bold text-emerald-700 uppercase">
+                      Kasa Avansı (+)
+                    </div>
+                    <div className="text-sm font-black text-emerald-900">
+                      {totalCashFloat.toFixed(2)} {settings?.currency}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200">
+                    <div className="text-[10px] font-bold text-rose-700 uppercase">
+                      Toplam Gider (-)
+                    </div>
+                    <div className="text-sm font-black text-rose-900">
+                      {totalExpensesAmount.toFixed(2)} {settings?.currency}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-900 text-white">
+                    <div className="text-[10px] font-bold text-amber-300 uppercase">
+                      Kasadaki Net Nakit
+                    </div>
+                    <div className="text-sm font-black text-white">
+                      {netCashInDrawer.toFixed(2)} {settings?.currency}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {periodExpenses.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-3">
+                      Bu dönemde kayıtlı gider veya kasa avansı yok.
+                    </p>
+                  ) : (
+                    periodExpenses.map((exp) => (
                       <div
-                        key={prod.name}
-                        className="py-3 flex items-center justify-between text-sm"
+                        key={exp.id}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs"
                       >
-                        <div className="flex items-center gap-3">
-                          <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 font-black text-xs flex items-center justify-center">
-                            {idx + 1}
-                          </span>
+                        <div>
                           <span className="font-bold text-slate-900">
-                            {prod.name}
+                            {exp.title}
+                          </span>
+                          <span className="ml-2 text-[10px] text-slate-400">
+                            {new Date(exp.createdAt).toLocaleString("tr-TR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
                           </span>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
-                            {prod.qty} Adet
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`font-black ${
+                              exp.category === "cash_float"
+                                ? "text-emerald-700"
+                                : "text-rose-600"
+                            }`}
+                          >
+                            {exp.category === "cash_float" ? "+" : "-"}
+                            {exp.amount.toFixed(2)} {settings?.currency}
                           </span>
-                          <span className="font-extrabold text-emerald-700 w-24 text-right">
-                            {prod.revenue.toFixed(2)} {settings?.currency}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCashExpense(exp.id)}
+                            className="text-slate-400 hover:text-red-600 font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Sağ: Kurye Tahsilat & Gün Sonu Hesaplaşma Özeti */}
+              <div className="lg:col-span-6 bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      🛵 Kurye Tahsilat & Gün Sonu Hesaplaşma Özeti
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Hangi kuryenin üzerinde ne kadar Nakit ve POS fişi biriktiğini görün ve tek tıkla teslim alın
+                    </p>
+                  </div>
+                </div>
+
+                {courierSettlementList.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center">
+                    Kayıtlı kurye bulunmuyor.
+                  </p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {courierSettlementList.map((c) => (
+                      <div
+                        key={c.courierName}
+                        className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div>
+                          <div className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                            <span>🛵 {c.courierName}</span>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                              Toplam {c.totalCount} Paket
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-600 mt-1 flex flex-wrap gap-3">
+                            <span>
+                              💵 Teslim Edilecek Nakit:{" "}
+                              <strong className="text-emerald-700">
+                                {c.cashUnsettled.toFixed(2)} {settings?.currency}
+                              </strong>
+                            </span>
+                            <span>
+                              💳 POS / KartSLİP:{" "}
+                              <strong className="text-blue-700">
+                                {c.cardUnsettled.toFixed(2)} {settings?.currency}
+                              </strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {c.unsettledCount > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSettleCourier(c.courierName)}
+                              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition cursor-pointer whitespace-nowrap"
+                            >
+                              ✅ Hesabı Teslim Al ({c.unsettledCount} Paket)
+                            </button>
+                          ) : (
+                            <span className="px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold">
+                              ✓ Hesap Teslim Alındı
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* 🧾 3. MÜŞTERİ VERESİYE / CARİ HESAP (AÇIK HESAP) DEFTERİ */}
+            <div className="bg-white p-6 rounded-2xl border border-amber-200 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">
+                    🧾 Müşteri Veresiye / Cari Hesap (Açık Hesap) Defteri
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Komşu esnaf ve kurumsal müşterilerin açık hesap bakiyelerini takip edin, tahsilat düşün ve WhatsApp&apos;tan ekstre gönderin
+                  </p>
+                </div>
+                <span className="text-xs font-black bg-amber-100 text-amber-900 px-3 py-1 rounded-full">
+                  Toplam Alacak Bakiyesi:{" "}
+                  {(settings?.creditAccounts || [])
+                    .reduce((s, a) => s + a.balance, 0)
+                    .toFixed(2)}{" "}
+                  {settings?.currency}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Sol: Yeni Cari Aç & Borç/Tahsilat İşle */}
+                <div className="lg:col-span-5 space-y-4">
+                  <form
+                    onSubmit={handleCreateNewCreditAccount}
+                    className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5"
+                  >
+                    <div className="text-xs font-extrabold text-slate-800">
+                      + Yeni Cari / Veresiye Müşteri Kartı Aç
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={newCreditCustomerName}
+                        onChange={(e) =>
+                          setNewCreditCustomerName(e.target.value)
+                        }
+                        placeholder="Müşteri / Esnaf Adı"
+                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                      />
+                      <input
+                        type="text"
+                        value={newCreditCustomerPhone}
+                        onChange={(e) =>
+                          setNewCreditCustomerPhone(e.target.value)
+                        }
+                        placeholder="WhatsApp Tel (0532...)"
+                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold rounded-lg cursor-pointer"
+                    >
+                      + Cari Hesap Oluştur
+                    </button>
+                  </form>
+
+                  {(settings?.creditAccounts || []).length > 0 && (
+                    <form
+                      onSubmit={handleAddCreditTransaction}
+                      className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-200 space-y-2.5"
+                    >
+                      <div className="text-xs font-extrabold text-amber-900">
+                        💳 Cari Hesaptan Tahsilat Düş / Borç Ekle
+                      </div>
+                      <select
+                        required
+                        value={selectedCreditAccId}
+                        onChange={(e) => setSelectedCreditAccId(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
+                      >
+                        <option value="">Müşteri Seçin...</option>
+                        {(settings?.creditAccounts || []).map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.customerName} (Bakiye:{" "}
+                            {acc.balance.toFixed(2)} {settings?.currency})
+                          </option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={creditTxType}
+                          onChange={(e) =>
+                            setCreditTxType(
+                              e.target.value as "debt" | "payment"
+                            )
+                          }
+                          className="px-2.5 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
+                        >
+                          <option value="payment">💵 Tahsilat Al (-)</option>
+                          <option value="debt">🧾 Borç Yaz (+)</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={creditTxAmount}
+                          onChange={(e) => setCreditTxAmount(e.target.value)}
+                          placeholder="Tutar (₺)"
+                          className="px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={creditTxNote}
+                        onChange={(e) => setCreditTxNote(e.target.value)}
+                        placeholder="Açıklama (Örn: Nakit tahsilat / Öğle yemeği)"
+                        className="w-full px-3 py-2 text-xs border border-amber-300 rounded-lg bg-white"
+                      />
+                      <button
+                        type="submit"
+                        className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold rounded-lg cursor-pointer"
+                      >
+                        İşlemi Kaydet
+                      </button>
+                    </form>
+                  )}
+                </div>
+
+                {/* Sağ: Cari Hesap Listesi */}
+                <div className="lg:col-span-7 space-y-2.5 max-h-96 overflow-y-auto">
+                  {(settings?.creditAccounts || []).length === 0 ? (
+                    <p className="text-xs text-slate-400 py-10 text-center">
+                      Henüz açılmış bir veresiye / cari müşteri hesabı bulunmuyor. Masa hesabı kapatırken &quot;Cari / Veresiye&quot; seçtiğinizde de otomatik oluşur.
+                    </p>
+                  ) : (
+                    (settings?.creditAccounts || []).map((acc) => (
+                      <div
+                        key={acc.id}
+                        className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-sm text-slate-900">
+                              {acc.customerName}
+                            </span>
+                            {acc.customerPhone && (
+                              <span className="text-xs text-slate-500">
+                                ({acc.customerPhone})
+                              </span>
+                            )}
+                          </div>
+                          {acc.transactions && acc.transactions.length > 0 && (
+                            <div className="text-[11px] text-slate-500">
+                              Son İşlem:{" "}
+                              {acc.transactions[0].type === "debt" ? "+" : "-"}
+                              {acc.transactions[0].amount.toFixed(2)}{" "}
+                              {settings?.currency} —{" "}
+                              {acc.transactions[0].description}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`text-sm font-black ${
+                              acc.balance > 0
+                                ? "text-amber-700"
+                                : "text-emerald-700"
+                            }`}
+                          >
+                            {acc.balance.toFixed(2)} {settings?.currency}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSendCreditWhatsApp(acc)}
+                            className="px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1ebe57] text-slate-950 text-xs font-extrabold cursor-pointer"
+                          >
+                            💬 WhatsApp Ekstre
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1796,6 +2489,181 @@ export default function AdminDashboardPage() {
                   <Save className="w-4 h-4" />
                   Üst Bar Ayarlarını Kaydet
                 </button>
+              </div>
+            </div>
+
+            {/* ⏱️ 5. SAATLİK "HAPPY HOUR" / ÖĞLE MENÜSÜ OTOMATİK İNDİRİM KURALI */}
+            <div className="lg:col-span-12 bg-white p-6 rounded-2xl border-2 border-amber-300 space-y-4 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-black">
+                    ⏱️
+                  </div>
+                  <div>
+                    <h2 className="font-extrabold text-base text-slate-900">
+                      Saatlik &quot;Happy Hour&quot; / Öğle Menüsü Otomatik İndirim Kuralı
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Restoranın sakin saatlerinde (Örn: 14:00 - 17:00) kupon koduna gerek kalmadan sepette otomatik yüzdelik indirim uygular
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cur = settings.happyHourConfig || {
+                      enabled: false,
+                      title: "Öğle Saatleri Happy Hour İndirimi",
+                      startTime: "14:00",
+                      endTime: "17:00",
+                      discountPercent: 15,
+                    };
+                    persistSettings(
+                      {
+                        ...settings,
+                        happyHourConfig: {
+                          ...cur,
+                          enabled: !cur.enabled,
+                        },
+                      },
+                      !cur.enabled
+                        ? "⏱️ Saatlik Happy Hour indirimi AKTİF edildi!"
+                        : "Saatlik Happy Hour indirimi kapatıldı."
+                    );
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                    settings.happyHourConfig?.enabled
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {settings.happyHourConfig?.enabled
+                    ? "✓ Happy Hour: AKTİF"
+                    : "Happy Hour: KAPALI (Aktif Et)"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <div className="md:col-span-5">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kampanya Başlığı
+                  </label>
+                  <input
+                    type="text"
+                    value={
+                      settings.happyHourConfig?.title ??
+                      "Öğle Saatleri Happy Hour İndirimi"
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        happyHourConfig: {
+                          enabled: settings.happyHourConfig?.enabled ?? false,
+                          title: e.target.value,
+                          startTime:
+                            settings.happyHourConfig?.startTime ?? "14:00",
+                          endTime: settings.happyHourConfig?.endTime ?? "17:00",
+                          discountPercent:
+                            settings.happyHourConfig?.discountPercent ?? 15,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Başlangıç Saati
+                  </label>
+                  <input
+                    type="time"
+                    value={settings.happyHourConfig?.startTime ?? "14:00"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        happyHourConfig: {
+                          enabled: settings.happyHourConfig?.enabled ?? false,
+                          title:
+                            settings.happyHourConfig?.title ??
+                            "Öğle Saatleri Happy Hour İndirimi",
+                          startTime: e.target.value,
+                          endTime: settings.happyHourConfig?.endTime ?? "17:00",
+                          discountPercent:
+                            settings.happyHourConfig?.discountPercent ?? 15,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Bitiş Saati
+                  </label>
+                  <input
+                    type="time"
+                    value={settings.happyHourConfig?.endTime ?? "17:00"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        happyHourConfig: {
+                          enabled: settings.happyHourConfig?.enabled ?? false,
+                          title:
+                            settings.happyHourConfig?.title ??
+                            "Öğle Saatleri Happy Hour İndirimi",
+                          startTime:
+                            settings.happyHourConfig?.startTime ?? "14:00",
+                          endTime: e.target.value,
+                          discountPercent:
+                            settings.happyHourConfig?.discountPercent ?? 15,
+                        },
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div className="md:col-span-3 flex gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      İndirim (%)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={80}
+                      value={settings.happyHourConfig?.discountPercent ?? 15}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          happyHourConfig: {
+                            enabled: settings.happyHourConfig?.enabled ?? false,
+                            title:
+                              settings.happyHourConfig?.title ??
+                              "Öğle Saatleri Happy Hour İndirimi",
+                            startTime:
+                              settings.happyHourConfig?.startTime ?? "14:00",
+                            endTime:
+                              settings.happyHourConfig?.endTime ?? "17:00",
+                            discountPercent: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 text-xs font-black border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      persistSettings(
+                        settings,
+                        "⏱️ Happy Hour saatlik indirim ayarları kaydedildi!"
+                      )
+                    }
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl cursor-pointer shrink-0"
+                  >
+                    Kaydet
+                  </button>
+                </div>
               </div>
             </div>
 
