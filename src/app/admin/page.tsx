@@ -45,6 +45,7 @@ import {
   Palette,
   Sun,
   Moon,
+  Tv,
 } from "lucide-react";
 import {
   CashExpense,
@@ -56,6 +57,7 @@ import {
   MenuItem,
   ModifierGroup,
   Order,
+  OrderType,
   RestaurantSettings,
   WhatsAppLog,
 } from "@/types";
@@ -4707,7 +4709,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     desc: "Adrese kurye ile gidecek paket siparişler",
                   },
                 ].map((opt) => {
-                  const currentTypes = Array.isArray(
+                  const currentTypes: OrderType[] = Array.isArray(
                     settings.tvDisplayOrderTypes
                   )
                     ? settings.tvDisplayOrderTypes
