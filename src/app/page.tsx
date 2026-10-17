@@ -241,6 +241,20 @@ function CustomerMenuContent() {
   // ❤️ Müşteri Favori Ürünleri (localStorage)
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
+  // 🖼️ Müşteri Menü Görünüm Modu (showcase = Büyük Fotoğraflı Vitrin, grid = Klasik Kart, compact = Hızlı Liste)
+  const [menuLayout, setMenuLayout] = useState<"showcase" | "grid" | "compact">(
+    "grid"
+  );
+
+  // 📸 Tam Ekran Ürün Fotoğrafı Büyütme (Lightbox Zoom)
+  const [zoomImage, setZoomImage] = useState<{
+    url: string;
+    title: string;
+    price?: number;
+    originalPrice?: number;
+    description?: string;
+  } | null>(null);
+
   useEffect(() => {
     try {
       const savedFavs = localStorage.getItem("restoran_favorite_items");
@@ -252,6 +266,17 @@ function CustomerMenuContent() {
       // ignore
     }
   }, []);
+
+  const handleSelectMenuLayout = (
+    nextLayout: "showcase" | "grid" | "compact"
+  ) => {
+    setMenuLayout(nextLayout);
+    try {
+      localStorage.setItem("restoran_menu_layout", nextLayout);
+    } catch {
+      // ignore
+    }
+  };
 
   const toggleFavoriteItem = (itemId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -347,6 +372,27 @@ function CustomerMenuContent() {
         setCategories(data.categories || []);
         setItems(data.items || []);
         setPublicReviews(data.publicReviews || []);
+
+        const adminDefaultLayout =
+          data.settings?.defaultMenuLayout || "grid";
+        try {
+          const savedLayout = localStorage.getItem("restoran_menu_layout") as
+            | "showcase"
+            | "grid"
+            | "compact"
+            | null;
+          if (
+            savedLayout === "showcase" ||
+            savedLayout === "grid" ||
+            savedLayout === "compact"
+          ) {
+            setMenuLayout(savedLayout);
+          } else {
+            setMenuLayout(adminDefaultLayout);
+          }
+        } catch {
+          setMenuLayout(adminDefaultLayout);
+        }
 
         const defaultTheme: ThemeId =
           data.settings?.storefrontTheme || "light-classic";
@@ -925,6 +971,53 @@ function CustomerMenuContent() {
         })
         .filter(Boolean) as OrderItem[]
     );
+  };
+
+  // ⚡ Menü kartı üzerinden doğrudan [- X +] ile sepetteki adedi değiştirme
+  const handleDirectMenuItemDelta = (
+    menuItem: MenuItem,
+    delta: number,
+    e: React.MouseEvent
+  ) => {
+    e.stopPropagation();
+    const matchingCartItems = cart.filter((c) => c.menuItemId === menuItem.id);
+    if (matchingCartItems.length > 0) {
+      const targetCartItem = matchingCartItems[matchingCartItems.length - 1];
+      updateCartQuantity(targetCartItem.id, delta);
+    } else if (delta > 0) {
+      openItemModal(menuItem);
+    }
+  };
+
+  const BADGE_META: Record<string, { label: string; cls: string }> = {
+    spicy: {
+      label: "🌶️ Acılı",
+      cls: "bg-red-50 text-red-700 border-red-200",
+    },
+    chef: {
+      label: "👨‍🍳 Şefin Spesiyali",
+      cls: "bg-amber-50 text-amber-800 border-amber-200",
+    },
+    new: {
+      label: "🆕 Yeni Lezzet",
+      cls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+    wood_fire: {
+      label: "🔥 Odun Ateşinde",
+      cls: "bg-orange-50 text-orange-800 border-orange-200",
+    },
+    meat_100: {
+      label: "🥩 %100 Yaprak Et",
+      cls: "bg-rose-50 text-rose-800 border-rose-200",
+    },
+    veg: {
+      label: "🥗 Vejetaryen",
+      cls: "bg-green-50 text-green-700 border-green-200",
+    },
+    fast: {
+      label: "⏱️ Hızlı Servis",
+      cls: "bg-sky-50 text-sky-700 border-sky-200",
+    },
   };
 
   const subtotal = useMemo(
@@ -1659,28 +1752,104 @@ function CustomerMenuContent() {
               ))}
             </div>
 
-            <div className="relative sm:w-56 flex-shrink-0">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Menüde lezzet ara..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-700"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="relative flex-1 sm:w-52">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Menüde lezzet ara..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* 🖼️ 3 Farklı Menü Görünüm Modu Seçici */}
+              <div
+                className="inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shrink-0"
+                title="Menü Görünüm Düzeni Seçin"
+              >
+                {[
+                  { id: "showcase" as const, label: "📸 Vitrin" },
+                  { id: "grid" as const, label: "🍱 Kart" },
+                  { id: "compact" as const, label: "📋 Liste" },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleSelectMenuLayout(opt.id)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer ${
+                      menuLayout === opt.id
+                        ? "bg-slate-900 text-white shadow-2xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       </header>
+
+      {/* ✨ VİTRİN ÜSTÜ HIZLI RESTORAN BİLGİ & CANLI WHATSAPP DESTEK BANDI */}
+      {settings?.showRestaurantInfoBar !== false && (
+        <div className="max-w-7xl mx-auto w-full px-4 mt-2.5">
+          <div className="bg-white border border-slate-200/90 rounded-2xl px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs shadow-2xs">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3.5 text-slate-700 font-semibold">
+              <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-800 border border-orange-200 px-2.5 py-0.5 rounded-full font-extrabold">
+                🛵 Ort. Teslimat: ~
+                {orderType === "delivery" && selectedZone
+                  ? selectedZone.estimatedMinutes
+                  : settings?.estimatedPrepMinutes || 25}{" "}
+                dk
+              </span>
+              <span className="inline-flex items-center gap-1">
+                💳 Kapıda Nakit &amp; Kredi Kartı (POS)
+              </span>
+              <span className="inline-flex items-center gap-1 text-amber-700 font-extrabold">
+                ⭐{" "}
+                {publicReviews.length > 0
+                  ? (
+                      publicReviews.reduce((s, r) => s + r.rating, 0) /
+                      publicReviews.length
+                    ).toFixed(1)
+                  : "4.9"}{" "}
+                / 5.0 Müşteri Puanı
+              </span>
+              {settings?.address && (
+                <span className="hidden md:inline-flex items-center gap-1 text-slate-500 truncate max-w-xs">
+                  📍 {settings.address}
+                </span>
+              )}
+            </div>
+
+            {settings?.phone && (
+              <a
+                href={`https://wa.me/${settings.phone.replace(/\D/g, "").replace(/^0/, "90")}?text=${encodeURIComponent(
+                  `Merhaba ${settings.name}, menü / sipariş hakkında bilgi almak istiyorum.`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 bg-[#25D366]/15 hover:bg-[#25D366] text-emerald-900 hover:text-slate-950 border border-[#25D366]/50 font-extrabold px-3 py-1 rounded-full transition"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>WhatsApp Hızlı Destek</span>
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ⏱️ SAATLİK HAPPY HOUR / ÖĞLE MENÜSÜ OTOMATİK İNDİRİM BARI */}
       {settings?.happyHourConfig?.enabled && (
@@ -1958,6 +2127,117 @@ function CustomerMenuContent() {
       <main className="max-w-7xl mx-auto w-full px-4 py-5 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* SOL SÜTUN: DOĞRUDAN YEMEK MENÜSÜ */}
         <div className="lg:col-span-8 space-y-6">
+          {/* 🔥 EN ÜSTTE KAYDIRILABİLİR "ŞEFİN TAVSİYELERİ & GÜNÜN FIRSATLARI" VİTRİN KARUSELİ */}
+          {settings?.showFeaturedCarousel !== false &&
+            activeCategory === "all" &&
+            !searchQuery.trim() &&
+            items.some(
+              (i) =>
+                i.available &&
+                (i.popular ||
+                  i.categoryId === "cat-kampanya" ||
+                  (i.originalPrice && i.originalPrice > i.price))
+            ) && (
+              <section className="bg-gradient-to-r from-orange-50 via-amber-50/60 to-white p-4 rounded-2xl border border-orange-200/90 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-orange-600 text-white text-[11px] font-black px-2.5 py-0.5 rounded-full shadow-2xs">
+                      🔥 VİTRİN
+                    </span>
+                    <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
+                      Şefin Tavsiyeleri &amp; Günün Fırsatları
+                    </h2>
+                  </div>
+                  <span className="text-[11px] font-bold text-orange-700 hidden sm:inline">
+                    Kaydırarak İnceleyin →
+                  </span>
+                </div>
+
+                <div className="flex items-stretch gap-3 overflow-x-auto no-scrollbar pb-1">
+                  {items
+                    .filter(
+                      (i) =>
+                        i.available &&
+                        (i.popular ||
+                          i.categoryId === "cat-kampanya" ||
+                          (i.originalPrice && i.originalPrice > i.price))
+                    )
+                    .slice(0, 8)
+                    .map((feat) => {
+                      const hasDisc =
+                        feat.originalPrice && feat.originalPrice > feat.price;
+                      const discPct = hasDisc
+                        ? Math.round(
+                            ((feat.originalPrice! - feat.price) /
+                              feat.originalPrice!) *
+                              100
+                          )
+                        : 0;
+                      const inCartQty = cart
+                        .filter((c) => c.menuItemId === feat.id)
+                        .reduce((s, c) => s + c.quantity, 0);
+                      return (
+                        <div
+                          key={`feat-${feat.id}`}
+                          onClick={() => openItemModal(feat)}
+                          className={`w-56 sm:w-64 flex-shrink-0 bg-white rounded-2xl border overflow-hidden cursor-pointer transition flex flex-col justify-between group ${
+                            inCartQty > 0
+                              ? "border-orange-500 ring-2 ring-orange-500/30 shadow-md"
+                              : "border-slate-200 hover:border-orange-400 hover:shadow-md"
+                          }`}
+                        >
+                          <div>
+                            <div className="relative h-32 bg-slate-100 overflow-hidden">
+                              {feat.imageUrl && (
+                                <img
+                                  src={feat.imageUrl}
+                                  alt={feat.name}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                />
+                              )}
+                              {hasDisc && (
+                                <span className="absolute top-2 left-2 bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow">
+                                  -%{discPct} İNDİRİM
+                                </span>
+                              )}
+                              {inCartQty > 0 && (
+                                <span className="absolute top-2 right-2 bg-orange-600 text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow">
+                                  🛒 Sepette: {inCartQty}
+                                </span>
+                              )}
+                            </div>
+                            <div className="p-3 space-y-1">
+                              <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 truncate group-hover:text-orange-600">
+                                {feat.name}
+                              </h3>
+                              <p className="text-[11px] text-slate-500 line-clamp-1">
+                                {feat.description}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="px-3 pb-3 pt-1 flex items-center justify-between border-t border-slate-100">
+                            <div className="flex items-baseline gap-1.5">
+                              {hasDisc && (
+                                <span className="text-[11px] text-slate-400 line-through font-semibold">
+                                  {feat.originalPrice!.toFixed(0)}{" "}
+                                  {settings?.currency}
+                                </span>
+                              )}
+                              <span className="font-black text-sm text-orange-600">
+                                {feat.price.toFixed(0)} {settings?.currency}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-extrabold bg-orange-50 group-hover:bg-orange-600 text-orange-700 group-hover:text-white px-2.5 py-1 rounded-lg transition">
+                              + İncele
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </section>
+            )}
+
           {filteredItems.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
               <Utensils className="w-8 h-8 text-slate-300 mx-auto" />
@@ -2011,25 +2291,322 @@ function CustomerMenuContent() {
                       {isCampaignCat && (
                         <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-orange-600 text-white px-2.5 py-1 rounded-full shadow-xs">
                           <Sparkles className="w-3 h-3" />
-                          Çoklu Ürün • Her Ürünün Porsiyonu & Ekstrası Seçilebilir
+                          Çoklu Ürün • Her Ürünün Porsiyonu &amp; Ekstrası Seçilebilir
                         </span>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div
+                      className={
+                        menuLayout === "compact"
+                          ? "grid grid-cols-1 gap-2.5"
+                          : "grid grid-cols-1 md:grid-cols-2 gap-3.5"
+                      }
+                    >
                       {catItems.map((item) => {
                         const subProductCount = (
                           item.modifierGroups || []
                         ).filter((g) => Boolean(g.productTag)).length;
                         const isFav = favoriteIds.includes(item.id);
+                        const inCartQty = cart
+                          .filter((c) => c.menuItemId === item.id)
+                          .reduce((s, c) => s + c.quantity, 0);
+                        const hasDiscount =
+                          item.originalPrice !== undefined &&
+                          item.originalPrice > item.price;
+                        const discountPercent = hasDiscount
+                          ? Math.round(
+                              ((item.originalPrice! - item.price) /
+                                item.originalPrice!) *
+                                100
+                            )
+                          : 0;
+                        const itemBadges = (item.badges || []).filter(
+                          (b) => BADGE_META[b]
+                        );
+
+                        // 📸 1. MOD: BÜYÜK FOTOĞRAFLI VİTRİN KARTI (SHOWCASE)
+                        if (menuLayout === "showcase") {
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => openItemModal(item)}
+                              className={`group bg-white rounded-2xl border overflow-hidden flex flex-col justify-between transition shadow-sm relative ${
+                                !item.available
+                                  ? "border-red-200 bg-slate-50/80 opacity-65 cursor-not-allowed"
+                                  : inCartQty > 0
+                                  ? "border-orange-500 ring-2 ring-orange-500/30 shadow-md cursor-pointer"
+                                  : "border-slate-200/80 hover:border-orange-400 hover:shadow-md cursor-pointer"
+                              }`}
+                            >
+                              <div>
+                                {item.imageUrl && (
+                                  <div className="relative h-44 bg-slate-100 overflow-hidden">
+                                    <img
+                                      src={item.imageUrl}
+                                      alt={item.name}
+                                      className={`w-full h-full object-cover transition duration-300 ${
+                                        item.available
+                                          ? "group-hover:scale-105"
+                                          : "grayscale"
+                                      }`}
+                                    />
+                                    <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1.5">
+                                      {hasDiscount && (
+                                        <span className="bg-rose-600 text-white text-[11px] font-black px-2.5 py-0.5 rounded-lg shadow">
+                                          -%{discountPercent} İNDİRİM
+                                        </span>
+                                      )}
+                                      {subProductCount > 0 && (
+                                        <span className="bg-orange-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-lg shadow">
+                                          🎁 {subProductCount} Ürünlü Kampanya
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={(e) =>
+                                          toggleFavoriteItem(item.id, e)
+                                        }
+                                        className="px-2 py-1 rounded-lg bg-white/90 hover:bg-white text-slate-800 text-[11px] font-extrabold shadow"
+                                      >
+                                        {isFav ? "❤️" : "🤍"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setZoomImage({
+                                            url: item.imageUrl,
+                                            title: item.name,
+                                            price: item.price,
+                                            originalPrice: item.originalPrice,
+                                            description: item.description,
+                                          });
+                                        }}
+                                        title="Fotoğrafı Büyüt"
+                                        className="px-2 py-1 rounded-lg bg-black/60 hover:bg-black/80 text-white text-[11px] font-bold shadow"
+                                      >
+                                        🔍 Büyüt
+                                      </button>
+                                    </div>
+                                    {!item.available && (
+                                      <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
+                                        <span className="bg-red-600 text-white text-xs font-black px-3 py-1 rounded-lg shadow">
+                                          TÜKENDİ
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                <div className="p-3.5 space-y-1.5">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    {item.popular && (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+                                        <Flame className="w-3 h-3" /> Çok Satan
+                                      </span>
+                                    )}
+                                    {itemBadges.map((bKey) => (
+                                      <span
+                                        key={bKey}
+                                        className={`inline-flex items-center text-[10px] font-extrabold px-2 py-0.5 rounded border ${BADGE_META[bKey].cls}`}
+                                      >
+                                        {BADGE_META[bKey].label}
+                                      </span>
+                                    ))}
+                                    {item.available &&
+                                      item.dailyStock !== null &&
+                                      item.dailyStock !== undefined &&
+                                      item.dailyStock > 0 && (
+                                        <span
+                                          className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                                            item.dailyStock <= 5
+                                              ? "bg-rose-600 text-white animate-pulse"
+                                              : "bg-amber-100 text-amber-800 border border-amber-300"
+                                          }`}
+                                        >
+                                          {item.dailyStock <= 5
+                                            ? `🔥 Son ${item.dailyStock} Porsiyon!`
+                                            : `📦 Kalan: ${item.dailyStock}`}
+                                        </span>
+                                      )}
+                                  </div>
+
+                                  <h3 className="font-extrabold text-slate-900 group-hover:text-orange-600 transition text-base truncate">
+                                    {item.name}
+                                  </h3>
+                                  <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                                    {item.description}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                                <div className="flex items-baseline gap-1.5">
+                                  {hasDiscount && (
+                                    <span className="text-xs text-slate-400 line-through font-semibold">
+                                      {item.originalPrice!.toFixed(2)}{" "}
+                                      {settings?.currency}
+                                    </span>
+                                  )}
+                                  <span className="font-black text-slate-900 text-base">
+                                    {item.price.toFixed(2)} {settings?.currency}
+                                  </span>
+                                </div>
+
+                                {!item.available ? (
+                                  <span className="text-[11px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">
+                                    Stokta Yok
+                                  </span>
+                                ) : inCartQty > 0 ? (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1.5 bg-orange-600 text-white rounded-xl px-2 py-1 shadow-xs"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={(e) =>
+                                        handleDirectMenuItemDelta(item, -1, e)
+                                      }
+                                      className="w-6 h-6 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center font-black"
+                                    >
+                                      -
+                                    </button>
+                                    <span className="text-xs font-black px-1">
+                                      {inCartQty} Sepette
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openItemModal(item)}
+                                      className="w-6 h-6 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center font-black"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-orange-600 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white px-3 py-1.5 rounded-xl transition">
+                                    <Plus className="w-3.5 h-3.5" /> Sepete Ekle
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // 📋 2. MOD: KOMPAKT HIZLI LİSTE GÖRÜNÜMÜ (COMPACT)
+                        if (menuLayout === "compact") {
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => openItemModal(item)}
+                              className={`group bg-white rounded-xl border p-2.5 flex items-center justify-between gap-3 transition ${
+                                !item.available
+                                  ? "border-red-200 bg-slate-50/80 opacity-65 cursor-not-allowed"
+                                  : inCartQty > 0
+                                  ? "border-orange-500 ring-2 ring-orange-500/20 bg-orange-50/15 cursor-pointer"
+                                  : "border-slate-200/80 hover:border-orange-400 cursor-pointer"
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                {item.imageUrl && (
+                                  <div className="relative w-14 h-14 rounded-lg overflow-hidden bg-slate-100 shrink-0">
+                                    <img
+                                      src={item.imageUrl}
+                                      alt={item.name}
+                                      className="w-full h-full object-cover"
+                                    />
+                                    {hasDiscount && (
+                                      <span className="absolute bottom-0 inset-x-0 bg-rose-600 text-white text-[9px] font-black text-center">
+                                        -%{discountPercent}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <h3 className="font-bold text-slate-900 text-sm truncate group-hover:text-orange-600">
+                                      {item.name}
+                                    </h3>
+                                    {itemBadges.map((bKey) => (
+                                      <span
+                                        key={bKey}
+                                        className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded border ${BADGE_META[bKey].cls}`}
+                                      >
+                                        {BADGE_META[bKey].label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <p className="text-xs text-slate-500 truncate mt-0.5">
+                                    {item.description}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                <div className="text-right">
+                                  {hasDiscount && (
+                                    <span className="text-[11px] text-slate-400 line-through block">
+                                      {item.originalPrice!.toFixed(0)}{" "}
+                                      {settings?.currency}
+                                    </span>
+                                  )}
+                                  <span className="font-black text-sm text-slate-900">
+                                    {item.price.toFixed(2)} {settings?.currency}
+                                  </span>
+                                </div>
+
+                                {!item.available ? (
+                                  <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 rounded-lg">
+                                    Tükendi
+                                  </span>
+                                ) : inCartQty > 0 ? (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1 bg-orange-600 text-white rounded-xl px-2 py-1"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={(e) =>
+                                        handleDirectMenuItemDelta(item, -1, e)
+                                      }
+                                      className="w-5 h-5 rounded bg-white/20 font-black text-xs"
+                                    >
+                                      -
+                                    </button>
+                                    <span className="text-xs font-black px-1">
+                                      {inCartQty}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openItemModal(item)}
+                                      className="w-5 h-5 rounded bg-white/20 font-black text-xs"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white px-2.5 py-1.5 rounded-lg transition">
+                                    <Plus className="w-3.5 h-3.5" /> Ekle
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // 🍱 3. MOD: KLASİK YAN YANA KART GÖRÜNÜMÜ (GRID - VARSAYILAN)
                         return (
                           <div
                             key={item.id}
                             onClick={() => openItemModal(item)}
                             className={`group bg-white rounded-2xl border p-3.5 flex gap-3.5 transition shadow-sm relative ${
-                              item.available
-                                ? "border-slate-200/80 hover:border-orange-400 hover:shadow-md cursor-pointer"
-                                : "border-red-200 bg-slate-50/80 opacity-65 cursor-not-allowed"
+                              !item.available
+                                ? "border-red-200 bg-slate-50/80 opacity-65 cursor-not-allowed"
+                                : inCartQty > 0
+                                ? "border-orange-500 ring-2 ring-orange-500/30 bg-orange-50/10 shadow-md cursor-pointer"
+                                : "border-slate-200/80 hover:border-orange-400 hover:shadow-md cursor-pointer"
                             }`}
                           >
                             <div className="flex-1 flex flex-col justify-between min-w-0">
@@ -2037,7 +2614,9 @@ function CustomerMenuContent() {
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={(e) => toggleFavoriteItem(item.id, e)}
+                                    onClick={(e) =>
+                                      toggleFavoriteItem(item.id, e)
+                                    }
                                     title={
                                       isFav
                                         ? "Favorilerden Çıkar"
@@ -2049,8 +2628,15 @@ function CustomerMenuContent() {
                                         : "bg-slate-50 text-slate-500 border-slate-200 hover:text-rose-600"
                                     }`}
                                   >
-                                    <span>{isFav ? "❤️ Favorim" : "🤍 Favori"}</span>
+                                    <span>
+                                      {isFav ? "❤️ Favorim" : "🤍 Favori"}
+                                    </span>
                                   </button>
+                                  {hasDiscount && (
+                                    <span className="inline-flex items-center text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-md shadow-2xs">
+                                      -%{discountPercent} İNDİRİM
+                                    </span>
+                                  )}
                                   {subProductCount > 0 && (
                                     <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wide bg-orange-600 text-white px-2 py-0.5 rounded-md">
                                       🎁 {subProductCount} Ürünlü Kampanya
@@ -2061,6 +2647,14 @@ function CustomerMenuContent() {
                                       <Flame className="w-3 h-3" /> Çok Satan
                                     </span>
                                   )}
+                                  {itemBadges.map((bKey) => (
+                                    <span
+                                      key={bKey}
+                                      className={`inline-flex items-center text-[10px] font-extrabold px-1.5 py-0.5 rounded border ${BADGE_META[bKey].cls}`}
+                                    >
+                                      {BADGE_META[bKey].label}
+                                    </span>
+                                  ))}
                                   {!item.available && (
                                     <span className="inline-flex text-[10px] font-extrabold uppercase bg-red-600 text-white px-2 py-0.5 rounded">
                                       Tükendi
@@ -2085,11 +2679,11 @@ function CustomerMenuContent() {
                                   {item.modifierGroups &&
                                     item.modifierGroups.length > 0 && (
                                       <span className="inline-flex text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                                        Porsiyon & Ekstralı
+                                        Porsiyon &amp; Ekstralı
                                       </span>
                                     )}
                                 </div>
-                                <h3 className="font-bold text-slate-900 group-hover:text-orange-600 transition text-sm sm:text-base mt-0.5 truncate">
+                                <h3 className="font-bold text-slate-900 group-hover:text-orange-600 transition text-sm sm:text-base mt-1 truncate">
                                   {item.name}
                                 </h3>
                                 <p className="text-xs text-slate-500 line-clamp-2 mt-1 leading-relaxed">
@@ -2111,42 +2705,92 @@ function CustomerMenuContent() {
                                 )}
                               </div>
 
-                              <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
-                                <span className="font-extrabold text-slate-900 text-base">
-                                  {item.price.toFixed(2)} {settings?.currency}
-                                </span>
-                              {item.available ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white px-2.5 py-1 rounded-lg transition">
-                                  <Plus className="w-3.5 h-3.5" /> Ekle
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center text-[11px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">
-                                  Stokta Yok
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {item.imageUrl && (
-                            <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                              <img
-                                src={item.imageUrl}
-                                alt={item.name}
-                                className={`w-full h-full object-cover transition duration-300 ${
-                                  item.available
-                                    ? "group-hover:scale-105"
-                                    : "grayscale"
-                                }`}
-                              />
-                              {!item.available && (
-                                <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
-                                  <span className="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow">
-                                    TÜKENDİ
+                              <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100 gap-2">
+                                <div className="flex items-baseline gap-1.5">
+                                  {hasDiscount && (
+                                    <span className="text-xs text-slate-400 line-through font-semibold">
+                                      {item.originalPrice!.toFixed(2)}{" "}
+                                      {settings?.currency}
+                                    </span>
+                                  )}
+                                  <span className="font-extrabold text-slate-900 text-base">
+                                    {item.price.toFixed(2)} {settings?.currency}
                                   </span>
                                 </div>
-                              )}
+                                {!item.available ? (
+                                  <span className="inline-flex items-center text-[11px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">
+                                    Stokta Yok
+                                  </span>
+                                ) : inCartQty > 0 ? (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1 bg-orange-600 text-white rounded-xl px-2 py-1 shadow-2xs"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={(e) =>
+                                        handleDirectMenuItemDelta(item, -1, e)
+                                      }
+                                      className="w-5 h-5 rounded bg-white/20 hover:bg-white/30 flex items-center justify-center font-black text-xs"
+                                    >
+                                      -
+                                    </button>
+                                    <span className="text-[11px] font-black px-1">
+                                      {inCartQty} Sepette
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => openItemModal(item)}
+                                      className="w-5 h-5 rounded bg-white/20 hover:bg-white/30 flex items-center justify-center font-black text-xs"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 bg-orange-50 group-hover:bg-orange-600 group-hover:text-white px-2.5 py-1 rounded-lg transition">
+                                    <Plus className="w-3.5 h-3.5" /> Ekle
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          )}
+
+                            {item.imageUrl && (
+                              <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                                <img
+                                  src={item.imageUrl}
+                                  alt={item.name}
+                                  className={`w-full h-full object-cover transition duration-300 ${
+                                    item.available
+                                      ? "group-hover:scale-105"
+                                      : "grayscale"
+                                  }`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setZoomImage({
+                                      url: item.imageUrl,
+                                      title: item.name,
+                                      price: item.price,
+                                      originalPrice: item.originalPrice,
+                                      description: item.description,
+                                    });
+                                  }}
+                                  title="Fotoğrafı Büyüt"
+                                  className="absolute bottom-1.5 right-1.5 w-6 h-6 rounded-lg bg-black/60 hover:bg-black/80 text-white text-[11px] flex items-center justify-center shadow"
+                                >
+                                  🔍
+                                </button>
+                                {!item.available && (
+                                  <div className="absolute inset-0 bg-black/45 flex items-center justify-center">
+                                    <span className="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow">
+                                      TÜKENDİ
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -3228,6 +3872,58 @@ function CustomerMenuContent() {
         </div>
       )}
 
+      {/* 📸 TAM EKRAN ÜRÜN FOTOĞRAFI BÜYÜTME (LIGHTBOX ZOOM) MODALI */}
+      {zoomImage && (
+        <div
+          onClick={() => setZoomImage(null)}
+          className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-2xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/15"
+          >
+            <div className="relative max-h-[70vh] bg-black flex items-center justify-center overflow-hidden">
+              <img
+                src={zoomImage.url}
+                alt={zoomImage.title}
+                className="w-full max-h-[70vh] object-contain"
+              />
+              <button
+                type="button"
+                onClick={() => setZoomImage(null)}
+                className="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/70 hover:bg-black text-white flex items-center justify-center shadow-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="font-extrabold text-base">{zoomImage.title}</h4>
+                {zoomImage.description && (
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    {zoomImage.description}
+                  </p>
+                )}
+              </div>
+              {zoomImage.price !== undefined && (
+                <div className="flex items-baseline gap-2">
+                  {zoomImage.originalPrice &&
+                    zoomImage.originalPrice > zoomImage.price && (
+                      <span className="text-xs text-slate-400 line-through">
+                        {zoomImage.originalPrice.toFixed(2)}{" "}
+                        {settings?.currency}
+                      </span>
+                    )}
+                  <span className="text-lg font-black text-orange-400">
+                    {zoomImage.price.toFixed(2)} {settings?.currency}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Ürün Opsiyon & Ekstra Seçim Modalı */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -3237,8 +3933,46 @@ function CustomerMenuContent() {
                 <img
                   src={selectedItem.imageUrl}
                   alt={selectedItem.name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover cursor-zoom-in"
+                  onClick={() =>
+                    setZoomImage({
+                      url: selectedItem.imageUrl,
+                      title: selectedItem.name,
+                      price: selectedItem.price,
+                      originalPrice: selectedItem.originalPrice,
+                      description: selectedItem.description,
+                    })
+                  }
                 />
+              )}
+              {selectedItem.originalPrice &&
+                selectedItem.originalPrice > selectedItem.price && (
+                  <span className="absolute top-3 left-3 bg-rose-600 text-white text-xs font-black px-2.5 py-1 rounded-xl shadow">
+                    -%
+                    {Math.round(
+                      ((selectedItem.originalPrice - selectedItem.price) /
+                        selectedItem.originalPrice) *
+                        100
+                    )}{" "}
+                    İNDİRİM
+                  </span>
+                )}
+              {selectedItem.imageUrl && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setZoomImage({
+                      url: selectedItem.imageUrl,
+                      title: selectedItem.name,
+                      price: selectedItem.price,
+                      originalPrice: selectedItem.originalPrice,
+                      description: selectedItem.description,
+                    })
+                  }
+                  className="absolute bottom-3 right-3 px-2.5 py-1 rounded-xl bg-black/65 hover:bg-black/80 text-white text-xs font-bold shadow cursor-pointer"
+                >
+                  🔍 Fotoğrafı Büyüt
+                </button>
               )}
               <button
                 onClick={() => setSelectedItem(null)}
@@ -3254,11 +3988,35 @@ function CustomerMenuContent() {
                   <h3 className="text-xl font-bold text-slate-900">
                     {selectedItem.name}
                   </h3>
-                  <span className="text-lg font-extrabold text-orange-600 whitespace-nowrap">
-                    {selectedItem.price.toFixed(2)} {settings?.currency}
-                  </span>
+                  <div className="text-right whitespace-nowrap">
+                    {selectedItem.originalPrice &&
+                      selectedItem.originalPrice > selectedItem.price && (
+                        <span className="text-xs text-slate-400 line-through font-semibold mr-1.5">
+                          {selectedItem.originalPrice.toFixed(2)}{" "}
+                          {settings?.currency}
+                        </span>
+                      )}
+                    <span className="text-lg font-extrabold text-orange-600">
+                      {selectedItem.price.toFixed(2)} {settings?.currency}
+                    </span>
+                  </div>
                 </div>
-                <p className="text-sm text-slate-600 mt-1">
+                {(selectedItem.badges || []).filter((b) => BADGE_META[b])
+                  .length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {(selectedItem.badges || [])
+                      .filter((b) => BADGE_META[b])
+                      .map((bKey) => (
+                        <span
+                          key={bKey}
+                          className={`inline-flex items-center text-[11px] font-extrabold px-2 py-0.5 rounded-lg border ${BADGE_META[bKey].cls}`}
+                        >
+                          {BADGE_META[bKey].label}
+                        </span>
+                      ))}
+                  </div>
+                )}
+                <p className="text-sm text-slate-600 mt-1.5">
                   {selectedItem.description}
                 </p>
               </div>
@@ -3835,8 +4593,85 @@ function CustomerMenuContent() {
     }
 
     if (checkoutStep === "cart") {
+      // 🎯 Minimum Paket Tutarı & İndirim Kuponu Hedefi Canlı İlerleme Hesabı
+      const nextCouponGoal =
+        appliedCoupon && subtotal < appliedCoupon.minOrderAmount
+          ? appliedCoupon
+          : !appliedCoupon
+          ? activeCoupons
+              .filter((c) => c.minOrderAmount > subtotal)
+              .sort((a, b) => a.minOrderAmount - b.minOrderAmount)[0] || null
+          : null;
+
+      const needsMinDelivery =
+        orderType === "delivery" &&
+        currentMinDeliveryAmount > 0 &&
+        subtotal < currentMinDeliveryAmount;
+
+      const progressPct = needsMinDelivery
+        ? Math.min(100, Math.round((subtotal / currentMinDeliveryAmount) * 100))
+        : nextCouponGoal
+        ? Math.min(
+            100,
+            Math.round((subtotal / nextCouponGoal.minOrderAmount) * 100)
+          )
+        : 100;
+
       return (
         <div className="p-4 space-y-4">
+          {/* 🎯 Canlı Minimum Paket Tutarı / Kupon Hedefi Doluluk Çubuğu */}
+          {(orderType === "delivery" || nextCouponGoal) && (
+            <div
+              className={`rounded-xl p-2.5 border text-xs space-y-1.5 ${
+                needsMinDelivery
+                  ? "bg-amber-50/80 border-amber-200 text-amber-900"
+                  : nextCouponGoal
+                  ? "bg-indigo-50/70 border-indigo-200 text-indigo-900"
+                  : "bg-emerald-50/80 border-emerald-200 text-emerald-900"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 font-bold text-[11px]">
+                {needsMinDelivery ? (
+                  <span>
+                    🛵 Bölge min. paket tutarına{" "}
+                    <strong className="text-orange-700">
+                      {(currentMinDeliveryAmount - subtotal).toFixed(0)}{" "}
+                      {settings?.currency}
+                    </strong>{" "}
+                    kaldı
+                  </span>
+                ) : nextCouponGoal ? (
+                  <span>
+                    🎁{" "}
+                    <strong className="text-indigo-700">
+                      {(nextCouponGoal.minOrderAmount - subtotal).toFixed(0)}{" "}
+                      {settings?.currency}
+                    </strong>{" "}
+                    daha ekleyin,{" "}
+                    <strong>{nextCouponGoal.code}</strong> kuponunu kullanın!
+                  </span>
+                ) : (
+                  <span>
+                    ✅ Minimum paket sınırını geçtiniz! Hemen sipariş verebilirsiniz.
+                  </span>
+                )}
+                <span className="font-black">%{progressPct}</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-black/10 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    needsMinDelivery
+                      ? "bg-orange-500"
+                      : nextCouponGoal
+                      ? "bg-indigo-600"
+                      : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto pr-1">
             {cart.map((item) => {
               const structuredBlocks = parseStructuredModifiers(

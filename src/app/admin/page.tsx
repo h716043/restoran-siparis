@@ -5088,6 +5088,105 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   )}
                 </div>
               </div>
+
+              {/* 🖼️ Müşteri Vitrini Menü Görünüm Modu & Vitrin Bandı Ayarları */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 mt-3">
+                <div className="text-xs font-extrabold text-slate-900">
+                  🖼️ Müşteri Vitrini Menü Kart Düzeni & Görsel Bantlar
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {[
+                    {
+                      id: "showcase" as const,
+                      title: "📸 Büyük Fotoğraflı Vitrin",
+                      desc: "Yemek fotoğrafı üstte büyük ve geniş, açıklama altta",
+                    },
+                    {
+                      id: "grid" as const,
+                      title: "🍱 Klasik Yan Yana Kart",
+                      desc: "Sol tarafta açıklama ve fiyat, sağda kare yemek fotoğrafı",
+                    },
+                    {
+                      id: "compact" as const,
+                      title: "📋 Kompakt Hızlı Liste",
+                      desc: "Çok ürünlü menüler için hızlı kaydırılabilir kompakt görünüm",
+                    },
+                  ].map((ly) => {
+                    const active =
+                      (settings.defaultMenuLayout || "grid") === ly.id;
+                    return (
+                      <button
+                        key={ly.id}
+                        type="button"
+                        onClick={() =>
+                          setSettings({
+                            ...settings,
+                            defaultMenuLayout: ly.id,
+                          })
+                        }
+                        className={`text-left p-3 rounded-xl border-2 transition cursor-pointer ${
+                          active
+                            ? "border-orange-500 bg-orange-50/70 shadow-2xs"
+                            : "border-slate-200 bg-white hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="text-xs font-extrabold text-slate-900">
+                          {ly.title}
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                          {ly.desc}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.showFeaturedCarousel !== false}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          showFeaturedCarousel: e.target.checked,
+                        })
+                      }
+                      className="mt-0.5 w-4 h-4 accent-orange-600 rounded"
+                    />
+                    <div className="text-xs">
+                      <span className="font-extrabold text-slate-900 block">
+                        🔥 &ldquo;Şefin Tavsiyeleri & Günün Fırsatları&rdquo; Vitrin Karuseli
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        Menünün üstünde popüler ve indirimli ürünleri büyük kaydırılabilir vitrin olarak gösterir.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white border border-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.showRestaurantInfoBar !== false}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          showRestaurantInfoBar: e.target.checked,
+                        })
+                      }
+                      className="mt-0.5 w-4 h-4 accent-orange-600 rounded"
+                    />
+                    <div className="text-xs">
+                      <span className="font-extrabold text-slate-900 block">
+                        ✨ Hızlı Restoran Bilgi & Canlı WhatsApp Destek Bandı
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        Teslimat süresi, ödeme türleri, ortalama müşteri puanı ve WhatsApp canlı destek butonunu gösterir.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
             </div>
 
             {/* 📺 Müşteri Sıra Çağrı Ekranı (/tv) Gösterilecek Sipariş Türleri */}
@@ -5806,7 +5905,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Satış Fiyatı ({settings?.currency}) *
@@ -5823,6 +5922,28 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     })
                   }
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-rose-700 mb-1">
+                  Eski Fiyat (Üstü Çizili - Opsiyonel)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={editingItem.originalPrice ?? ""}
+                  onChange={(e) =>
+                    setEditingItem({
+                      ...editingItem,
+                      originalPrice:
+                        e.target.value === ""
+                          ? undefined
+                          : Number(e.target.value),
+                    })
+                  }
+                  placeholder="Örn: 320"
+                  className="w-full px-3 py-2 text-sm border border-rose-200 bg-rose-50/30 rounded-xl"
                 />
               </div>
               <div>
@@ -5862,6 +5983,49 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   }
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
                 />
+              </div>
+            </div>
+
+            {/* 🌶️ Görsel Lezzet & İçerik Rozetleri (Müşteri Vitrininde Gösterilir) */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-extrabold text-slate-800">
+                🌶️ Müşteri Vitrininde Görünecek Lezzet & İçerik Rozetleri (İsteğe Bağlı)
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: "spicy", label: "🌶️ Acılı" },
+                  { id: "chef", label: "👨‍🍳 Şefin Spesiyali" },
+                  { id: "new", label: "🆕 Yeni Lezzet" },
+                  { id: "wood_fire", label: "🔥 Odun Ateşinde" },
+                  { id: "meat_100", label: "🥩 %100 Yaprak Et" },
+                  { id: "veg", label: "🥗 Vejetaryen" },
+                  { id: "fast", label: "⏱️ Hızlı Servis" },
+                ].map((b) => {
+                  const currentBadges = editingItem.badges || [];
+                  const isSel = currentBadges.includes(b.id);
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => {
+                        const next = isSel
+                          ? currentBadges.filter((x) => x !== b.id)
+                          : [...currentBadges, b.id];
+                        setEditingItem({
+                          ...editingItem,
+                          badges: next,
+                        });
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                        isSel
+                          ? "bg-orange-600 text-white border-orange-600 shadow-2xs"
+                          : "bg-white text-slate-700 border-slate-200 hover:border-orange-300"
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

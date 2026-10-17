@@ -35,11 +35,15 @@ export interface MenuItem {
   name: string;
   description: string;
   price: number;
+  /** İndirimsiz / üstü çizili eski fiyat (TL) — tanımlandığında müşteri ekranında % indirim rozetiyle gösterilir */
+  originalPrice?: number;
   /** Ürün birim maliyeti (TL) — Z raporunda gerçek net kâr hesabı için (isteğe bağlı) */
   costPrice?: number;
   imageUrl: string;
   available: boolean;
   popular?: boolean;
+  /** Görsel ürün rozetleri / etiketleri (örn: ["spicy", "chef", "wood_fire", "new"]) */
+  badges?: string[];
   /** Günlük porsiyon / kritik stok sınırı (null veya undefined = Sınırsız) */
   dailyStock?: number | null;
   modifierGroups: ModifierGroup[];
@@ -310,6 +314,9 @@ export interface RestaurantSettings {
   firstOrderDiscountPercent?: number;
   storefrontTheme?: StorefrontThemeId; // 3 Açık + 3 Koyu tema seçimi
   allowCustomerThemeSwitch?: boolean; // Müşteri vitrinde kendi temasını değiştirebilsin mi?
+  defaultMenuLayout?: "showcase" | "grid" | "compact"; // Müşteri vitrini varsayılan ürün görünüm modu
+  showFeaturedCarousel?: boolean; // Üstte "Şefin Tavsiyeleri & Günün Fırsatları" vitrin karuseli gösterilsin mi?
+  showRestaurantInfoBar?: boolean; // Üstte "Hızlı Restoran Bilgi & WhatsApp Bandı" gösterilsin mi?
   loyaltyConfig?: LoyaltyConfig;
   happyHourConfig?: HappyHourConfig;
   cashExpenses?: CashExpense[];

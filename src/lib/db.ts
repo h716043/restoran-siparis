@@ -49,7 +49,7 @@ const DB_PATH = path.join(DATA_DIR, "restaurant.sqlite");
 
 const globalForDb = globalThis as unknown as {
   sqliteDb?: DatabaseSync;
-  schemaMigratedV11?: boolean;
+  schemaMigratedV12?: boolean;
 };
 
 export function getDb(): DatabaseSync {
@@ -58,10 +58,10 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL;");
     initSchema(db);
     globalForDb.sqliteDb = db;
-    globalForDb.schemaMigratedV11 = true;
-  } else if (!globalForDb.schemaMigratedV11) {
+    globalForDb.schemaMigratedV12 = true;
+  } else if (!globalForDb.schemaMigratedV12) {
     initSchema(globalForDb.sqliteDb);
-    globalForDb.schemaMigratedV11 = true;
+    globalForDb.schemaMigratedV12 = true;
   }
   return globalForDb.sqliteDb;
 }
@@ -252,6 +252,8 @@ function initSchema(db: DatabaseSync) {
     "ALTER TABLE orders ADD COLUMN isPriority INTEGER DEFAULT 0;",
     "ALTER TABLE menu_items ADD COLUMN dailyStock INTEGER DEFAULT NULL;",
     "ALTER TABLE menu_items ADD COLUMN costPrice REAL DEFAULT 0;",
+    "ALTER TABLE menu_items ADD COLUMN originalPrice REAL DEFAULT NULL;",
+    "ALTER TABLE menu_items ADD COLUMN badgesJson TEXT DEFAULT '[]';",
     "ALTER TABLE users ADD COLUMN loyaltyPoints REAL DEFAULT 0;",
   ];
   for (const sql of alterCols) {
@@ -854,6 +856,18 @@ export function getSettings(): RestaurantSettings {
     parsed.tvCustomNote = "📶 Ücretsiz Wi-Fi Şifremiz: Lezzet2026 • Afiyet Olsun!";
     updated = true;
   }
+  if (!parsed.defaultMenuLayout) {
+    parsed.defaultMenuLayout = "grid";
+    updated = true;
+  }
+  if (parsed.showFeaturedCarousel === undefined) {
+    parsed.showFeaturedCarousel = true;
+    updated = true;
+  }
+  if (parsed.showRestaurantInfoBar === undefined) {
+    parsed.showRestaurantInfoBar = true;
+    updated = true;
+  }
   if (!Array.isArray(parsed.reservations)) {
     parsed.reservations = [];
     updated = true;
@@ -900,33 +914,71 @@ export function getMenuItems(): MenuItem[] {
     name: string;
     description: string;
     price: number;
+    originalPrice?: number | null;
     costPrice?: number | null;
     imageUrl: string;
     available: number;
     popular: number;
+    badgesJson?: string | null;
     dailyStock: number | null;
     modifierGroupsJson: string;
   }>;
 
-  return rows.map((r) => ({
-    id: r.id,
-    categoryId: r.categoryId,
-    name: r.name,
-    description: r.description,
-    price: r.price,
-    costPrice:
-      r.costPrice !== null && r.costPrice !== undefined
-        ? Number(r.costPrice)
-        : 0,
-    imageUrl: r.imageUrl,
-    available: Boolean(r.available),
-    popular: Boolean(r.popular),
-    dailyStock:
-      r.dailyStock !== null && r.dailyStock !== undefined
-        ? Number(r.dailyStock)
-        : null,
-    modifierGroups: JSON.parse(r.modifierGroupsJson || "[]"),
-  }));
+  return rows.map((r) => {
+    let parsedBadges: string[] = [];
+    try {
+      parsedBadges = JSON.parse(r.badgesJson || "[]");
+    } catch {
+      parsedBadges = [];
+    }
+    // Varsayılan zenginleştirme: Henüz etiket atanmamış popüler/kampanya ürünlerine görsel rozet önerisi
+    if (parsedBadges.length === 0) {
+      const lower = `${r.name} ${r.description}`.toLowerCase();
+      if (lower.includes("acılı") || lower.includes("adana") || lower.includes("urfa")) {
+        if (lower.includes("adana") || lower.includes("acılı")) parsedBadges.push("spicy");
+      }
+      if (lower.includes("taş fırın") || lower.includes("odun") || lower.includes("pide") || lower.includes("lahmacun")) {
+        parsedBadges.push("wood_fire");
+      }
+      if (lower.includes("döner") || lower.includes("iskender") || lower.includes("yaprak")) {
+        parsedBadges.push("meat_100");
+      }
+      if (Boolean(r.popular) && parsedBadges.length < 2) {
+        parsedBadges.push("chef");
+      }
+    }
+
+    const origPrice =
+      r.originalPrice !== null &&
+      r.originalPrice !== undefined &&
+      Number(r.originalPrice) > r.price
+        ? Number(r.originalPrice)
+        : r.categoryId === "cat-kampanya"
+        ? Math.round((r.price * 1.18) / 10) * 10
+        : undefined;
+
+    return {
+      id: r.id,
+      categoryId: r.categoryId,
+      name: r.name,
+      description: r.description,
+      price: r.price,
+      originalPrice: origPrice,
+      costPrice:
+        r.costPrice !== null && r.costPrice !== undefined
+          ? Number(r.costPrice)
+          : 0,
+      imageUrl: r.imageUrl,
+      available: Boolean(r.available),
+      popular: Boolean(r.popular),
+      badges: parsedBadges,
+      dailyStock:
+        r.dailyStock !== null && r.dailyStock !== undefined
+          ? Number(r.dailyStock)
+          : null,
+      modifierGroups: JSON.parse(r.modifierGroupsJson || "[]"),
+    };
+  });
 }
 
 export function saveMenuItem(item: MenuItem): MenuItem {
@@ -943,22 +995,33 @@ export function saveMenuItem(item: MenuItem): MenuItem {
   }
   const normalizedCost = Math.max(0, Number(item.costPrice || 0));
   item.costPrice = normalizedCost;
+  const normalizedOrigPrice =
+    item.originalPrice !== undefined &&
+    item.originalPrice !== null &&
+    Number(item.originalPrice) > 0
+      ? Number(item.originalPrice)
+      : null;
+  item.originalPrice = normalizedOrigPrice || undefined;
+  const badgesArr = Array.isArray(item.badges) ? item.badges : [];
+  item.badges = badgesArr;
 
   const existing = db.prepare("SELECT id FROM menu_items WHERE id = ?").get(item.id);
   if (existing) {
     db.prepare(`
       UPDATE menu_items
-      SET categoryId = ?, name = ?, description = ?, price = ?, costPrice = ?, imageUrl = ?, available = ?, popular = ?, dailyStock = ?, modifierGroupsJson = ?
+      SET categoryId = ?, name = ?, description = ?, price = ?, originalPrice = ?, costPrice = ?, imageUrl = ?, available = ?, popular = ?, badgesJson = ?, dailyStock = ?, modifierGroupsJson = ?
       WHERE id = ?
     `).run(
       item.categoryId,
       item.name,
       item.description,
       item.price,
+      normalizedOrigPrice,
       normalizedCost,
       item.imageUrl,
       item.available ? 1 : 0,
       item.popular ? 1 : 0,
+      JSON.stringify(badgesArr),
       normalizedStock,
       JSON.stringify(item.modifierGroups || []),
       item.id
@@ -967,18 +1030,20 @@ export function saveMenuItem(item: MenuItem): MenuItem {
     const id = item.id || `item-${Date.now()}`;
     item.id = id;
     db.prepare(`
-      INSERT INTO menu_items (id, categoryId, name, description, price, costPrice, imageUrl, available, popular, dailyStock, modifierGroupsJson)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO menu_items (id, categoryId, name, description, price, originalPrice, costPrice, imageUrl, available, popular, badgesJson, dailyStock, modifierGroupsJson)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       item.categoryId,
       item.name,
       item.description,
       item.price,
+      normalizedOrigPrice,
       normalizedCost,
       item.imageUrl,
       item.available ? 1 : 0,
       item.popular ? 1 : 0,
+      JSON.stringify(badgesArr),
       normalizedStock,
       JSON.stringify(item.modifierGroups || [])
     );
