@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
         ? rawSettings
         : {
             ...rawSettings,
+            courierPins: undefined,
             securityConfig: undefined,
             cloudSyncConfig: undefined,
           };

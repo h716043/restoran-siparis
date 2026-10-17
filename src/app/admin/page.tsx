@@ -152,8 +152,9 @@ export default function AdminDashboardPage() {
     "all" | "available" | "sold_out"
   >("all");
 
-  // Yeni Kurye Adı
+  // Yeni Kurye Adı ve Özel Şifresi
   const [newCourierName, setNewCourierName] = useState("");
+  const [newCourierPin, setNewCourierPin] = useState("");
 
   // Yeni Kategori Formu
   const [newCatName, setNewCatName] = useState("");
@@ -5033,73 +5034,149 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
-            {/* Kurye Listesi Yönetimi */}
+            {/* Kurye Listesi & Her Kuryeye Özel Şifre Yönetimi */}
             <div className="border-t border-slate-200 pt-4 space-y-3">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
                 <Truck className="w-4 h-4 text-orange-600" />
-                <span>Paket Servis Kurye Listesi (WhatsApp Bildirimi İçin)</span>
+                <span>Paket Servis Kurye Listesi & Kurye Özel Şifreleri (PIN)</span>
               </div>
               <p className="text-xs text-slate-500">
-                Mutfak/Kasa ekranında paket siparişi yola çıkarırken seçebileceğiniz kurye isimlerini buradan tanımlayabilirsiniz.
+                Her kuryeye kendine özel giriş şifresi (PIN) atayabilirsiniz. Kurye{" "}
+                <strong>/courier</strong> ekranından kendi şifresiyle giriş yaptığında
+                otomatik olarak kendi profili seçilir ve yalnızca kendi paketlerini yönetir.
               </p>
 
-              <div className="flex gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                 <input
                   type="text"
-                  placeholder="Örn: Ahmet (Motorlu Kurye)"
+                  placeholder="Kurye Adı (Örn: Ahmet - Motorlu Kurye)"
                   value={newCourierName}
                   onChange={(e) => setNewCourierName(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                  className="sm:col-span-6 px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                />
+                <input
+                  type="text"
+                  placeholder="Özel Şifre / PIN (Örn: 4444)"
+                  value={newCourierPin}
+                  onChange={(e) => setNewCourierPin(e.target.value)}
+                  className="sm:col-span-3 px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono"
                 />
                 <button
                   type="button"
                   onClick={() => {
-                    if (!newCourierName.trim()) return;
+                    const cleanName = newCourierName.trim();
+                    if (!cleanName) return;
                     const list = settings.couriers || [
                       "Kurye 1 (Motorlu)",
                       "Kurye 2 (Motorlu)",
                       "Hızlı Kurye",
                     ];
-                    setSettings({
+                    const cleanPin =
+                      newCourierPin.trim() ||
+                      String((list.length + 1) * 1111).slice(0, 4);
+                    const nextCouriers = list.includes(cleanName)
+                      ? list
+                      : [...list, cleanName];
+                    const nextPins = {
+                      ...(settings.courierPins || {}),
+                      [cleanName]: cleanPin,
+                    };
+                    const nextSettings: RestaurantSettings = {
                       ...settings,
-                      couriers: [...list, newCourierName.trim()],
-                    });
+                      couriers: nextCouriers,
+                      courierPins: nextPins,
+                    };
+                    persistSettings(
+                      nextSettings,
+                      `🛵 ${cleanName} kurye listesine özel şifresiyle eklendi!`
+                    );
                     setNewCourierName("");
+                    setNewCourierPin("");
                   }}
-                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
+                  className="sm:col-span-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
                 >
-                  + Kurye Ekle
+                  + Kurye & Şifre Ekle
                 </button>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {(
                   settings.couriers || [
                     "Kurye 1 (Motorlu)",
                     "Kurye 2 (Motorlu)",
                     "Hızlı Kurye",
                   ]
-                ).map((cName, idx) => (
-                  <span
-                    key={`${cName}-${idx}`}
-                    className="inline-flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-xl"
-                  >
-                    <span>🛵 {cName}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const list = settings.couriers || [];
-                        setSettings({
-                          ...settings,
-                          couriers: list.filter((_, i) => i !== idx),
-                        });
-                      }}
-                      className="text-red-500 hover:text-red-700 font-black cursor-pointer"
+                ).map((cName, idx) => {
+                  const currentPin =
+                    settings.courierPins?.[cName] ||
+                    String((idx + 1) * 1111).slice(0, 4);
+                  return (
+                    <div
+                      key={`${cName}-${idx}`}
+                      className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold px-3 py-2 rounded-xl"
                     >
-                      ×
-                    </button>
-                  </span>
-                ))}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="truncate">🛵 {cName}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-bold text-slate-400">
+                          Şifre:
+                        </span>
+                        <input
+                          type="text"
+                          value={currentPin}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSettings({
+                              ...settings,
+                              courierPins: {
+                                ...(settings.courierPins || {}),
+                                [cName]: val,
+                              },
+                            });
+                          }}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim() || "1111";
+                            const nextSettings: RestaurantSettings = {
+                              ...settings,
+                              courierPins: {
+                                ...(settings.courierPins || {}),
+                                [cName]: val,
+                              },
+                            };
+                            persistSettings(
+                              nextSettings,
+                              `🔑 ${cName} şifresi güncellendi!`
+                            );
+                          }}
+                          className="w-20 px-2 py-1 text-xs font-mono font-extrabold text-center bg-white border border-slate-300 rounded-lg text-orange-700 focus:outline-none focus:border-orange-500"
+                          title="Kuryenin kendine özel giriş şifresi (PIN)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const list = settings.couriers || [];
+                            const nextPins = { ...(settings.courierPins || {}) };
+                            delete nextPins[cName];
+                            const nextSettings: RestaurantSettings = {
+                              ...settings,
+                              couriers: list.filter((_, i) => i !== idx),
+                              courierPins: nextPins,
+                            };
+                            persistSettings(
+                              nextSettings,
+                              `🗑️ ${cName} kurye listesinden kaldırıldı.`
+                            );
+                          }}
+                          className="text-red-500 hover:text-red-700 font-black px-1.5 py-0.5 rounded hover:bg-red-50 cursor-pointer"
+                          title="Kuryeyi Sil"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

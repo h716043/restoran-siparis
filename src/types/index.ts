@@ -311,6 +311,7 @@ export interface RestaurantSettings {
   deliveryZones?: DeliveryZone[];
   coupons?: Coupon[];
   couriers?: string[];
+  courierPins?: Record<string, string>; // Her kuryenin kendine özel giriş şifresi / PIN kodu
   tvDisplayOrderTypes?: OrderType[]; // TV Sıra Çağrı ekranında (/tv) hangi sipariş türlerinin gösterileceği (delivery, pickup, dine_in)
   whatsappConfig?: WhatsAppConfig;
   securityConfig?: SecurityConfig;

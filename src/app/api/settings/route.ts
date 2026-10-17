@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
   }
   return NextResponse.json({
     ...raw,
+    courierPins: undefined,
     securityConfig: undefined,
     cloudSyncConfig: undefined,
   });
@@ -30,6 +31,7 @@ export async function PUT(req: NextRequest) {
     const updated = updateSettings({
       ...current,
       ...body,
+      courierPins: body.courierPins || current.courierPins,
       securityConfig: body.securityConfig || current.securityConfig,
       cloudSyncConfig: body.cloudSyncConfig || current.cloudSyncConfig,
     });

@@ -53,13 +53,22 @@ export async function PATCH(
 
     const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
-    const courierPin = req.headers.get("x-courier-pin");
+    const courierPin = req.headers.get("x-courier-pin")?.trim();
     const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
     const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
+    const courierPins = settings.courierPins || {};
+    const courierList = settings.couriers || [];
+
+    const hasValidCourierPin =
+      Boolean(courierPin) &&
+      Object.entries(courierPins).some(
+        ([cName, cPin]) => cPin === courierPin && courierList.includes(cName)
+      );
 
     const isAuthorized =
       role === "admin" ||
       role === "kitchen" ||
+      hasValidCourierPin ||
       (courierPin &&
         (courierPin === validKitchenPin || courierPin === validAdminPin));
 

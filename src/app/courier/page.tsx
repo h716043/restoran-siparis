@@ -22,7 +22,12 @@ import {
 
 export default function CourierPage() {
   const [pin, setPin] = useState("");
+  const [loginCourierName, setLoginCourierName] = useState<string>("auto");
   const [savedPin, setSavedPin] = useState<string>("");
+  const [lockedCourierName, setLockedCourierName] = useState<string | null>(
+    null
+  );
+  const [isMasterLogin, setIsMasterLogin] = useState<boolean>(false);
   const [authError, setAuthError] = useState("");
   const [orders, setOrders] = useState<Order[]>([]);
   const [couriers, setCouriers] = useState<string[]>([]);
@@ -36,28 +41,44 @@ export default function CourierPage() {
     try {
       const sp = localStorage.getItem("restoran_courier_pin");
       const sc = localStorage.getItem("restoran_selected_courier");
+      const lc = localStorage.getItem("restoran_login_courier_name");
       if (sp) setSavedPin(sp);
       if (sc) setSelectedCourier(sc);
+      if (lc) setLoginCourierName(lc);
     } catch {
       // ignore
     }
+    fetch("/api/menu")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.settings?.couriers)) {
+          setCouriers(d.settings.couriers);
+        }
+      })
+      .catch(() => {});
     const t = setInterval(() => setNowMs(Date.now()), 15000);
     return () => clearInterval(t);
   }, []);
 
   const fetchCourierOrders = useCallback(
-    async (pinToUse: string) => {
+    async (pinToUse: string, courierHint?: string) => {
       if (!pinToUse) return;
       setLoading(true);
       try {
-        const res = await fetch("/api/orders", {
-          headers: {
-            "x-courier-pin": pinToUse,
-          },
-        });
+        const targetHint = courierHint ?? loginCourierName;
+        const headers: Record<string, string> = {
+          "x-courier-pin": pinToUse,
+        };
+        if (targetHint && targetHint !== "auto" && targetHint !== "all") {
+          headers["x-courier-name"] = encodeURIComponent(targetHint);
+        }
+        const res = await fetch("/api/orders", { headers });
         if (res.status === 401) {
-          setAuthError("Hatalı Kurye / Personel PIN kodu.");
+          setAuthError(
+            "Hatalı Kurye Şifresi! Lütfen kendi kurye şifrenizi (PIN) kontrol edin."
+          );
           setSavedPin("");
+          setLockedCourierName(null);
           localStorage.removeItem("restoran_courier_pin");
           return;
         }
@@ -67,6 +88,14 @@ export default function CourierPage() {
           if (data.couriers && data.couriers.length > 0) {
             setCouriers(data.couriers);
           }
+          if (data.authenticatedCourier) {
+            setLockedCourierName(data.authenticatedCourier);
+            setIsMasterLogin(false);
+            setSelectedCourier(data.authenticatedCourier);
+          } else {
+            setLockedCourierName(null);
+            setIsMasterLogin(Boolean(data.isMasterCourierLogin));
+          }
           setAuthError("");
         }
       } catch {
@@ -75,7 +104,7 @@ export default function CourierPage() {
         setLoading(false);
       }
     },
-    []
+    [loginCourierName]
   );
 
   useEffect(() => {
@@ -90,11 +119,17 @@ export default function CourierPage() {
     const clean = pin.trim();
     if (!clean) return;
     setSavedPin(clean);
-    localStorage.setItem("restoran_courier_pin", clean);
-    await fetchCourierOrders(clean);
+    try {
+      localStorage.setItem("restoran_courier_pin", clean);
+      localStorage.setItem("restoran_login_courier_name", loginCourierName);
+    } catch {
+      // ignore
+    }
+    await fetchCourierOrders(clean, loginCourierName);
   };
 
   const handleCourierChange = (val: string) => {
+    if (lockedCourierName) return;
     setSelectedCourier(val);
     try {
       localStorage.setItem("restoran_selected_courier", val);
@@ -118,7 +153,7 @@ export default function CourierPage() {
         },
         body: JSON.stringify({
           status,
-          courierName,
+          courierName: lockedCourierName || courierName,
         }),
       });
       await fetchCourierOrders(savedPin);
@@ -181,7 +216,7 @@ export default function CourierPage() {
             <div>
               <h1 className="text-lg font-extrabold">Kurye Cep Paneli</h1>
               <p className="text-xs text-slate-400">
-                Paket teslimat, yol tarifi ve tahsilat ekranı
+                Her kuryeye özel şifre ile güvenli giriş
               </p>
             </div>
           </div>
@@ -193,9 +228,31 @@ export default function CourierPage() {
           )}
 
           <form onSubmit={handleLogin} className="space-y-4">
+            {couriers.length > 0 && (
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Kurye Seçimi
+                </label>
+                <select
+                  value={loginCourierName}
+                  onChange={(e) => setLoginCourierName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-orange-500"
+                >
+                  <option value="auto">
+                    🔑 Şifreme Göre Kurye Profilimi Otomatik Tanı
+                  </option>
+                  {couriers.map((c) => (
+                    <option key={c} value={c}>
+                      🛵 {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                Personel / Kurye PIN Kodu (Varsayılan: 1234)
+                Kurye Özel Şifreniz (PIN)
               </label>
               <div className="relative">
                 <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
@@ -208,11 +265,14 @@ export default function CourierPage() {
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-center text-lg font-black tracking-widest text-white focus:outline-none focus:border-orange-500"
                 />
               </div>
+              <p className="text-[11px] text-slate-500 mt-1.5">
+                Size atanan kişisel kurye şifrenizi girin (Örn: Kurye 1 → 1111, Kurye 2 → 2222).
+              </p>
             </div>
 
             <button
               type="submit"
-              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-lg"
+              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-lg cursor-pointer"
             >
               <ShieldCheck className="w-5 h-5" />
               <span>Kurye Paneline Giriş Yap</span>
@@ -267,6 +327,7 @@ export default function CourierPage() {
                 type="button"
                 onClick={() => {
                   setSavedPin("");
+                  setLockedCourierName(null);
                   localStorage.removeItem("restoran_courier_pin");
                 }}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-red-900/60 text-slate-300 hover:text-red-200"
@@ -277,22 +338,36 @@ export default function CourierPage() {
             </div>
           </div>
 
-          {/* Kurye Seçimi */}
-          <div className="flex items-center gap-2">
-            <UserCheck className="w-4 h-4 text-orange-400 flex-shrink-0" />
-            <select
-              value={selectedCourier}
-              onChange={(e) => handleCourierChange(e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-xl"
-            >
-              <option value="all">Tüm Kuryeler ({activeDeliveries.length} Aktif Paket)</option>
-              {couriers.map((c) => (
-                <option key={c} value={c}>
-                  🛵 {c}
+          {/* Kurye Kimliği veya Yönetici Kurye Seçimi */}
+          {lockedCourierName && !isMasterLogin ? (
+            <div className="flex items-center justify-between bg-orange-950/40 border border-orange-500/40 px-3 py-2 rounded-xl text-xs">
+              <div className="flex items-center gap-2 font-extrabold text-orange-300">
+                <UserCheck className="w-4 h-4 text-orange-400 shrink-0" />
+                <span>🛵 Aktif Kurye: {lockedCourierName}</span>
+              </div>
+              <span className="text-[10px] font-bold bg-orange-500/20 text-orange-200 px-2 py-0.5 rounded-md">
+                Kişisel Şifre İle Giriş
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-orange-400 flex-shrink-0" />
+              <select
+                value={selectedCourier}
+                onChange={(e) => handleCourierChange(e.target.value)}
+                className="flex-1 bg-slate-800 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-xl"
+              >
+                <option value="all">
+                  Tüm Kuryeler ({activeDeliveries.length} Aktif Paket)
                 </option>
-              ))}
-            </select>
-          </div>
+                {couriers.map((c) => (
+                  <option key={c} value={c}>
+                    🛵 {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </header>
 

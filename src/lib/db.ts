@@ -799,6 +799,24 @@ export function getSettings(): RestaurantSettings {
     ];
     updated = true;
   }
+  if (!Array.isArray(parsed.couriers) || parsed.couriers.length === 0) {
+    parsed.couriers = [
+      "Kurye 1 (Motorlu)",
+      "Kurye 2 (Motorlu)",
+      "Hızlı Kurye",
+    ];
+    updated = true;
+  }
+  if (!parsed.courierPins || typeof parsed.courierPins !== "object") {
+    parsed.courierPins = {};
+    updated = true;
+  }
+  parsed.couriers.forEach((cName, idx) => {
+    if (!parsed.courierPins![cName]) {
+      parsed.courierPins![cName] = String((idx + 1) * 1111).slice(0, 4);
+      updated = true;
+    }
+  });
   if (!Array.isArray(parsed.tvDisplayOrderTypes)) {
     parsed.tvDisplayOrderTypes = ["pickup", "dine_in", "delivery"];
     updated = true;

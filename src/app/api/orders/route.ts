@@ -99,22 +99,58 @@ export async function GET(req: NextRequest) {
     }
 
     const role = req.cookies.get("restoran_staff_role")?.value;
-    const courierPin = req.headers.get("x-courier-pin");
+    const courierPin = req.headers.get("x-courier-pin")?.trim();
+    const rawCourierHeader = req.headers.get("x-courier-name");
+    const requestedCourierName = rawCourierHeader
+      ? decodeURIComponent(rawCourierHeader).trim()
+      : "";
     const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
     const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
+    const courierPins = settings.courierPins || {};
+    const courierList = settings.couriers || [];
+
+    let matchedCourier: string | null = null;
+    if (courierPin) {
+      if (
+        requestedCourierName &&
+        requestedCourierName !== "all" &&
+        courierPins[requestedCourierName] === courierPin
+      ) {
+        matchedCourier = requestedCourierName;
+      } else {
+        const foundEntry = Object.entries(courierPins).find(
+          ([cName, cPin]) =>
+            cPin === courierPin && courierList.includes(cName)
+        );
+        if (foundEntry) {
+          matchedCourier = foundEntry[0];
+        }
+      }
+    }
+
+    const isMasterPin =
+      Boolean(courierPin) &&
+      (courierPin === validKitchenPin || courierPin === validAdminPin);
 
     const isAuthorized =
       role === "admin" ||
       role === "kitchen" ||
-      (courierPin &&
-        (courierPin === validKitchenPin || courierPin === validAdminPin));
+      Boolean(matchedCourier) ||
+      isMasterPin;
 
     if (!isAuthorized) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
     const orders = getOrders();
-    return NextResponse.json({ orders, couriers: settings.couriers || [] });
+    return NextResponse.json({
+      orders,
+      couriers: courierList,
+      authenticatedCourier: matchedCourier,
+      isMasterCourierLogin: Boolean(
+        isMasterPin || role === "admin" || role === "kitchen"
+      ),
+    });
   } catch (error) {
     console.error("GET /api/orders error:", error);
     return NextResponse.json({ error: "Siparişler alınamadı" }, { status: 500 });
