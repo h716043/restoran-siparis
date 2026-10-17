@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
         sambaPos: nextSamba,
       };
       const updatedSettings = updateSettings({
+        ...settings,
         posIntegrationConfig: nextPosConfig,
       });
       return NextResponse.json({
@@ -64,7 +65,9 @@ export async function POST(req: NextRequest) {
 
     // 2) SambaPOS Bağlantısını Test Etme
     if (body.action === "test_connection") {
-      const result = await testSambaPosConnection(body.sambaPos);
+      const result = await testSambaPosConnection(
+        body.sambaPos || body.sambaPosConfig
+      );
       return NextResponse.json(result);
     }
 

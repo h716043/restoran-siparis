@@ -249,17 +249,17 @@ export default function KitchenTabletPage() {
     const sync = order.posSyncInfo;
     const isSyncing = posSyncingOrderId === order.id;
 
-    if (sync?.synced) {
+    if (sync?.status === "synced") {
       return (
         <span
           className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-lg"
           title={
-            sync.externalTicketNumber
-              ? `SambaPOS Fiş #${sync.externalTicketNumber}`
+            sync.externalTicketId
+              ? `SambaPOS Fiş #${sync.externalTicketId}`
               : "SambaPOS'a Aktarıldı"
           }
         >
-          ✅ SambaPOS{sync.externalTicketNumber ? ` #${sync.externalTicketNumber}` : ""}
+          ✅ SambaPOS{sync.externalTicketId ? ` #${sync.externalTicketId}` : ""}
         </span>
       );
     }
@@ -270,19 +270,19 @@ export default function KitchenTabletPage() {
         onClick={() => handleManualSambaSync(order.id)}
         disabled={isSyncing}
         className={`inline-flex items-center gap-1 text-[11px] font-extrabold px-2 py-0.5 rounded-lg border transition cursor-pointer disabled:opacity-50 ${
-          sync?.lastError
+          sync?.errorMessage
             ? "bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40"
             : "bg-indigo-600/25 hover:bg-indigo-600 text-indigo-200 hover:text-white border-indigo-500/40"
         }`}
         title={
-          sync?.lastError
-            ? `Son Hata: ${sync.lastError} (Tekrar göndermek için tıklayın)`
+          sync?.errorMessage
+            ? `Son Hata: ${sync.errorMessage} (Tekrar göndermek için tıklayın)`
             : "Bu siparişi şimdi SambaPOS'a aktar"
         }
       >
         {isSyncing
           ? "⏳ SambaPOS..."
-          : sync?.lastError
+          : sync?.errorMessage
           ? "⚠️ SambaPOS Tekrar Dene"
           : "🔌 SambaPOS'a Aktar"}
       </button>

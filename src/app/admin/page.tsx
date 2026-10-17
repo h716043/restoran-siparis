@@ -373,28 +373,24 @@ export default function AdminDashboardPage() {
     requireAuthForDeliveryAndPickup: true,
   };
 
-  const posIntegrationConfig = settings?.posIntegrationConfig || {
-    activeProvider: "none" as const,
-  };
-
-  const sambaConfig = posIntegrationConfig.sambaPos || {
+  const sambaConfig = settings?.posIntegrationConfig?.sambaPos || {
     enabled: false,
-    connectionMode: "graphql" as const,
+    mode: "graphql" as const,
     syncTrigger: "on_accepted" as const,
     serverUrl: "http://localhost:9000",
     clientId: "restoran_pos",
-    clientSecret: "1234",
     username: "Admin",
     password: "1234",
     departmentName: "Restoran",
     ticketTypeName: "Adisyon",
     terminalName: "Sunucu",
-    tableEntityTypeName: "Masalar",
-    customerEntityTypeName: "Müşteriler",
-    defaultOrderTagGroupName: "Seçenekler",
+    userName: "Admin",
+    tableEntityType: "Masalar",
+    tableEntityPrefix: "Masa ",
+    customerEntityType: "Müşteriler",
+    defaultOrderTagName: "Default",
     fallbackMenuItemName: "Online Sipariş Ürünü",
-    sendDeliveryFeeAsItem: true,
-    deliveryFeeItemName: "Paket Servis Ücreti",
+    autoCreateCustomerEntity: true,
   };
 
   const updateSambaConfigField = (patch: Partial<typeof sambaConfig>) => {
@@ -439,7 +435,7 @@ export default function AdminDashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "test_connection",
-          sambaPosConfig: sambaConfig,
+          sambaPos: sambaConfig,
         }),
       });
       const data = await res.json();
@@ -476,7 +472,7 @@ export default function AdminDashboardPage() {
         ok: Boolean(data.ok),
         message: data.message,
       });
-      await fetchAll();
+      await loadData();
     } catch {
       setPosTestStatus({
         ok: false,
@@ -502,7 +498,7 @@ export default function AdminDashboardPage() {
         ok: Boolean(data.ok),
         message: data.message,
       });
-      await fetchAll();
+      await loadData();
     } catch {
       setPosTestStatus({
         ok: false,
@@ -6185,10 +6181,10 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     Bağlantı Türü (Protokol)
                   </label>
                   <select
-                    value={sambaConfig.connectionMode}
+                    value={sambaConfig.mode}
                     onChange={(e) =>
                       updateSambaConfigField({
-                        connectionMode: e.target.value as "graphql" | "webhook",
+                        mode: e.target.value as "graphql" | "webhook",
                       })
                     }
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
@@ -6203,7 +6199,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                 </div>
               </div>
 
-              {sambaConfig.connectionMode === "graphql" ? (
+              {sambaConfig.mode === "graphql" ? (
                 <div className="space-y-4 pt-2 border-t border-slate-100">
                   <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-700">
                     2. SambaPOS V5 Message Server & Eşleştirme Ayarları
@@ -6263,7 +6259,10 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                         type="text"
                         value={sambaConfig.username}
                         onChange={(e) =>
-                          updateSambaConfigField({ username: e.target.value })
+                          updateSambaConfigField({
+                            username: e.target.value,
+                            userName: e.target.value,
+                          })
                         }
                         placeholder="Admin"
                         className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
@@ -6326,10 +6325,10 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       </label>
                       <input
                         type="text"
-                        value={sambaConfig.tableEntityTypeName}
+                        value={sambaConfig.tableEntityType}
                         onChange={(e) =>
                           updateSambaConfigField({
-                            tableEntityTypeName: e.target.value,
+                            tableEntityType: e.target.value,
                           })
                         }
                         placeholder="Masalar"
@@ -6342,10 +6341,10 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       </label>
                       <input
                         type="text"
-                        value={sambaConfig.customerEntityTypeName}
+                        value={sambaConfig.customerEntityType}
                         onChange={(e) =>
                           updateSambaConfigField({
-                            customerEntityTypeName: e.target.value,
+                            customerEntityType: e.target.value,
                           })
                         }
                         placeholder="Müşteriler"
@@ -6358,13 +6357,13 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       </label>
                       <input
                         type="text"
-                        value={sambaConfig.defaultOrderTagGroupName}
+                        value={sambaConfig.defaultOrderTagName}
                         onChange={(e) =>
                           updateSambaConfigField({
-                            defaultOrderTagGroupName: e.target.value,
+                            defaultOrderTagName: e.target.value,
                           })
                         }
-                        placeholder="Seçenekler"
+                        placeholder="Default"
                         className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
                       />
                     </div>
@@ -6377,7 +6376,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       </label>
                       <input
                         type="text"
-                        value={sambaConfig.fallbackMenuItemName}
+                        value={sambaConfig.fallbackMenuItemName || ""}
                         onChange={(e) =>
                           updateSambaConfigField({
                             fallbackMenuItemName: e.target.value,
@@ -6395,29 +6394,29 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       <label className="flex items-center gap-2 text-xs font-extrabold text-slate-800 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={Boolean(sambaConfig.sendDeliveryFeeAsItem)}
+                          checked={Boolean(sambaConfig.autoCreateCustomerEntity)}
                           onChange={(e) =>
                             updateSambaConfigField({
-                              sendDeliveryFeeAsItem: e.target.checked,
+                              autoCreateCustomerEntity: e.target.checked,
                             })
                           }
                           className="w-4 h-4 accent-indigo-600 rounded"
                         />
-                        Paket Servis Ücretini Kalem Olarak Gönder
+                        Paket Serviste Müşteri Varlığını Eşleştir & Masa Ön Eki
                       </label>
                       <input
                         type="text"
-                        value={sambaConfig.deliveryFeeItemName}
+                        value={sambaConfig.tableEntityPrefix}
                         onChange={(e) =>
                           updateSambaConfigField({
-                            deliveryFeeItemName: e.target.value,
+                            tableEntityPrefix: e.target.value,
                           })
                         }
-                        placeholder="Paket Servis Ücreti"
+                        placeholder="Masa "
                         className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm"
                       />
                       <p className="text-[11px] text-slate-500">
-                        Bölge gönderim ücreti varsa SambaPOS adisyonuna bu ürün adıyla eklenir.
+                        Örn: QR Masadan &quot;5&quot; geldiğinde SambaPOS&apos;ta <code>Masa 5</code> varlığına bağlar.
                       </p>
                     </div>
                   </div>
@@ -6434,9 +6433,9 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                       </label>
                       <input
                         type="text"
-                        value={sambaConfig.webhookUrl || ""}
+                        value={sambaConfig.serverUrl}
                         onChange={(e) =>
-                          updateSambaConfigField({ webhookUrl: e.target.value })
+                          updateSambaConfigField({ serverUrl: e.target.value })
                         }
                         placeholder="http://localhost:9005/sambapos-bridge"
                         className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
@@ -6444,14 +6443,14 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Gizli Anahtar (Bearer Token / X-POS-Secret)
+                        Gizli Anahtar / API Şifresi (İsteğe Bağlı)
                       </label>
                       <input
                         type="password"
-                        value={sambaConfig.webhookSecret || ""}
+                        value={sambaConfig.password}
                         onChange={(e) =>
                           updateSambaConfigField({
-                            webhookSecret: e.target.value,
+                            password: e.target.value,
                           })
                         }
                         placeholder="İsteğe bağlı güvenlik anahtarı"
@@ -6538,27 +6537,27 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                             </span>
                           </td>
                           <td className="py-2.5 px-3">
-                            {sync?.synced ? (
+                            {sync?.status === "synced" ? (
                               <div className="space-y-0.5">
                                 <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
                                   ✅ SambaPOS&apos;a Aktarıldı
-                                  {sync.externalTicketNumber
-                                    ? ` (Fiş #${sync.externalTicketNumber})`
+                                  {sync.externalTicketId
+                                    ? ` (Fiş #${sync.externalTicketId})`
                                     : ""}
                                 </span>
-                                {sync.lastError && (
+                                {sync.errorMessage && (
                                   <div className="text-[10px] text-amber-700">
-                                    ℹ️ {sync.lastError}
+                                    ℹ️ {sync.errorMessage}
                                   </div>
                                 )}
                               </div>
-                            ) : sync?.lastError ? (
+                            ) : sync?.errorMessage ? (
                               <div className="space-y-0.5">
                                 <span className="inline-flex items-center gap-1 bg-rose-100 text-rose-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
                                   ⚠️ Hata Oluştu
                                 </span>
-                                <div className="text-[10px] text-rose-600 max-w-xs truncate" title={sync.lastError}>
-                                  {sync.lastError}
+                                <div className="text-[10px] text-rose-600 max-w-xs truncate" title={sync.errorMessage}>
+                                  {sync.errorMessage}
                                 </div>
                               </div>
                             ) : (
@@ -6581,7 +6580,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                                     : ""
                                 }`}
                               />
-                              {sync?.synced
+                              {sync?.status === "synced"
                                 ? "Tekrar Gönder"
                                 : "SambaPOS'a Aktar"}
                             </button>
