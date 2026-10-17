@@ -2089,6 +2089,15 @@ export default function KitchenTabletPage() {
                   0
                 );
                 const isOccupied = tableActiveOrders.length > 0;
+                const latestTableOrderMs = tableActiveOrders.reduce(
+                  (max, o) => Math.max(max, new Date(o.createdAt).getTime()),
+                  0
+                );
+                const idleMins =
+                  isOccupied && latestTableOrderMs > 0
+                    ? Math.max(0, Math.floor((nowMs - latestTableOrderMs) / 60000))
+                    : 0;
+                const isIdleLong = isOccupied && idleMins >= 20;
 
                 return (
                   <div
@@ -2132,6 +2141,13 @@ export default function KitchenTabletPage() {
                           </span>
                         )}
                       </div>
+
+                      {isIdleLong && (
+                        <div className="bg-amber-950/60 border border-amber-500/40 rounded-xl px-2.5 py-1.5 text-[11px] font-extrabold text-amber-300 flex items-center justify-between">
+                          <span>☕ {idleMins} dk işlem yok</span>
+                          <span className="underline">Çay / Tatlı Sor</span>
+                        </div>
+                      )}
 
                       {activeResv && !isOccupied && (
                         <div className="bg-blue-950/60 border border-blue-500/40 rounded-xl p-2 text-xs text-blue-200">
@@ -2178,10 +2194,16 @@ export default function KitchenTabletPage() {
                                     {item.quantity}x
                                   </strong>{" "}
                                   {item.name}
+                                  {item.isComplimentary && (
+                                    <span className="ml-1 text-[10px] font-black text-amber-300">
+                                      (🎁 İkram)
+                                    </span>
+                                  )}
                                 </span>
                                 <span className="text-slate-400">
-                                  {item.totalPrice.toFixed(0)}{" "}
-                                  {settings?.currency}
+                                  {item.isComplimentary
+                                    ? `0 ${settings?.currency}`
+                                    : `${item.totalPrice.toFixed(0)} ${settings?.currency}`}
                                 </span>
                               </div>
                             ))
@@ -2386,11 +2408,61 @@ export default function KitchenTabletPage() {
                                             </strong>{" "}
                                             {item.name}
                                           </span>
+                                          {item.isComplimentary && (
+                                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                              🎁 İKRAM (0 ₺)
+                                            </span>
+                                          )}
                                         </div>
-                                        <span className="font-bold text-emerald-400">
-                                          {item.totalPrice.toFixed(2)}{" "}
-                                          {settings?.currency}
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              await fetch(
+                                                `/api/orders/${ord.id}`,
+                                                {
+                                                  method: "PATCH",
+                                                  headers: {
+                                                    "Content-Type":
+                                                      "application/json",
+                                                    "x-kitchen-pin":
+                                                      sessionStorage.getItem(
+                                                        "kitchen_auth_pin"
+                                                      ) || "",
+                                                  },
+                                                  body: JSON.stringify({
+                                                    action:
+                                                      "toggle_item_complimentary",
+                                                    itemId: item.id,
+                                                  }),
+                                                }
+                                              );
+                                              fetchOrders();
+                                            }}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-extrabold border transition cursor-pointer ${
+                                              item.isComplimentary
+                                                ? "bg-amber-600 text-white border-amber-400"
+                                                : "bg-slate-800 hover:bg-amber-600/30 text-amber-300 border-amber-500/30"
+                                            }`}
+                                            title="Müessese İkramı (0 ₺) Yap / Geri Al"
+                                          >
+                                            {item.isComplimentary
+                                              ? "🎁 İkramı Geri Al"
+                                              : "🎁 İkram Yap"}
+                                          </button>
+                                          <span
+                                            className={`font-bold ${
+                                              item.isComplimentary
+                                                ? "line-through text-slate-500"
+                                                : "text-emerald-400"
+                                            }`}
+                                          >
+                                            {item.isComplimentary
+                                              ? `0.00 ${settings?.currency}`
+                                              : `${item.totalPrice.toFixed(2)} ${settings?.currency}`}
+                                          </span>
+                                        </div>
                                       </div>
                                     );
                                   })
@@ -2794,7 +2866,25 @@ export default function KitchenTabletPage() {
                   Biten bir yemeği tek dokunuşla &ldquo;Tükendi&rdquo; olarak işaretleyin veya günlük kalan porsiyon adedini güncelleyin; müşteri ekranında anında senkronize olur.
                 </p>
               </div>
-              <div className="flex items-center gap-2 text-xs font-bold">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await fetch("/api/menu", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ type: "reset_daily_stocks" }),
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      if (data.items) setMenuItems(data.items);
+                      fetchOrders();
+                    }
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold px-3.5 py-2 rounded-xl transition cursor-pointer shadow"
+                >
+                  🔄 Sabah Stoklarını Yenile (Tükenenleri Aç)
+                </button>
                 <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-xl">
                   Stokta: {menuItems.filter((m) => m.available).length} Ürün
                 </span>

@@ -104,10 +104,18 @@ export async function GET(req: NextRequest) {
     const requestedCourierName = rawCourierHeader
       ? decodeURIComponent(rawCourierHeader).trim()
       : "";
+    const waiterPin = req.headers.get("x-waiter-pin")?.trim();
+    const rawWaiterHeader = req.headers.get("x-waiter-name");
+    const requestedWaiterName = rawWaiterHeader
+      ? decodeURIComponent(rawWaiterHeader).trim()
+      : "";
+
     const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
     const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
     const courierPins = settings.courierPins || {};
     const courierList = settings.couriers || [];
+    const waiterPins = settings.waiterPins || {};
+    const waiterList = settings.waiters || [];
 
     let matchedCourier: string | null = null;
     if (courierPin) {
@@ -128,14 +136,37 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    let matchedWaiter: string | null = null;
+    if (waiterPin) {
+      if (
+        requestedWaiterName &&
+        requestedWaiterName !== "auto" &&
+        requestedWaiterName !== "all" &&
+        waiterPins[requestedWaiterName] === waiterPin
+      ) {
+        matchedWaiter = requestedWaiterName;
+      } else {
+        const foundWaiter = Object.entries(waiterPins).find(
+          ([wName, wPin]) =>
+            wPin === waiterPin && waiterList.includes(wName)
+        );
+        if (foundWaiter) {
+          matchedWaiter = foundWaiter[0];
+        }
+      }
+    }
+
     const isMasterPin =
-      Boolean(courierPin) &&
-      (courierPin === validKitchenPin || courierPin === validAdminPin);
+      (Boolean(courierPin) &&
+        (courierPin === validKitchenPin || courierPin === validAdminPin)) ||
+      (Boolean(waiterPin) &&
+        (waiterPin === validKitchenPin || waiterPin === validAdminPin));
 
     const isAuthorized =
       role === "admin" ||
       role === "kitchen" ||
       Boolean(matchedCourier) ||
+      Boolean(matchedWaiter) ||
       isMasterPin;
 
     if (!isAuthorized) {
@@ -146,8 +177,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       orders,
       couriers: courierList,
+      waiters: waiterList,
       authenticatedCourier: matchedCourier,
+      authenticatedWaiter: matchedWaiter,
       isMasterCourierLogin: Boolean(
+        isMasterPin || role === "admin" || role === "kitchen"
+      ),
+      isMasterWaiterLogin: Boolean(
         isMasterPin || role === "admin" || role === "kitchen"
       ),
     });
@@ -167,8 +203,22 @@ export async function POST(req: NextRequest) {
 
     const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
+    const waiterPin = req.headers.get("x-waiter-pin")?.trim();
+    const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
+    const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
+    const waiterPins = settings.waiterPins || {};
+    const waiterList = settings.waiters || [];
+    const hasValidWaiterPin =
+      Boolean(waiterPin) &&
+      (waiterPin === validKitchenPin ||
+        waiterPin === validAdminPin ||
+        Object.entries(waiterPins).some(
+          ([wName, wPin]) => wPin === waiterPin && waiterList.includes(wName)
+        ));
+
     const isStaffPosOrder =
-      Boolean(body.isStaffPosOrder) && (role === "admin" || role === "kitchen");
+      Boolean(body.isStaffPosOrder) &&
+      (role === "admin" || role === "kitchen" || hasValidWaiterPin);
 
     const requireAuth =
       !isStaffPosOrder &&
@@ -374,8 +424,23 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     await pullActivityFromCloud(true);
+    const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
-    const isAuthorized = role === "admin" || role === "kitchen";
+    const waiterPin = req.headers.get("x-waiter-pin")?.trim();
+    const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
+    const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
+    const waiterPins = settings.waiterPins || {};
+    const waiterList = settings.waiters || [];
+    const hasValidWaiterPin =
+      Boolean(waiterPin) &&
+      (waiterPin === validKitchenPin ||
+        waiterPin === validAdminPin ||
+        Object.entries(waiterPins).some(
+          ([wName, wPin]) => wPin === waiterPin && waiterList.includes(wName)
+        ));
+
+    const isAuthorized =
+      role === "admin" || role === "kitchen" || hasValidWaiterPin;
     if (!isAuthorized) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }

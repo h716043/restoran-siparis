@@ -10,6 +10,7 @@ import {
   deleteCategory,
   createReservation,
   updateReservationStatus,
+  resetDailyMenuStocks,
 } from "@/lib/db";
 import {
   pullActivityFromCloud,
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
         : {
             ...rawSettings,
             courierPins: undefined,
+            waiterPins: undefined,
             securityConfig: undefined,
             cloudSyncConfig: undefined,
           };
@@ -128,6 +130,14 @@ export async function POST(req: NextRequest) {
 
       await syncActivityWithCloud();
       return NextResponse.json({ reservation: updated, settings: getSettings() });
+    }
+
+    if (body.type === "reset_daily_stocks") {
+      const refreshedItems = resetDailyMenuStocks(
+        Number(body.defaultStock || 50)
+      );
+      await pushCatalogToCloud();
+      return NextResponse.json({ items: refreshedItems });
     }
 
     if (body.type === "category") {

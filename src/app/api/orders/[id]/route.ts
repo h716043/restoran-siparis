@@ -54,10 +54,13 @@ export async function PATCH(
     const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
     const courierPin = req.headers.get("x-courier-pin")?.trim();
+    const waiterPin = req.headers.get("x-waiter-pin")?.trim();
     const validKitchenPin = settings.securityConfig?.kitchenPassword || "1234";
     const validAdminPin = settings.securityConfig?.adminPassword || "admin1234";
     const courierPins = settings.courierPins || {};
     const courierList = settings.couriers || [];
+    const waiterPins = settings.waiterPins || {};
+    const waiterList = settings.waiters || [];
 
     const hasValidCourierPin =
       Boolean(courierPin) &&
@@ -65,10 +68,19 @@ export async function PATCH(
         ([cName, cPin]) => cPin === courierPin && courierList.includes(cName)
       );
 
+    const hasValidWaiterPin =
+      Boolean(waiterPin) &&
+      (waiterPin === validKitchenPin ||
+        waiterPin === validAdminPin ||
+        Object.entries(waiterPins).some(
+          ([wName, wPin]) => wPin === waiterPin && waiterList.includes(wName)
+        ));
+
     const isAuthorized =
       role === "admin" ||
       role === "kitchen" ||
       hasValidCourierPin ||
+      hasValidWaiterPin ||
       (courierPin &&
         (courierPin === validKitchenPin || courierPin === validAdminPin));
 
@@ -80,6 +92,23 @@ export async function PATCH(
     if (body.action === "toggle_item_prepared") {
       const { toggleOrderItemPrepared } = await import("@/lib/db");
       const toggled = toggleOrderItemPrepared(id, String(body.itemId || "all"));
+      if (!toggled) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      await syncActivityWithCloud();
+      return NextResponse.json({ order: toggled });
+    }
+
+    // Adisyondaki bir ürünü tek tuşla "Müessese İkramı (0 ₺)" yapma veya ikramı geri alma
+    if (body.action === "toggle_item_complimentary") {
+      const { toggleOrderItemComplimentary } = await import("@/lib/db");
+      const toggled = toggleOrderItemComplimentary(
+        id,
+        String(body.itemId || "")
+      );
       if (!toggled) {
         return NextResponse.json(
           { error: "Sipariş bulunamadı" },
@@ -135,7 +164,8 @@ export async function PATCH(
       body.status,
       body.estimatedMinutes,
       body.rejectReason,
-      body.courierName
+      body.courierName,
+      body.paymentMethod
     );
     if (!updated) {
       return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });

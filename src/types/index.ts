@@ -75,6 +75,8 @@ export interface OrderItem {
   itemNote?: string;
   /** Mutfak ekranında usta tarafından hazırlandı olarak tiklendi mi? */
   prepared?: boolean;
+  /** Müessese ikramı olarak işaretlendi mi? (Fiyatı 0 TL olarak yansır) */
+  isComplimentary?: boolean;
 }
 
 export interface SplitPaymentInfo {
@@ -312,6 +314,9 @@ export interface RestaurantSettings {
   coupons?: Coupon[];
   couriers?: string[];
   courierPins?: Record<string, string>; // Her kuryenin kendine özel giriş şifresi / PIN kodu
+  waiters?: string[]; // Garson listesi
+  waiterPins?: Record<string, string>; // Her garsonun kendine özel giriş şifresi / PIN kodu
+  defaultDailyStocks?: Record<string, number>; // Ürün bazlı sabah varsayılan günlük porsiyon stok şablonu
   tvDisplayOrderTypes?: OrderType[]; // TV Sıra Çağrı ekranında (/tv) hangi sipariş türlerinin gösterileceği (delivery, pickup, dine_in)
   whatsappConfig?: WhatsAppConfig;
   securityConfig?: SecurityConfig;

@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ...raw,
     courierPins: undefined,
+    waiterPins: undefined,
     securityConfig: undefined,
     cloudSyncConfig: undefined,
   });
@@ -32,6 +33,7 @@ export async function PUT(req: NextRequest) {
       ...current,
       ...body,
       courierPins: body.courierPins || current.courierPins,
+      waiterPins: body.waiterPins || current.waiterPins,
       securityConfig: body.securityConfig || current.securityConfig,
       cloudSyncConfig: body.cloudSyncConfig || current.cloudSyncConfig,
     });

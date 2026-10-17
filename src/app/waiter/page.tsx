@@ -35,6 +35,10 @@ const QUICK_WAITER_NOTES = [
 export default function WaiterTerminalPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [pinInput, setPinInput] = useState("");
+  const [loginWaiterSelect, setLoginWaiterSelect] = useState<string>("auto");
+  const [savedWaiterPin, setSavedWaiterPin] = useState<string>("");
+  const [lockedWaiterName, setLockedWaiterName] = useState<string | null>(null);
+  const [waiterList, setWaiterList] = useState<string[]>([]);
   const [pinError, setPinError] = useState("");
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -94,13 +98,31 @@ export default function WaiterTerminalPage() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3200);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Play notification chime via Web Audio API
+  const getWaiterHeaders = useCallback(
+    (includeJson = false): Record<string, string> => {
+      const h: Record<string, string> = {};
+      if (includeJson) h["Content-Type"] = "application/json";
+      if (savedWaiterPin) {
+        h["x-waiter-pin"] = savedWaiterPin;
+        if (loginWaiterSelect && loginWaiterSelect !== "auto") {
+          h["x-waiter-name"] = encodeURIComponent(loginWaiterSelect);
+        }
+      }
+      return h;
+    },
+    [savedWaiterPin, loginWaiterSelect]
+  );
+
+  // Play notification chime + mobile vibration via Web Audio API
   const playNotificationBeep = useCallback(() => {
     if (!soundEnabled || typeof window === "undefined") return;
     try {
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([220, 100, 220]);
+      }
       const AudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
@@ -124,19 +146,40 @@ export default function WaiterTerminalPage() {
   }, [soundEnabled]);
 
   useEffect(() => {
+    let savedPin = "";
     if (typeof window !== "undefined") {
       const savedName = localStorage.getItem("restoran_waiter_name");
       if (savedName) setWaiterName(savedName);
       const savedSound = localStorage.getItem("restoran_waiter_sound");
       if (savedSound !== null) setSoundEnabled(savedSound === "1");
+      savedPin = localStorage.getItem("restoran_waiter_pin") || "";
+      const savedSel = localStorage.getItem("restoran_waiter_select") || "auto";
+      setLoginWaiterSelect(savedSel);
+      if (savedPin) {
+        setSavedWaiterPin(savedPin);
+      }
     }
-    fetch("/api/staff-auth")
+    fetch("/api/menu")
       .then((r) => r.json())
-      .then((d) => setAuthenticated(Boolean(d.authenticated !== false)))
-      .catch(() => setAuthenticated(true));
+      .then((d) => {
+        if (Array.isArray(d?.settings?.waiters)) {
+          setWaiterList(d.settings.waiters);
+        }
+      })
+      .catch(() => {});
+
+    if (savedPin) {
+      setAuthenticated(true);
+    } else {
+      fetch("/api/staff-auth")
+        .then((r) => r.json())
+        .then((d) => setAuthenticated(Boolean(d.authenticated === true)))
+        .catch(() => setAuthenticated(false));
+    }
   }, []);
 
   const handleWaiterNameChange = (val: string) => {
+    if (lockedWaiterName) return;
     setWaiterName(val);
     if (typeof window !== "undefined") {
       localStorage.setItem("restoran_waiter_name", val);
@@ -154,29 +197,86 @@ export default function WaiterTerminalPage() {
 
   const handlePinLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanPin = pinInput.trim();
+    if (!cleanPin) return;
     setPinError("");
-    const res = await fetch("/api/staff-auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pinInput, role: "kitchen" }),
+
+    const headers: Record<string, string> = {
+      "x-waiter-pin": cleanPin,
+    };
+    if (loginWaiterSelect && loginWaiterSelect !== "auto") {
+      headers["x-waiter-name"] = encodeURIComponent(loginWaiterSelect);
+    }
+
+    const checkRes = await fetch("/api/orders", {
+      headers,
+      cache: "no-store",
     });
-    if (res.ok) {
+
+    if (checkRes.ok) {
+      const data = await checkRes.json();
+      setSavedWaiterPin(cleanPin);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("restoran_waiter_pin", cleanPin);
+        localStorage.setItem("restoran_waiter_select", loginWaiterSelect);
+      }
+      if (data.authenticatedWaiter) {
+        setLockedWaiterName(data.authenticatedWaiter);
+        setWaiterName(data.authenticatedWaiter);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("restoran_waiter_name", data.authenticatedWaiter);
+        }
+      } else {
+        setLockedWaiterName(null);
+      }
+      // Ayrıca genel personel çerezini de (eğer kasa/admin şifresi ise) dene
+      fetch("/api/staff-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: cleanPin, role: "kitchen" }),
+      }).catch(() => {});
       setAuthenticated(true);
     } else {
-      setPinError("Hatalı personel PIN kodu!");
+      setPinError(
+        "Hatalı Garson Şifresi! Lütfen kendi garson şifrenizi (PIN) kontrol edin."
+      );
+    }
+  };
+
+  const handleWaiterLogout = () => {
+    setSavedWaiterPin("");
+    setLockedWaiterName(null);
+    setPinInput("");
+    setAuthenticated(false);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("restoran_waiter_pin");
     }
   };
 
   const fetchAllData = useCallback(async () => {
     try {
       const [ordersRes, menuRes, reqRes] = await Promise.all([
-        fetch("/api/orders", { cache: "no-store" }),
+        fetch("/api/orders", {
+          headers: getWaiterHeaders(false),
+          cache: "no-store",
+        }),
         fetch("/api/menu", { cache: "no-store" }),
         fetch("/api/table-calls", { cache: "no-store" }),
       ]);
+      if (ordersRes.status === 401) {
+        setAuthenticated(false);
+        return;
+      }
       if (ordersRes.ok) {
         const oData = await ordersRes.json();
         setOrders(oData.orders || []);
+        if (Array.isArray(oData.waiters) && oData.waiters.length > 0) {
+          setWaiterList(oData.waiters);
+        }
+        if (oData.authenticatedWaiter) {
+          setLockedWaiterName(oData.authenticatedWaiter);
+          setWaiterName(oData.authenticatedWaiter);
+        }
       }
       if (menuRes.ok) {
         const mData = await menuRes.json();
@@ -191,7 +291,7 @@ export default function WaiterTerminalPage() {
     } catch (err) {
       console.error("Garson verisi alınamadı:", err);
     }
-  }, []);
+  }, [getWaiterHeaders]);
 
   useEffect(() => {
     if (!authenticated) return;
@@ -435,7 +535,7 @@ export default function WaiterTerminalPage() {
         const primaryOrder = selectedTableOrders[0];
         const res = await fetch(`/api/orders/${primaryOrder.id}`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: getWaiterHeaders(true),
           body: JSON.stringify({
             action: "append_items",
             items: cart,
@@ -462,7 +562,7 @@ export default function WaiterTerminalPage() {
       const subtotalAmount = cart.reduce((sum, item) => sum + item.totalPrice, 0);
       const res = await fetch("/api/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getWaiterHeaders(true),
         body: JSON.stringify({
           orderType: "dine_in",
           tableNumber: selectedTable,
@@ -503,7 +603,7 @@ export default function WaiterTerminalPage() {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getWaiterHeaders(true),
         body: JSON.stringify({
           action: "remove_order_item",
           itemId,
@@ -526,7 +626,7 @@ export default function WaiterTerminalPage() {
   const handleToggleItemServed = async (orderId: string, itemId: string) => {
     const res = await fetch(`/api/orders/${orderId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: getWaiterHeaders(true),
       body: JSON.stringify({
         action: "toggle_item_prepared",
         itemId,
@@ -537,13 +637,36 @@ export default function WaiterTerminalPage() {
     }
   };
 
+  const handleToggleItemComplimentary = async (
+    orderId: string,
+    itemId: string
+  ) => {
+    setProcessingBill(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        headers: getWaiterHeaders(true),
+        body: JSON.stringify({
+          action: "toggle_item_complimentary",
+          itemId,
+        }),
+      });
+      if (res.ok) {
+        await fetchAllData();
+        showToast("🎁 Ürün ikram durumu güncellendi");
+      }
+    } finally {
+      setProcessingBill(false);
+    }
+  };
+
   const handleTransferTable = async () => {
     if (!transferTargetTable || transferTargetTable === selectedTable) return;
     setProcessingBill(true);
     try {
       const res = await fetch("/api/orders", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getWaiterHeaders(true),
         body: JSON.stringify({
           action: "transfer_table",
           fromTable: selectedTable,
@@ -593,7 +716,7 @@ export default function WaiterTerminalPage() {
     try {
       const res = await fetch("/api/orders", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getWaiterHeaders(true),
         body: JSON.stringify({
           action: "close_table_payment",
           tableNumber: selectedTable,
@@ -631,7 +754,7 @@ export default function WaiterTerminalPage() {
     try {
       const res = await fetch("/api/orders", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getWaiterHeaders(true),
         body: JSON.stringify({
           action: "partial_table_payment",
           tableNumber: selectedTable,
@@ -662,7 +785,7 @@ export default function WaiterTerminalPage() {
   ) => {
     const res = await fetch("/api/menu", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getWaiterHeaders(true),
       body: JSON.stringify({
         type: "update_reservation",
         reservationId,
@@ -685,6 +808,8 @@ export default function WaiterTerminalPage() {
         (it) => `
         <tr>
           <td style="padding:4px 0;font-weight:bold;">${it.quantity}x ${it.name}${
+          it.isComplimentary ? " (🎁 İKRAM)" : ""
+        }${
           it.selectedModifiers.length > 0
             ? `<div style="font-size:11px;color:#555;font-weight:normal;">${it.selectedModifiers
                 .map((m) => m.optionName)
@@ -743,7 +868,7 @@ export default function WaiterTerminalPage() {
     setTableRequests((prev) => prev.filter((c) => c.id !== id));
     await fetch("/api/table-calls", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: getWaiterHeaders(true),
       body: JSON.stringify({ id }),
     });
     fetchAllData();
@@ -794,10 +919,10 @@ export default function WaiterTerminalPage() {
           className="w-full max-w-sm bg-stone-900 border border-stone-800 rounded-3xl p-6 space-y-4 shadow-2xl"
         >
           <div className="text-center space-y-1">
-            <span className="text-4xl">📱</span>
+            <span className="text-4xl">👨‍💼</span>
             <h1 className="text-xl font-black">Garson Cep & Salon Terminali</h1>
             <p className="text-xs text-stone-400">
-              Masa yönetimi, adisyon ve sipariş ekranı için PIN giriniz
+              Size atanan kişisel garson şifrenizle (PIN) giriş yapınız
             </p>
           </div>
           {pinError && (
@@ -805,19 +930,51 @@ export default function WaiterTerminalPage() {
               {pinError}
             </div>
           )}
-          <input
-            type="password"
-            inputMode="numeric"
-            value={pinInput}
-            onChange={(e) => setPinInput(e.target.value)}
-            placeholder="Personel PIN Kodu"
-            className="w-full px-4 py-3.5 rounded-2xl bg-stone-950 border border-stone-800 text-center text-lg font-black tracking-widest focus:outline-none focus:border-amber-500"
-          />
+
+          {waiterList.length > 0 && (
+            <div>
+              <label className="block text-xs font-bold text-stone-300 mb-1.5">
+                Garson Seçimi
+              </label>
+              <select
+                value={loginWaiterSelect}
+                onChange={(e) => setLoginWaiterSelect(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-2xl bg-stone-950 border border-stone-800 text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value="auto">
+                  🔑 Şifreme Göre Garson Profilimi Otomatik Tanı
+                </option>
+                {waiterList.map((w) => (
+                  <option key={w} value={w}>
+                    👨‍💼 {w}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-bold text-stone-300 mb-1.5">
+              Garson Özel Şifreniz (PIN)
+            </label>
+            <input
+              type="password"
+              inputMode="numeric"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              placeholder="••••"
+              className="w-full px-4 py-3 rounded-2xl bg-stone-950 border border-stone-800 text-center text-lg font-black tracking-widest focus:outline-none focus:border-amber-500"
+            />
+            <p className="text-[11px] text-stone-500 mt-1 text-center">
+              Örn: Garson 1 → 1010, Garson 2 → 2020 veya Kasa PIN (1234)
+            </p>
+          </div>
+
           <button
             type="submit"
-            className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-sm transition"
+            className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-sm transition cursor-pointer"
           >
-            Giriş Yap →
+            Garson Paneline Giriş Yap →
           </button>
         </form>
       </div>
@@ -853,19 +1010,28 @@ export default function WaiterTerminalPage() {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <input
-            type="text"
-            value={waiterName}
-            onChange={(e) => handleWaiterNameChange(e.target.value)}
-            placeholder="Garson Adı"
-            title="Aktif Garson Adı"
-            className="w-24 sm:w-28 px-2.5 py-1.5 rounded-xl bg-stone-950 border border-stone-800 text-[11px] font-bold text-amber-300 focus:outline-none focus:border-amber-500"
-          />
+          {lockedWaiterName ? (
+            <span
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-[11px] font-black text-amber-300"
+              title="Kişisel Garson Şifresi İle Giriş Yapıldı"
+            >
+              👨‍💼 {lockedWaiterName}
+            </span>
+          ) : (
+            <input
+              type="text"
+              value={waiterName}
+              onChange={(e) => handleWaiterNameChange(e.target.value)}
+              placeholder="Garson Adı"
+              title="Aktif Garson Adı"
+              className="w-24 sm:w-28 px-2.5 py-1.5 rounded-xl bg-stone-950 border border-stone-800 text-[11px] font-bold text-amber-300 focus:outline-none focus:border-amber-500"
+            />
+          )}
           <button
             type="button"
             onClick={toggleSound}
             title="Sesli Bildirim Zili"
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition ${
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
               soundEnabled
                 ? "bg-emerald-950/60 border-emerald-600/50 text-emerald-300"
                 : "bg-stone-800 border-stone-700 text-stone-400"
@@ -879,6 +1045,14 @@ export default function WaiterTerminalPage() {
           >
             👨‍🍳 Mutfak
           </Link>
+          <button
+            type="button"
+            onClick={handleWaiterLogout}
+            title="Garson Çıkış / Değiştir"
+            className="px-2 py-1.5 rounded-xl bg-stone-800 hover:bg-red-900/60 text-xs font-bold text-stone-300 hover:text-red-200 cursor-pointer"
+          >
+            🚪
+          </button>
         </div>
       </header>
 
@@ -996,8 +1170,15 @@ export default function WaiterTerminalPage() {
                     tableOrders.length > 0
                       ? tableOrders[tableOrders.length - 1].createdAt
                       : null;
+                  const latestOrderIso =
+                    tableOrders.length > 0
+                      ? tableOrders[0].updatedAt || tableOrders[0].createdAt
+                      : null;
                   const elapsedMins = oldestOrderIso
                     ? getElapsedMinutes(oldestOrderIso)
+                    : 0;
+                  const idleMins = latestOrderIso
+                    ? getElapsedMinutes(latestOrderIso)
                     : 0;
                   const activeCall = tableRequests.find(
                     (r) => String(r.tableNumber) === tNum
@@ -1070,7 +1251,7 @@ export default function WaiterTerminalPage() {
                         )}
 
                         {isOccupied ? (
-                          <div className="mt-2 space-y-0.5">
+                          <div className="mt-2 space-y-1">
                             <div className="text-sm font-black text-amber-300">
                               {formatCurrency(totalBill)}
                             </div>
@@ -1080,6 +1261,11 @@ export default function WaiterTerminalPage() {
                                 ⏱️ {elapsedMins} dk
                               </span>
                             </div>
+                            {idleMins >= 20 && !activeCall && (
+                              <div className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[10px] font-extrabold text-amber-200">
+                                ☕ {idleMins} dk işlem yok • Çay/Tatlı Sor
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="mt-3 text-xs text-stone-500 font-medium">
@@ -1609,12 +1795,17 @@ export default function WaiterTerminalPage() {
                                 <span className="text-xs font-black text-white">
                                   {it.quantity}x {it.name}
                                 </span>
+                                {it.isComplimentary && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500 text-stone-950 font-black">
+                                    🎁 İKRAM (0 ₺)
+                                  </span>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() =>
                                     handleToggleItemServed(it.orderId, it.id)
                                   }
-                                  className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  className={`text-[10px] px-1.5 py-0.5 rounded font-bold cursor-pointer ${
                                     it.prepared
                                       ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
                                       : "bg-stone-800 text-stone-400"
@@ -1644,10 +1835,36 @@ export default function WaiterTerminalPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-xs font-black text-amber-300 mr-1">
-                              {formatCurrency(it.totalPrice)}
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                            <span
+                              className={`text-xs font-black mr-1 ${
+                                it.isComplimentary
+                                  ? "text-emerald-400"
+                                  : "text-amber-300"
+                              }`}
+                            >
+                              {it.isComplimentary
+                                ? "0.00 ₺ (İkram)"
+                                : formatCurrency(it.totalPrice)}
                             </span>
+                            <button
+                              type="button"
+                              disabled={processingBill}
+                              onClick={() =>
+                                handleToggleItemComplimentary(
+                                  it.orderId,
+                                  it.id
+                                )
+                              }
+                              title="Müessese İkramı Yap / Geri Al"
+                              className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                                it.isComplimentary
+                                  ? "bg-emerald-950/80 border-emerald-500 text-emerald-300"
+                                  : "bg-stone-800 hover:bg-stone-700 border-stone-700 text-amber-300"
+                              }`}
+                            >
+                              {it.isComplimentary ? "🎁 İkram ✓" : "🎁 İkram"}
+                            </button>
                             {it.quantity > 1 && (
                               <button
                                 type="button"
@@ -1660,7 +1877,7 @@ export default function WaiterTerminalPage() {
                                   )
                                 }
                                 title="Adedi 1 Azalt"
-                                className="px-2 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-[10px] font-bold text-stone-200"
+                                className="px-2 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-[10px] font-bold text-stone-200 cursor-pointer"
                               >
                                 -1
                               </button>
@@ -1676,7 +1893,7 @@ export default function WaiterTerminalPage() {
                                 )
                               }
                               title="Kalemi İptal Et / Sil"
-                              className="px-2 py-1 rounded-lg bg-red-950/70 hover:bg-red-900 border border-red-800/60 text-[10px] font-bold text-red-300"
+                              className="px-2 py-1 rounded-lg bg-red-950/70 hover:bg-red-900 border border-red-800/60 text-[10px] font-bold text-red-300 cursor-pointer"
                             >
                               🗑️ İptal
                             </button>

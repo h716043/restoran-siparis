@@ -1,24 +1,36 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Order } from "@/types";
 import {
   Banknote,
+  Bell,
   CheckCircle2,
   Clock,
   CreditCard,
   KeyRound,
   LogOut,
   MapPin,
+  MessageCircle,
   Navigation,
   PackageCheck,
   Phone,
+  Printer,
   RefreshCw,
   ShieldCheck,
   Truck,
   UserCheck,
+  X,
 } from "lucide-react";
+
+function normalizeWhatsAppPhone(raw: string): string {
+  const digits = (raw || "").replace(/\D/g, "");
+  if (digits.startsWith("90") && digits.length === 12) return digits;
+  if (digits.startsWith("0") && digits.length === 11) return "9" + digits;
+  if (digits.length === 10 && digits.startsWith("5")) return "90" + digits;
+  return digits;
+}
 
 export default function CourierPage() {
   const [pin, setPin] = useState("");
@@ -35,7 +47,39 @@ export default function CourierPage() {
   const [activeTab, setActiveTab] = useState<"active" | "completed">("active");
   const [loading, setLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [batchUpdating, setBatchUpdating] = useState(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [courierAlertMsg, setCourierAlertMsg] = useState<string>("");
+  const [showSettlementSlip, setShowSettlementSlip] = useState<boolean>(false);
+  const knownDeliveryIdsRef = useRef<Set<string>>(new Set());
+  const initialLoadedRef = useRef<boolean>(false);
+
+  const playCourierAlertSound = useCallback(() => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([250, 120, 250]);
+      }
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.16);
+      gain.gain.setValueAtTime(0.22, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.45);
+    } catch {
+      // ignore audio context restrictions
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -84,7 +128,38 @@ export default function CourierPage() {
         }
         if (res.ok) {
           const data = await res.json();
-          setOrders(data.orders || []);
+          const fetchedOrders: Order[] = data.orders || [];
+          const activeCourier =
+            data.authenticatedCourier || selectedCourier || "all";
+
+          const currentRelevantDeliveries = fetchedOrders.filter(
+            (o) =>
+              o.orderType === "delivery" &&
+              (o.status === "accepted" || o.status === "ready") &&
+              (activeCourier === "all" ||
+                !o.courierName ||
+                o.courierName === activeCourier)
+          );
+
+          if (initialLoadedRef.current) {
+            const newlyArrived = currentRelevantDeliveries.filter(
+              (o) => !knownDeliveryIdsRef.current.has(o.id)
+            );
+            if (newlyArrived.length > 0) {
+              playCourierAlertSound();
+              const first = newlyArrived[0];
+              setCourierAlertMsg(
+                `🔔 Yeni Paket Düştü: #${first.orderNumber} (${first.customerName})`
+              );
+              setTimeout(() => setCourierAlertMsg(""), 6000);
+            }
+          }
+          knownDeliveryIdsRef.current = new Set(
+            currentRelevantDeliveries.map((o) => o.id)
+          );
+          initialLoadedRef.current = true;
+
+          setOrders(fetchedOrders);
           if (data.couriers && data.couriers.length > 0) {
             setCouriers(data.couriers);
           }
@@ -104,7 +179,7 @@ export default function CourierPage() {
         setLoading(false);
       }
     },
-    [loginCourierName]
+    [loginCourierName, playCourierAlertSound, selectedCourier]
   );
 
   useEffect(() => {
@@ -141,7 +216,8 @@ export default function CourierPage() {
   const handleUpdateOrder = async (
     orderId: string,
     status: Order["status"],
-    courierName?: string
+    courierName?: string,
+    paymentMethod?: Order["paymentMethod"]
   ) => {
     setUpdatingId(orderId);
     try {
@@ -154,6 +230,7 @@ export default function CourierPage() {
         body: JSON.stringify({
           status,
           courierName: lockedCourierName || courierName,
+          paymentMethod,
         }),
       });
       await fetchCourierOrders(savedPin);
@@ -175,6 +252,41 @@ export default function CourierPage() {
       return !o.courierName || o.courierName === selectedCourier;
     });
   }, [deliveryOrders, selectedCourier]);
+
+  const claimableAcceptedPackages = useMemo(
+    () => activeDeliveries.filter((o) => o.status === "accepted"),
+    [activeDeliveries]
+  );
+
+  const handleBatchPickupAll = async () => {
+    if (claimableAcceptedPackages.length === 0) return;
+    setBatchUpdating(true);
+    try {
+      const assignedCourier =
+        lockedCourierName ||
+        (selectedCourier !== "all"
+          ? selectedCourier
+          : couriers[0] || "Kurye");
+      await Promise.all(
+        claimableAcceptedPackages.map((ord) =>
+          fetch(`/api/orders/${ord.id}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-courier-pin": savedPin,
+            },
+            body: JSON.stringify({
+              status: "ready",
+              courierName: assignedCourier,
+            }),
+          })
+        )
+      );
+      await fetchCourierOrders(savedPin);
+    } finally {
+      setBatchUpdating(false);
+    }
+  };
 
   const todayCompletedDeliveries = useMemo(() => {
     const startOfToday = new Date();
@@ -201,6 +313,17 @@ export default function CourierPage() {
     () =>
       todayCompletedDeliveries
         .filter((o) => o.paymentMethod === "card_at_door")
+        .reduce((s, o) => s + o.totalAmount, 0),
+    [todayCompletedDeliveries]
+  );
+
+  const unsettledCashTotal = useMemo(
+    () =>
+      todayCompletedDeliveries
+        .filter(
+          (o) =>
+            o.paymentMethod === "cash" && !o.splitPaymentInfo?.courierSettled
+        )
         .reduce((s, o) => s + o.totalAmount, 0),
     [todayCompletedDeliveries]
   );
@@ -315,8 +438,17 @@ export default function CourierPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => setShowSettlementSlip(true)}
+                className="px-2.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                title="Gün Sonu Kurye Mutabakat Fişi"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Mutabakat Fişi</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => fetchCourierOrders(savedPin)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200"
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
                 title="Yenile"
               >
                 <RefreshCw
@@ -330,7 +462,7 @@ export default function CourierPage() {
                   setLockedCourierName(null);
                   localStorage.removeItem("restoran_courier_pin");
                 }}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-red-900/60 text-slate-300 hover:text-red-200"
+                className="p-2 rounded-xl bg-slate-800 hover:bg-red-900/60 text-slate-300 hover:text-red-200 cursor-pointer"
                 title="Çıkış"
               >
                 <LogOut className="w-4 h-4" />
@@ -372,6 +504,22 @@ export default function CourierPage() {
       </header>
 
       <main className="max-w-xl mx-auto px-4 pt-4 space-y-4">
+        {courierAlertMsg && (
+          <div className="bg-orange-600 text-white px-4 py-3 rounded-2xl font-extrabold text-xs flex items-center justify-between shadow-lg animate-pulse">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4" />
+              <span>{courierAlertMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCourierAlertMsg("")}
+              className="text-white/80 hover:text-white font-black"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Günlük Kurye Tahsilat Özeti */}
         <div className="grid grid-cols-3 gap-2.5">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 text-center">
@@ -405,7 +553,7 @@ export default function CourierPage() {
           <button
             type="button"
             onClick={() => setActiveTab("active")}
-            className={`py-2 rounded-lg text-xs font-extrabold transition ${
+            className={`py-2 rounded-lg text-xs font-extrabold transition cursor-pointer ${
               activeTab === "active"
                 ? "bg-orange-600 text-white shadow"
                 : "text-slate-400 hover:text-white"
@@ -416,7 +564,7 @@ export default function CourierPage() {
           <button
             type="button"
             onClick={() => setActiveTab("completed")}
-            className={`py-2 rounded-lg text-xs font-extrabold transition ${
+            className={`py-2 rounded-lg text-xs font-extrabold transition cursor-pointer ${
               activeTab === "completed"
                 ? "bg-emerald-600 text-white shadow"
                 : "text-slate-400 hover:text-white"
@@ -434,11 +582,28 @@ export default function CourierPage() {
                 Şu anda bekleyen aktif paket servis bulunmuyor.
               </p>
               <p className="text-xs text-slate-500">
-                Yeni paket onaylandığında bu ekrana otomatik düşer.
+                Yeni paket onaylandığında sesli bildirimle bu ekrana düşer.
               </p>
             </div>
           ) : (
             <div className="space-y-3.5">
+              {/* Çoklu Paket Toplu Teslim Al & Yola Çık Butonu */}
+              {claimableAcceptedPackages.length > 1 && (
+                <button
+                  type="button"
+                  disabled={batchUpdating}
+                  onClick={handleBatchPickupAll}
+                  className="w-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold text-xs py-3 px-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                >
+                  <Truck className="w-4 h-4" />
+                  <span>
+                    {batchUpdating
+                      ? "Paketler Üzerinize Alınıyor..."
+                      : `🛵 Hazır ${claimableAcceptedPackages.length} Paketin Tümünü Üzerime Al & Toplu Yola Çık`}
+                  </span>
+                </button>
+              )}
+
               {activeDeliveries.map((order) => {
                 const elapsedMins = Math.max(
                   0,
@@ -448,6 +613,10 @@ export default function CourierPage() {
                 );
                 const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
                   order.customerAddress || ""
+                )}`;
+                const waPhone = normalizeWhatsAppPhone(order.customerPhone);
+                const waLocationUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
+                  `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişiniz için kuryeniz yola çıktı 🛵 Adresinizi daha hızlı bulabilmem için bu mesaja WhatsApp üzerinden konum gönderebilir misiniz? 📍`
                 )}`;
 
                 return (
@@ -510,6 +679,59 @@ export default function CourierPage() {
                       </div>
                     </div>
 
+                    {/* Kapıda Tahsilat Yöntemi Hızlı Değiştirme (Nakit <-> POS Kart) */}
+                    <div className="flex items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 px-3 py-2 rounded-xl">
+                      <span className="text-[11px] font-bold text-slate-400">
+                        Tahsilat Tipi:
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={updatingId === order.id}
+                          onClick={() => {
+                            if (order.paymentMethod !== "cash") {
+                              handleUpdateOrder(
+                                order.id,
+                                order.status,
+                                order.courierName,
+                                "cash"
+                              );
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer ${
+                            order.paymentMethod === "cash"
+                              ? "bg-emerald-600 text-white shadow"
+                              : "bg-slate-800 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          <Banknote className="w-3 h-3" />
+                          <span>Nakit</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingId === order.id}
+                          onClick={() => {
+                            if (order.paymentMethod !== "card_at_door") {
+                              handleUpdateOrder(
+                                order.id,
+                                order.status,
+                                order.courierName,
+                                "card_at_door"
+                              );
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer ${
+                            order.paymentMethod === "card_at_door"
+                              ? "bg-blue-600 text-white shadow"
+                              : "bg-slate-800 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          <CreditCard className="w-3 h-3" />
+                          <span>POS Kart</span>
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Açık Adres Kutusu */}
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
                       <div className="flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
@@ -525,23 +747,32 @@ export default function CourierPage() {
                       )}
                     </div>
 
-                    {/* Hızlı Arama ve Harita Butonları */}
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* Hızlı Arama, Harita ve WhatsApp Konum İsteme Butonları */}
+                    <div className="grid grid-cols-3 gap-2">
                       <a
                         href={`tel:${order.customerPhone}`}
-                        className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 px-3 rounded-xl border border-slate-700 transition"
+                        className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px] py-2.5 px-2 rounded-xl border border-slate-700 transition"
                       >
-                        <Phone className="w-4 h-4 text-emerald-400" />
+                        <Phone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         <span>Müşteriyi Ara</span>
                       </a>
                       <a
                         href={mapsUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center justify-center gap-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-200 font-bold text-xs py-2.5 px-3 rounded-xl border border-blue-800 transition"
+                        className="flex items-center justify-center gap-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-200 font-bold text-[11px] py-2.5 px-2 rounded-xl border border-blue-800 transition"
                       >
-                        <Navigation className="w-4 h-4 text-blue-400" />
-                        <span>Haritada Yol Tarifi</span>
+                        <Navigation className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        <span>Yol Tarifi</span>
+                      </a>
+                      <a
+                        href={waLocationUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-200 font-bold text-[11px] py-2.5 px-2 rounded-xl border border-emerald-800 transition"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>Konum İste</span>
                       </a>
                     </div>
 
@@ -576,7 +807,7 @@ export default function CourierPage() {
                               : order.courierName || couriers[0] || "Kurye"
                           )
                         }
-                        className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-md"
+                        className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-md cursor-pointer"
                       >
                         <Truck className="w-4 h-4" />
                         <span>
@@ -588,12 +819,13 @@ export default function CourierPage() {
                         type="button"
                         disabled={updatingId === order.id}
                         onClick={() => handleUpdateOrder(order.id, "completed")}
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-md"
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-md cursor-pointer"
                       >
                         <CheckCircle2 className="w-5 h-5" />
                         <span>
-                          Teslim Edildi ({order.totalAmount.toFixed(0)} ₺ Tahsil
-                          Edildi)
+                          Teslim Edildi ({order.totalAmount.toFixed(0)} ₺{" "}
+                          {order.paymentMethod === "cash" ? "Nakit" : "POS"}{" "}
+                          Tahsil Edildi)
                         </span>
                       </button>
                     )}
@@ -612,14 +844,14 @@ export default function CourierPage() {
               todayCompletedDeliveries.map((o) => (
                 <div
                   key={o.id}
-                  className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between text-xs"
+                  className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between text-xs gap-2"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-black text-emerald-400">
                         #{o.orderNumber}
                       </span>
-                      <span className="font-bold text-white">
+                      <span className="font-bold text-white truncate">
                         {o.customerName}
                       </span>
                     </div>
@@ -627,12 +859,35 @@ export default function CourierPage() {
                       {o.customerAddress}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-black text-sm text-white">
-                      {o.totalAmount.toFixed(2)} ₺
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      {o.paymentMethod === "cash" ? "Nakit" : "POS Kart"}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleUpdateOrder(
+                          o.id,
+                          o.status,
+                          o.courierName,
+                          o.paymentMethod === "cash" ? "card_at_door" : "cash"
+                        )
+                      }
+                      className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
+                        o.paymentMethod === "cash"
+                          ? "bg-emerald-950/60 border-emerald-700 text-emerald-300"
+                          : "bg-blue-950/60 border-blue-700 text-blue-300"
+                      }`}
+                      title="Tahsilat tipini değiştirmek için dokunun"
+                    >
+                      {o.paymentMethod === "cash" ? "💵 Nakit" : "💳 POS Kart"}
+                    </button>
+                    <div className="text-right">
+                      <div className="font-black text-sm text-white">
+                        {o.totalAmount.toFixed(2)} ₺
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {o.splitPaymentInfo?.courierSettled
+                          ? "✅ Kasaya Teslim"
+                          : "⏳ Kuryede"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -641,6 +896,89 @@ export default function CourierPage() {
           </div>
         )}
       </main>
+
+      {/* Gün Sonu Kurye Bireysel Mutabakat (Hesaplaşma) Fişi Modalı */}
+      {showSettlementSlip && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white text-slate-900 rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="font-black text-base text-slate-900">
+                  🧾 Kurye Gün Sonu Mutabakat Fişi
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {lockedCourierName ||
+                    (selectedCourier === "all"
+                      ? "Tüm Kuryeler"
+                      : selectedCourier)}{" "}
+                  • {new Date().toLocaleDateString("tr-TR")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettlementSlip(false)}
+                className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2 text-xs font-mono">
+              <div className="flex justify-between">
+                <span>Toplam Teslim Edilen:</span>
+                <strong>{todayCompletedDeliveries.length} Paket</strong>
+              </div>
+              <div className="flex justify-between text-emerald-700">
+                <span>Toplam Nakit Tahsilat:</span>
+                <strong>{todayCashTotal.toFixed(2)} ₺</strong>
+              </div>
+              <div className="flex justify-between text-blue-700">
+                <span>Toplam POS Kart Slip:</span>
+                <strong>{todayCardTotal.toFixed(2)} ₺</strong>
+              </div>
+              <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-black text-orange-700">
+                <span>Kasaya Teslim Edilecek Nakit:</span>
+                <span>{unsettledCashTotal.toFixed(2)} ₺</span>
+              </div>
+            </div>
+
+            {todayCompletedDeliveries.length > 0 && (
+              <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1 text-[11px] font-mono">
+                {todayCompletedDeliveries.map((o) => (
+                  <div key={o.id} className="flex justify-between">
+                    <span>
+                      #{o.orderNumber} {o.customerName.slice(0, 14)}
+                    </span>
+                    <span>
+                      {o.totalAmount.toFixed(0)} ₺ (
+                      {o.paymentMethod === "cash" ? "Nakit" : "POS"})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Fişi Yazdır</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSettlementSlip(false)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl cursor-pointer"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

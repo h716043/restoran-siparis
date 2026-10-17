@@ -817,6 +817,28 @@ export function getSettings(): RestaurantSettings {
       updated = true;
     }
   });
+  if (!Array.isArray(parsed.waiters) || parsed.waiters.length === 0) {
+    parsed.waiters = [
+      "Garson 1 (Salon)",
+      "Garson 2 (Bahçe)",
+      "Şef Garson",
+    ];
+    updated = true;
+  }
+  if (!parsed.waiterPins || typeof parsed.waiterPins !== "object") {
+    parsed.waiterPins = {};
+    updated = true;
+  }
+  parsed.waiters.forEach((wName, idx) => {
+    if (!parsed.waiterPins![wName]) {
+      parsed.waiterPins![wName] = String((idx + 1) * 1010).slice(0, 4);
+      updated = true;
+    }
+  });
+  if (!parsed.defaultDailyStocks || typeof parsed.defaultDailyStocks !== "object") {
+    parsed.defaultDailyStocks = {};
+    updated = true;
+  }
   if (!Array.isArray(parsed.tvDisplayOrderTypes)) {
     parsed.tvDisplayOrderTypes = ["pickup", "dine_in", "delivery"];
     updated = true;
@@ -941,7 +963,42 @@ export function saveMenuItem(item: MenuItem): MenuItem {
       JSON.stringify(item.modifierGroups || [])
     );
   }
+  if (normalizedStock !== null && normalizedStock > 0) {
+    const s = getSettings();
+    s.defaultDailyStocks = {
+      ...(s.defaultDailyStocks || {}),
+      [item.id]: normalizedStock,
+    };
+    updateSettings(s);
+  }
   return item;
+}
+
+/** Sabah / Vardiya başında günlük sınırlı ürünleri varsayılan porsiyon stoklarına yeniler ve satışa açar */
+export function resetDailyMenuStocks(defaultStockAmount = 50): MenuItem[] {
+  const db = getDb();
+  const s = getSettings();
+  const defaults = s.defaultDailyStocks || {};
+  const allItems = getMenuItems();
+
+  for (const item of allItems) {
+    if (
+      item.dailyStock !== null ||
+      defaults[item.id] !== undefined ||
+      !item.available
+    ) {
+      const targetStock =
+        defaults[item.id] !== undefined
+          ? defaults[item.id]
+          : item.dailyStock !== null && item.dailyStock !== undefined
+          ? Math.max(defaultStockAmount, item.dailyStock)
+          : null;
+      db.prepare(
+        "UPDATE menu_items SET dailyStock = ?, available = 1 WHERE id = ?"
+      ).run(targetStock, item.id);
+    }
+  }
+  return getMenuItems();
 }
 
 export function deleteMenuItem(id: string) {
@@ -1362,7 +1419,8 @@ export function updateOrderStatus(
   status: Order["status"],
   estimatedMinutes?: number,
   rejectReason?: string,
-  courierName?: string
+  courierName?: string,
+  paymentMethod?: Order["paymentMethod"]
 ): Order | null {
   const db = getDb();
   const existing = getOrderById(id);
@@ -1372,6 +1430,7 @@ export function updateOrderStatus(
   const est = estimatedMinutes !== undefined ? estimatedMinutes : existing.estimatedMinutes;
   const rej = rejectReason !== undefined ? rejectReason : existing.rejectReason;
   const cou = courierName !== undefined ? courierName : existing.courierName;
+  const pay = paymentMethod !== undefined ? paymentMethod : existing.paymentMethod;
 
   // Eğer sipariş iptal/red edildiyse günlük stokları geri yükle
   if (status === "rejected" && existing.status !== "rejected") {
@@ -1380,9 +1439,9 @@ export function updateOrderStatus(
 
   db.prepare(`
     UPDATE orders
-    SET status = ?, estimatedMinutes = ?, courierName = ?, rejectReason = ?, updatedAt = ?
+    SET status = ?, estimatedMinutes = ?, courierName = ?, rejectReason = ?, paymentMethod = ?, updatedAt = ?
     WHERE id = ?
-  `).run(status, est || null, cou || null, rej || null, updatedAt, id);
+  `).run(status, est || null, cou || null, rej || null, pay, updatedAt, id);
 
   return getOrderById(id);
 }
@@ -1412,6 +1471,54 @@ export function toggleOrderItemPrepared(
     SET itemsJson = ?, updatedAt = ?
     WHERE id = ?
   `).run(JSON.stringify(updatedItems), updatedAt, orderId);
+
+  return getOrderById(orderId);
+}
+
+/** Adisyondaki bir ürünü tek tuşla "Müessese İkramı (0 ₺)" yapar veya ikramı geri alır */
+export function toggleOrderItemComplimentary(
+  orderId: string,
+  itemId: string
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+
+  const updatedItems = existing.items.map((item) => {
+    if (item.id === itemId) {
+      const nextComp = !item.isComplimentary;
+      return {
+        ...item,
+        isComplimentary: nextComp,
+        totalPrice: nextComp
+          ? 0
+          : Number((item.unitPrice * item.quantity).toFixed(2)),
+      };
+    }
+    return item;
+  });
+
+  const nextSubtotal = updatedItems.reduce(
+    (sum, i) => sum + Number(i.totalPrice || 0),
+    0
+  );
+  const nextTotal = Math.max(
+    0,
+    nextSubtotal - (existing.discountAmount || 0) + (existing.deliveryFee || 0)
+  );
+  const updatedAt = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE orders
+    SET itemsJson = ?, subtotal = ?, totalAmount = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(
+    JSON.stringify(updatedItems),
+    nextSubtotal,
+    nextTotal,
+    updatedAt,
+    orderId
+  );
 
   return getOrderById(orderId);
 }

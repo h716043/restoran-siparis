@@ -156,6 +156,10 @@ export default function AdminDashboardPage() {
   const [newCourierName, setNewCourierName] = useState("");
   const [newCourierPin, setNewCourierPin] = useState("");
 
+  // Yeni Garson Adı ve Özel Şifresi
+  const [newWaiterName, setNewWaiterName] = useState("");
+  const [newWaiterPin, setNewWaiterPin] = useState("");
+
   // Yeni Kategori Formu
   const [newCatName, setNewCatName] = useState("");
 
@@ -2399,25 +2403,46 @@ export default function AdminDashboardPage() {
                     </button>
                   </div>
                 </div>
-                <button
-                  onClick={() =>
-                    setEditingItem({
-                      id: "",
-                      categoryId: categories[0]?.id || "cat-1",
-                      name: "",
-                      description: "",
-                      price: 200,
-                      imageUrl:
-                        "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80",
-                      available: true,
-                      popular: false,
-                      modifierGroups: [],
-                    })
-                  }
-                  className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" /> Yeni Ürün Ekle
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await fetch("/api/menu", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ type: "reset_daily_stocks" }),
+                      });
+                      if (res.ok) {
+                        loadData();
+                        showToast(
+                          "🔄 Tüm ürünlerin günlük stokları yenilendi ve tükenenler satışa açıldı!"
+                        );
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl transition cursor-pointer shadow-xs"
+                  >
+                    🔄 Günlük Stokları Yenile (Tükenenleri Aç)
+                  </button>
+                  <button
+                    onClick={() =>
+                      setEditingItem({
+                        id: "",
+                        categoryId: categories[0]?.id || "cat-1",
+                        name: "",
+                        description: "",
+                        price: 200,
+                        imageUrl:
+                          "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80",
+                        available: true,
+                        popular: false,
+                        modifierGroups: [],
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" /> Yeni Ürün Ekle
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -5170,6 +5195,147 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                           }}
                           className="text-red-500 hover:text-red-700 font-black px-1.5 py-0.5 rounded hover:bg-red-50 cursor-pointer"
                           title="Kuryeyi Sil"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 👨‍💼 Garson Listesi & Her Garsona Özel Giriş Şifresi (PIN) Yönetimi */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900">
+                  👨‍💼 Salon Garsonları & Her Garsona Özel Giriş Şifresi (PIN)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Her garsona kendine özel bir şifre (PIN) atayabilirsiniz. Garsonlar /waiter ekranına kendi şifreleriyle giriş yaptığında açtıkları tüm masa siparişleri otomatik olarak kendi adlarına yazılır.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  placeholder="Yeni garson adı (Örn: Ahmet - Salon)"
+                  value={newWaiterName}
+                  onChange={(e) => setNewWaiterName(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                />
+                <input
+                  type="text"
+                  placeholder="Özel Şifre / PIN (Örn: 4040)"
+                  value={newWaiterPin}
+                  onChange={(e) => setNewWaiterPin(e.target.value)}
+                  className="sm:w-48 px-3 py-2 text-xs font-mono font-bold border border-slate-200 rounded-xl"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const name = newWaiterName.trim();
+                    if (!name) return;
+                    const list = settings.waiters || [
+                      "Garson 1 (Salon)",
+                      "Garson 2 (Bahçe)",
+                      "Şef Garson",
+                    ];
+                    const pin =
+                      newWaiterPin.trim() ||
+                      String(Math.floor(1000 + Math.random() * 9000));
+                    const nextSettings: RestaurantSettings = {
+                      ...settings,
+                      waiters: [...list, name],
+                      waiterPins: {
+                        ...(settings.waiterPins || {}),
+                        [name]: pin,
+                      },
+                    };
+                    setNewWaiterName("");
+                    setNewWaiterPin("");
+                    persistSettings(
+                      nextSettings,
+                      `✅ "${name}" garson listesine eklendi (Şifre: ${pin})`
+                    );
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer whitespace-nowrap"
+                >
+                  + Garson Ekle
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {(
+                  settings.waiters || [
+                    "Garson 1 (Salon)",
+                    "Garson 2 (Bahçe)",
+                    "Şef Garson",
+                  ]
+                ).map((wName, idx) => {
+                  const currentPin =
+                    settings.waiterPins?.[wName] ||
+                    String((idx + 1) * 1010).slice(0, 4);
+                  return (
+                    <div
+                      key={`${wName}-${idx}`}
+                      className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold px-3 py-2 rounded-xl"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="truncate">👨‍💼 {wName}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-bold text-slate-400">
+                          Şifre:
+                        </span>
+                        <input
+                          type="text"
+                          value={currentPin}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSettings({
+                              ...settings,
+                              waiterPins: {
+                                ...(settings.waiterPins || {}),
+                                [wName]: val,
+                              },
+                            });
+                          }}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim() || "1010";
+                            const nextSettings: RestaurantSettings = {
+                              ...settings,
+                              waiterPins: {
+                                ...(settings.waiterPins || {}),
+                                [wName]: val,
+                              },
+                            };
+                            persistSettings(
+                              nextSettings,
+                              `🔑 ${wName} şifresi güncellendi!`
+                            );
+                          }}
+                          className="w-20 px-2 py-1 text-xs font-mono font-extrabold text-center bg-white border border-slate-300 rounded-lg text-orange-700 focus:outline-none focus:border-orange-500"
+                          title="Garsonun kendine özel giriş şifresi (PIN)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const list = settings.waiters || [];
+                            const nextPins = { ...(settings.waiterPins || {}) };
+                            delete nextPins[wName];
+                            const nextSettings: RestaurantSettings = {
+                              ...settings,
+                              waiters: list.filter((_, i) => i !== idx),
+                              waiterPins: nextPins,
+                            };
+                            persistSettings(
+                              nextSettings,
+                              `🗑️ ${wName} garson listesinden kaldırıldı.`
+                            );
+                          }}
+                          className="text-red-500 hover:text-red-700 font-black px-1.5 py-0.5 rounded hover:bg-red-50 cursor-pointer"
+                          title="Garsonu Sil"
                         >
                           ×
                         </button>
