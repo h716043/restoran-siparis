@@ -228,9 +228,11 @@ function CustomerMenuContent() {
     text: string;
   } | null>(null);
 
-  // Masa Garson Çağır / Hesap İste Bildirimi
+  // Masa Garson Çağır / Hesap İste Bildirimi & Canlı Masa Adisyonu
   const [tableCallSending, setTableCallSending] = useState(false);
   const [tableCallToast, setTableCallToast] = useState<string>("");
+  const [liveTableOrders, setLiveTableOrders] = useState<Order[]>([]);
+  const [tableBillExpanded, setTableBillExpanded] = useState(false);
 
   // 3 Açık + 3 Kapalı Tema Yönetimi
   const [activeTheme, setActiveTheme] = useState<ThemeId>("light-classic");
@@ -395,6 +397,32 @@ function CustomerMenuContent() {
     }
   }, [activeCategory, categories]);
 
+  const fetchPublicTableOrders = useCallback(async (tNum: string) => {
+    if (!tNum) {
+      setLiveTableOrders([]);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/orders?publicTable=${encodeURIComponent(tNum)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setLiveTableOrders(data.orders || []);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (orderType === "dine_in" && tableNumber) {
+      fetchPublicTableOrders(tableNumber);
+    } else {
+      setLiveTableOrders([]);
+    }
+  }, [orderType, tableNumber, fetchPublicTableOrders]);
+
   useEffect(() => {
     const timer = setInterval(async () => {
       if (currentUser?.phone) {
@@ -407,6 +435,9 @@ function CustomerMenuContent() {
           const d = await r.json();
           setMyReservations(d.reservations || []);
         }
+      }
+      if (orderType === "dine_in" && tableNumber) {
+        fetchPublicTableOrders(tableNumber);
       }
       if (guestActiveOrder) {
         try {
@@ -425,6 +456,9 @@ function CustomerMenuContent() {
     currentUser?.phone,
     guestActiveOrder,
     fetchUserProfileAndOrders,
+    fetchPublicTableOrders,
+    orderType,
+    tableNumber,
     resPhone,
     reservationModalOpen,
   ]);
@@ -1187,6 +1221,7 @@ function CustomerMenuContent() {
         body: JSON.stringify({
           orderType,
           tableNumber: orderType === "dine_in" ? tableNumber : undefined,
+          appendToActiveTableOrder: orderType === "dine_in",
           userId: currentUser?.id,
           customerName,
           customerPhone:
@@ -1234,6 +1269,9 @@ function CustomerMenuContent() {
         setDeliveryTiming("asap");
         setCheckoutStep("cart");
         setMobileCartOpen(false);
+        if (orderType === "dine_in" && tableNumber) {
+          fetchPublicTableOrders(tableNumber);
+        }
         if (currentUser?.phone) {
           await fetchUserProfileAndOrders(currentUser.phone);
           setAccountTab("active_orders");
@@ -1674,9 +1712,9 @@ function CustomerMenuContent() {
         </div>
       )}
 
-      {/* QR MASALAR İÇİN "GARSON ÇAĞIR" & "HESAP İSTE" CANLI SERVİS BARI */}
+      {/* QR MASALAR İÇİN "GARSON ÇAĞIR", "HESAP İSTE" & "CANLI MASA ADİSYONUM" BARI */}
       {orderType === "dine_in" && (
-        <div className="max-w-7xl mx-auto w-full px-4 mt-3">
+        <div className="max-w-7xl mx-auto w-full px-4 mt-3 space-y-2.5">
           <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-3.5 shadow-md flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-400 flex items-center justify-center font-bold">
@@ -1734,6 +1772,81 @@ function CustomerMenuContent() {
               </button>
             </div>
           </div>
+
+          {/* 2. ÖZELLİK: Masanın Canlı Açık Adisyonunu Gör & Ek Sipariş Ver */}
+          {tableNumber && liveTableOrders.length > 0 && (
+            <div className="bg-white border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-xs">
+                    🪑 Masa {tableNumber} Açık Adisyonunuz
+                  </span>
+                  <span className="text-xs font-bold text-slate-600">
+                    {liveTableOrders.reduce(
+                      (acc, o) =>
+                        acc + o.items.reduce((s, it) => s + it.quantity, 0),
+                      0
+                    )}{" "}
+                    Ürün • Yeni vereceğiniz siparişler bu adisyona otomatik eklenir
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-orange-600">
+                    Toplam:{" "}
+                    {liveTableOrders
+                      .reduce((s, o) => s + o.totalAmount, 0)
+                      .toFixed(0)}{" "}
+                    {settings?.currency || "₺"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTableBillExpanded((prev) => !prev)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
+                  >
+                    {tableBillExpanded
+                      ? "Adisyonu Gizle ▲"
+                      : "Adisyon Detayı Gör ▾"}
+                  </button>
+                </div>
+              </div>
+
+              {tableBillExpanded && (
+                <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                  {liveTableOrders.flatMap((ord) =>
+                    ord.items.map((it) => (
+                      <div
+                        key={`${ord.id}-${it.id}`}
+                        className="flex items-center justify-between text-xs bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/70"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-orange-600">
+                            {it.quantity}x
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {it.name}
+                          </span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              it.prepared || ord.status === "ready"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            {it.prepared || ord.status === "ready"
+                              ? "🍽️ Hazır / Servis"
+                              : "👨‍🍳 Hazırlanıyor"}
+                          </span>
+                        </div>
+                        <span className="font-extrabold text-slate-900">
+                          {it.totalPrice.toFixed(0)} {settings?.currency || "₺"}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

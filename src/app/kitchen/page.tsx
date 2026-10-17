@@ -119,6 +119,12 @@ export default function KitchenTabletPage() {
   const [tableCreditCustomerName, setTableCreditCustomerName] =
     useState<string>("");
   const [tableActionLoading, setTableActionLoading] = useState(false);
+  const [checkedModalItemKeys, setCheckedModalItemKeys] = useState<string[]>(
+    []
+  );
+  const [stationFilter, setStationFilter] = useState<
+    "all" | "grill" | "cold" | "drink_dessert" | "late"
+  >("all");
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const knownPendingIds = useRef<Set<string>>(new Set());
@@ -506,12 +512,40 @@ export default function KitchenTabletPage() {
   const openTableManagementModal = (tableNum: string, tableOrders: Order[]) => {
     const total = tableOrders.reduce((s, o) => s + o.totalAmount, 0);
     setSelectedTableModal(tableNum);
+    setCheckedModalItemKeys([]);
     const nextTarget = tableNum === "1" ? "2" : "1";
     setTransferTargetTable(nextTarget);
     setTablePaymentMode("cash");
     setTableExtraDiscount("0");
     setSplitCashAmount(String(Math.round(total / 2)));
     setSplitCardAmount(String(Math.max(0, total - Math.round(total / 2))));
+  };
+
+  // Masadan erken kalkan kişinin seçilen ürünlerini kısmi tahsil edip adisyondan düşme
+  const handlePartialTablePaymentModal = async (
+    tableNum: string,
+    method: "cash" | "pos_at_table"
+  ) => {
+    if (!tableNum || checkedModalItemKeys.length === 0) return;
+    setTableActionLoading(true);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "partial_table_payment",
+          tableNumber: tableNum,
+          selectedItemKeys: checkedModalItemKeys,
+          paymentMethod: method,
+        }),
+      });
+      if (res.ok) {
+        setCheckedModalItemKeys([]);
+        await fetchOrders();
+      }
+    } finally {
+      setTableActionLoading(false);
+    }
   };
 
   // Masa Taşıma / Birleştirme
@@ -810,9 +844,63 @@ export default function KitchenTabletPage() {
     fetchOrders();
   };
 
-  const pendingOrders = orders.filter((o) => o.status === "pending");
+  const matchesStationFilter = (ord: Order) => {
+    if (stationFilter === "all") return true;
+    if (stationFilter === "late") {
+      const elapsed = Math.floor(
+        (nowMs - new Date(ord.createdAt).getTime()) / 60000
+      );
+      return elapsed >= 20;
+    }
+    return ord.items.some((it) => {
+      const mItem = menuItems.find((m) => m.id === it.menuItemId);
+      const catId = mItem?.categoryId || "";
+      const catName = (
+        categories.find((c) => c.id === catId)?.name ||
+        it.name ||
+        ""
+      ).toLowerCase();
+      if (stationFilter === "grill") {
+        return (
+          catId === "cat-1" ||
+          catId === "cat-2" ||
+          catId === "cat-3" ||
+          catName.includes("kebap") ||
+          catName.includes("ızgara") ||
+          catName.includes("pide") ||
+          catName.includes("döner") ||
+          catName.includes("menü")
+        );
+      }
+      if (stationFilter === "cold") {
+        return (
+          catId === "cat-4" ||
+          catName.includes("salata") ||
+          catName.includes("meze") ||
+          catName.includes("çorba") ||
+          catName.includes("başlangıç")
+        );
+      }
+      if (stationFilter === "drink_dessert") {
+        return (
+          catId === "cat-5" ||
+          catId === "cat-6" ||
+          catName.includes("tatlı") ||
+          catName.includes("içecek") ||
+          catName.includes("ayran")
+        );
+      }
+      return true;
+    });
+  };
+
+  const pendingOrders = orders.filter(
+    (o) => o.status === "pending" && matchesStationFilter(o)
+  );
   const preparingOrders = orders.filter(
-    (o) => o.status === "accepted" || o.status === "ready"
+    (o) =>
+      (o.status === "accepted" || o.status === "ready") &&
+      matchesStationFilter(o)
   );
   const completedOrders = orders.filter((o) => o.status === "completed");
   const rejectedOrders = orders.filter((o) => o.status === "rejected");
@@ -1245,15 +1333,56 @@ export default function KitchenTabletPage() {
       {/* Ana Sipariş Alanı */}
       <main className="p-4 flex-1 max-w-7xl w-full mx-auto">
         {activeTab === "active" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Sol Sütun: Onay Bekleyen Yeni Siparişler (GloriaFood Gelen Kutusu) */}
-            <div className="lg:col-span-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-                  Onay Bekleyen Yeni Siparişler ({pendingOrders.length})
-                </h2>
+          <div className="space-y-4">
+            {/* Mutfak İstasyon Filtresi & Gecikme Alarmı (KDS) */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-extrabold uppercase text-slate-400 mr-1">
+                  👨‍🍳 İstasyon Filtresi:
+                </span>
+                {[
+                  { id: "all", label: "📋 Tüm İstasyonlar" },
+                  { id: "grill", label: "🍖 Ana Yemek / Izgara / Fırın" },
+                  { id: "cold", label: "🥗 Başlangıç / Salata / Çorba" },
+                  { id: "drink_dessert", label: "🥤 İçecek & Tatlı" },
+                  { id: "late", label: "🚨 Gecikenler (20+ dk)" },
+                ].map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() =>
+                      setStationFilter(st.id as typeof stationFilter)
+                    }
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      stationFilter === st.id
+                        ? st.id === "late"
+                          ? "bg-red-600 text-white shadow"
+                          : "bg-orange-600 text-white shadow"
+                        : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
               </div>
+              <div className="flex items-center gap-2 text-[11px] font-bold text-slate-400">
+                <span className="text-emerald-400">🟢 0-15 dk Normal</span>
+                <span>•</span>
+                <span className="text-amber-300">🟡 15-25 dk Uyarı</span>
+                <span>•</span>
+                <span className="text-red-400">🔴 25+ dk Gecikme Alarmı</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Sol Sütun: Onay Bekleyen Yeni Siparişler (GloriaFood Gelen Kutusu) */}
+              <div className="lg:col-span-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                    Onay Bekleyen Yeni Siparişler ({pendingOrders.length})
+                  </h2>
+                </div>
 
               {pendingOrders.length === 0 ? (
                 <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-10 text-center text-slate-500 space-y-2">
@@ -1899,6 +2028,7 @@ export default function KitchenTabletPage() {
               )}
             </div>
           </div>
+          </div>
         )}
 
         {/* CANLI MASA HARİTASI & AÇIK MASA ADİSYON TAKİBİ SEKMESİ */}
@@ -2206,36 +2336,101 @@ export default function KitchenTabletPage() {
                               Bu masada açık sipariş kalmadı.
                             </p>
                           ) : (
-                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                              {modalTableOrders.map((ord) =>
-                                ord.items.map((item) => (
-                                  <div
-                                    key={`${ord.id}-${item.id}`}
-                                    className="flex items-center justify-between text-xs bg-slate-900 px-3 py-2 rounded-xl border border-slate-800"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <span
-                                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                          item.prepared
-                                            ? "bg-emerald-600/20 text-emerald-300"
-                                            : "bg-slate-800 text-slate-400"
+                            <div className="space-y-2">
+                              <div className="text-[11px] text-slate-400">
+                                💡 Masadan erken kalkan kişinin ödeyeceği ürünleri işaretleyip adisyondan düşebilirsiniz:
+                              </div>
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                {modalTableOrders.map((ord) =>
+                                  ord.items.map((item) => {
+                                    const compKey = `${ord.id}__${item.id}`;
+                                    const isChecked =
+                                      checkedModalItemKeys.includes(compKey);
+                                    return (
+                                      <div
+                                        key={`${ord.id}-${item.id}`}
+                                        onClick={() =>
+                                          setCheckedModalItemKeys((prev) =>
+                                            prev.includes(compKey)
+                                              ? prev.filter((k) => k !== compKey)
+                                              : [...prev, compKey]
+                                          )
+                                        }
+                                        className={`flex items-center justify-between text-xs px-3 py-2 rounded-xl border cursor-pointer transition ${
+                                          isChecked
+                                            ? "bg-orange-950/40 border-orange-500"
+                                            : "bg-slate-900 border-slate-800 hover:border-slate-700"
                                         }`}
                                       >
-                                        {item.prepared ? "✓ Hazır" : "⏳ Mutfak"}
-                                      </span>
-                                      <span className="font-bold text-white">
-                                        <strong className="text-orange-400">
-                                          {item.quantity}x
-                                        </strong>{" "}
-                                        {item.name}
-                                      </span>
-                                    </div>
-                                    <span className="font-bold text-emerald-400">
-                                      {item.totalPrice.toFixed(2)}{" "}
-                                      {settings?.currency}
-                                    </span>
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => {}}
+                                            className="w-3.5 h-3.5 accent-orange-500"
+                                          />
+                                          <span
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                              item.prepared
+                                                ? "bg-emerald-600/20 text-emerald-300"
+                                                : "bg-slate-800 text-slate-400"
+                                            }`}
+                                          >
+                                            {item.prepared
+                                              ? "✓ Hazır"
+                                              : "⏳ Mutfak"}
+                                          </span>
+                                          <span className="font-bold text-white">
+                                            <strong className="text-orange-400">
+                                              {item.quantity}x
+                                            </strong>{" "}
+                                            {item.name}
+                                          </span>
+                                        </div>
+                                        <span className="font-bold text-emerald-400">
+                                          {item.totalPrice.toFixed(2)}{" "}
+                                          {settings?.currency}
+                                        </span>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+
+                              {checkedModalItemKeys.length > 0 && (
+                                <div className="bg-slate-900 border border-emerald-500/40 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-xs font-extrabold text-emerald-300">
+                                    Seçilen ({checkedModalItemKeys.length} Kalem) Kısmi Tahsilat:
+                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={tableActionLoading}
+                                      onClick={() =>
+                                        handlePartialTablePaymentModal(
+                                          selectedTableModal,
+                                          "cash"
+                                        )
+                                      }
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer"
+                                    >
+                                      💵 Seçilenleri Nakit Al & Düş
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={tableActionLoading}
+                                      onClick={() =>
+                                        handlePartialTablePaymentModal(
+                                          selectedTableModal,
+                                          "pos_at_table"
+                                        )
+                                      }
+                                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-black text-xs cursor-pointer"
+                                    >
+                                      💳 Seçilenleri Kartla Al & Düş
+                                    </button>
                                   </div>
-                                ))
+                                </div>
                               )}
                             </div>
                           )}

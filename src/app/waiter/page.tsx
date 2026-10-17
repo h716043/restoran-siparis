@@ -622,6 +622,60 @@ export default function WaiterTerminalPage() {
     }
   };
 
+  // 6. ÖZELLİK: Masadan erken kalkan kişinin seçilen ürünlerini tahsil edip adisyondan düşme
+  const handlePartialItemsPayment = async (
+    paymentMethod: "cash" | "pos_at_table"
+  ) => {
+    if (checkedBillItemIds.length === 0) return;
+    setProcessingBill(true);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "partial_table_payment",
+          tableNumber: selectedTable,
+          selectedItemKeys: checkedBillItemIds,
+          paymentMethod,
+        }),
+      });
+      if (res.ok) {
+        const paidTotal = checkedItemsSubtotal;
+        setCheckedBillItemIds([]);
+        await fetchAllData();
+        showToast(
+          `✅ Seçilen ürünler (${formatCurrency(paidTotal)}) ${
+            paymentMethod === "cash" ? "Nakit" : "Kart"
+          } tahsil edildi ve masa hesabından düşüldü!`
+        );
+      }
+    } finally {
+      setProcessingBill(false);
+    }
+  };
+
+  // 5. ÖZELLİK: Garson ekranından rezervasyon masa atama / oturtma
+  const handleUpdateReservation = async (
+    reservationId: string,
+    status: "pending" | "confirmed" | "rejected" | "seated" | "cancelled",
+    tableNumber?: string
+  ) => {
+    const res = await fetch("/api/menu", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "update_reservation",
+        reservationId,
+        status,
+        tableNumber,
+      }),
+    });
+    if (res.ok) {
+      await fetchAllData();
+      showToast("📅 Rezervasyon durumu güncellendi");
+    }
+  };
+
   const handlePrintTableBill = () => {
     if (selectedTableOrders.length === 0 || typeof window === "undefined") return;
     const win = window.open("", "_blank", "width=360,height=640");
@@ -952,6 +1006,11 @@ export default function WaiterTerminalPage() {
                   const isPreparing = tableOrders.some(
                     (o) => o.status === "accepted" || o.status === "pending"
                   );
+                  const activeReservation = (settings?.reservations || []).find(
+                    (r) =>
+                      (r.status === "pending" || r.status === "confirmed") &&
+                      String(r.tableNumber || "") === tNum
+                  );
 
                   return (
                     <div
@@ -963,6 +1022,8 @@ export default function WaiterTerminalPage() {
                           ? "bg-emerald-950/60 border-emerald-500 shadow-lg shadow-emerald-950/40"
                           : isOccupied
                           ? "bg-amber-950/35 border-amber-500/60"
+                          : activeReservation
+                          ? "bg-purple-950/45 border-purple-500/70"
                           : "bg-stone-900/70 border-stone-800 hover:border-stone-700"
                       }`}
                     >
@@ -989,12 +1050,24 @@ export default function WaiterTerminalPage() {
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
                               👨‍🍳 Ocakta
                             </span>
+                          ) : activeReservation ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500 text-white font-black">
+                              🟣 REZERVE ({activeReservation.time})
+                            </span>
                           ) : (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-400 font-bold">
                               Boş
                             </span>
                           )}
                         </div>
+
+                        {activeReservation && (
+                          <div className="mt-1.5 px-2 py-1 rounded-lg bg-purple-950/70 border border-purple-500/40 text-[10px] text-purple-200 font-semibold">
+                            📅 {activeReservation.customerName} •{" "}
+                            {activeReservation.guests} Kişi ({activeReservation.date}{" "}
+                            {activeReservation.time})
+                          </div>
+                        )}
 
                         {isOccupied ? (
                           <div className="mt-2 space-y-0.5">
@@ -1010,7 +1083,9 @@ export default function WaiterTerminalPage() {
                           </div>
                         ) : (
                           <div className="mt-3 text-xs text-stone-500 font-medium">
-                            Açık adisyon yok
+                            {activeReservation
+                              ? "Rezerve misafir bekleniyor"
+                              : "Açık adisyon yok"}
                           </div>
                         )}
                       </div>
@@ -1656,35 +1731,65 @@ export default function WaiterTerminalPage() {
                       </div>
                     </div>
 
-                    <div className="bg-stone-950 border border-stone-800 rounded-xl p-2.5 flex items-center justify-between">
-                      <div>
-                        <div className="text-[10px] text-stone-400 font-bold">
-                          SEÇİLEN ÜRÜNLER TOPLAMI ({checkedBillItemIds.length}{" "}
-                          Kalem)
+                    <div className="bg-stone-950 border border-stone-800 rounded-xl p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-[10px] text-stone-400 font-bold">
+                            SEÇİLEN ÜRÜNLER TOPLAMI ({checkedBillItemIds.length}{" "}
+                            Kalem)
+                          </div>
+                          <div className="text-xs font-black text-amber-300 mt-0.5">
+                            {formatCurrency(checkedItemsSubtotal)}
+                          </div>
                         </div>
-                        <div className="text-xs font-black text-amber-300 mt-0.5">
-                          {formatCurrency(checkedItemsSubtotal)}
-                        </div>
+                        {checkedBillItemIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBillPaymentMethod("split");
+                              setSplitCardInput(
+                                checkedItemsSubtotal.toFixed(2)
+                              );
+                              setSplitCashInput(
+                                Math.max(
+                                  0,
+                                  netPayableBillAmount - checkedItemsSubtotal
+                                ).toFixed(2)
+                              );
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-[10px] font-bold text-amber-300"
+                          >
+                            Parçalıya Aktar
+                          </button>
+                        )}
                       </div>
+
                       {checkedBillItemIds.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setBillPaymentMethod("split");
-                            setSplitCardInput(
-                              checkedItemsSubtotal.toFixed(2)
-                            );
-                            setSplitCashInput(
-                              Math.max(
-                                0,
-                                netPayableBillAmount - checkedItemsSubtotal
-                              ).toFixed(2)
-                            );
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-[10px] font-bold text-amber-300"
-                        >
-                          Parçalıya Aktar
-                        </button>
+                        <div className="pt-2 border-t border-stone-800 space-y-1.5">
+                          <div className="text-[10px] text-emerald-400 font-bold">
+                            💡 Masadan erken kalkan kişinin seçilen ürünlerini tahsil edip adisyondan düşebilirsiniz:
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              disabled={processingBill}
+                              onClick={() => handlePartialItemsPayment("cash")}
+                              className="py-2 px-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-stone-950 font-black text-[11px] transition"
+                            >
+                              💵 Seçilenleri Nakit Al & Düş
+                            </button>
+                            <button
+                              type="button"
+                              disabled={processingBill}
+                              onClick={() =>
+                                handlePartialItemsPayment("pos_at_table")
+                              }
+                              className="py-2 px-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-stone-950 font-black text-[11px] transition"
+                            >
+                              💳 Seçilenleri Kartla Al & Düş
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -2016,6 +2121,128 @@ export default function WaiterTerminalPage() {
                     </div>
                   </div>
                 ))
+              )}
+            </div>
+
+            {/* Active Reservations Management */}
+            <div className="space-y-2">
+              <h2 className="text-sm font-black text-purple-400">
+                📅 Masa Rezervasyon Talepleri (
+                {
+                  (settings?.reservations || []).filter(
+                    (r) => r.status === "pending" || r.status === "confirmed"
+                  ).length
+                }
+                )
+              </h2>
+              {(settings?.reservations || []).filter(
+                (r) => r.status === "pending" || r.status === "confirmed"
+              ).length === 0 ? (
+                <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 text-xs text-stone-400 text-center">
+                  Aktif veya bekleyen masa rezervasyonu bulunmuyor.
+                </div>
+              ) : (
+                (settings?.reservations || [])
+                  .filter(
+                    (r) => r.status === "pending" || r.status === "confirmed"
+                  )
+                  .map((res) => (
+                    <div
+                      key={res.id}
+                      className="bg-purple-950/35 border border-purple-500/50 rounded-2xl p-3.5 space-y-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-black text-white flex items-center gap-2">
+                            <span>{res.customerName}</span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                res.status === "confirmed"
+                                  ? "bg-emerald-500 text-stone-950"
+                                  : "bg-amber-500 text-stone-950"
+                              }`}
+                            >
+                              {res.status === "confirmed"
+                                ? "✓ Onaylandı"
+                                : "⏳ Onay Bekliyor"}
+                            </span>
+                          </div>
+                          <div className="text-xs text-purple-200 font-semibold mt-0.5">
+                            📅 {res.date} • ⏰ {res.time} • 👥 {res.guests} Kişi • 📞{" "}
+                            {res.customerPhone}
+                          </div>
+                          {res.notes && (
+                            <div className="text-[11px] text-stone-300 mt-1 italic">
+                              📝 Not: {res.notes}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={res.tableNumber || ""}
+                            onChange={(e) =>
+                              handleUpdateReservation(
+                                res.id,
+                                res.status,
+                                e.target.value
+                              )
+                            }
+                            className="bg-stone-950 border border-purple-500/40 rounded-xl px-2.5 py-1.5 text-xs text-white font-bold"
+                          >
+                            <option value="">Masa Ata...</option>
+                            {Array.from({ length: totalTables }, (_, i) =>
+                              String(i + 1)
+                            ).map((t) => (
+                              <option key={t} value={t}>
+                                Masa {t}
+                              </option>
+                            ))}
+                          </select>
+                          {res.status === "pending" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateReservation(
+                                  res.id,
+                                  "confirmed",
+                                  res.tableNumber
+                                )
+                              }
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500 text-stone-950 font-black text-xs"
+                            >
+                              ✓ Onayla
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateReservation(
+                                res.id,
+                                "seated",
+                                res.tableNumber
+                              )
+                            }
+                            className="px-2.5 py-1.5 rounded-xl bg-amber-500 text-stone-950 font-black text-xs"
+                          >
+                            🪑 Oturdu
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateReservation(
+                                res.id,
+                                "cancelled",
+                                res.tableNumber
+                              )
+                            }
+                            className="px-2.5 py-1.5 rounded-xl bg-red-500/20 text-red-300 border border-red-500/40 font-bold text-xs"
+                          >
+                            İptal
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
               )}
             </div>
           </div>

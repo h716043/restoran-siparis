@@ -36,6 +36,12 @@ export default function TvOrderQueuePage() {
   const [tvOrderTypes, setTvOrderTypes] = useState<
     Array<"dine_in" | "pickup" | "delivery">
   >(["pickup", "dine_in", "delivery"]);
+  const [announcementText, setAnnouncementText] = useState<string>("");
+  const [happyHourSummary, setHappyHourSummary] = useState<string>("");
+  const [featuredItems, setFeaturedItems] = useState<
+    Array<{ id: string; name: string; price: number }>
+  >([]);
+  const [currency, setCurrency] = useState<string>("₺");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState("");
   const [highlightedReadyIds, setHighlightedReadyIds] = useState<string[]>([]);
@@ -70,8 +76,26 @@ export default function TvOrderQueuePage() {
       const data = await res.json();
       if (data.restaurantName) setRestaurantName(data.restaurantName);
       if (data.slogan) setSlogan(data.slogan);
+      if (data.currency) setCurrency(data.currency);
       if (Array.isArray(data.tvDisplayOrderTypes)) {
         setTvOrderTypes(data.tvDisplayOrderTypes);
+      }
+      if (data.announcementBar?.enabled && data.announcementBar?.text) {
+        setAnnouncementText(
+          `${data.announcementBar.badgeText || "🔥 FIRSAT"}: ${data.announcementBar.text}`
+        );
+      } else {
+        setAnnouncementText("");
+      }
+      if (data.happyHourConfig?.enabled) {
+        setHappyHourSummary(
+          `⏱️ ${data.happyHourConfig.title} (${data.happyHourConfig.startTime}-${data.happyHourConfig.endTime} arası %${data.happyHourConfig.discountPercent} İndirim!)`
+        );
+      } else {
+        setHappyHourSummary("");
+      }
+      if (Array.isArray(data.featuredItems)) {
+        setFeaturedItems(data.featuredItems);
       }
 
       const list: TvOrderSummary[] = data.orders || [];
@@ -383,6 +407,43 @@ export default function TvOrderQueuePage() {
           )}
         </section>
       </main>
+
+      {/* 7. ÖZELLİK: TV Digital Signage Alt Kampanya, Happy Hour & Popüler Menü Bandı */}
+      {(announcementText || happyHourSummary || featuredItems.length > 0) && (
+        <footer className="bg-gradient-to-r from-slate-900 via-orange-950/60 to-slate-900 border-t border-orange-500/30 px-6 py-3 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {announcementText && (
+              <span className="inline-flex items-center gap-2 bg-orange-500/20 border border-orange-500/40 text-orange-200 text-xs sm:text-sm font-black px-3.5 py-1.5 rounded-xl">
+                {announcementText}
+              </span>
+            )}
+            {happyHourSummary && (
+              <span className="inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs sm:text-sm font-black px-3.5 py-1.5 rounded-xl">
+                {happyHourSummary}
+              </span>
+            )}
+          </div>
+
+          {featuredItems.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                ⭐ Öne Çıkanlar:
+              </span>
+              {featuredItems.map((fi) => (
+                <span
+                  key={fi.id}
+                  className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-3 py-1 rounded-xl text-xs font-bold text-white whitespace-nowrap"
+                >
+                  <span>{fi.name}</span>
+                  <strong className="text-amber-400">
+                    {fi.price} {currency}
+                  </strong>
+                </span>
+              ))}
+            </div>
+          )}
+        </footer>
+      )}
     </div>
   );
 }

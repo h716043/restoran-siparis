@@ -803,9 +803,14 @@ export function getSettings(): RestaurantSettings {
     parsed.tvDisplayOrderTypes = ["pickup", "dine_in", "delivery"];
     updated = true;
   }
+  if (!Array.isArray(parsed.reservations)) {
+    parsed.reservations = [];
+    updated = true;
+  }
   if (updated) {
     db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(JSON.stringify(parsed));
   }
+  parsed.reservations = getReservations();
   return parsed;
 }
 
@@ -1209,9 +1214,19 @@ export function getReservations(rawPhone?: string): TableReservation[] {
   const rows = db
     .prepare("SELECT * FROM reservations ORDER BY createdAt DESC LIMIT 100")
     .all() as unknown as TableReservation[];
-  if (!rawPhone) return rows;
+  const mapped = rows.map((r) => ({
+    ...r,
+    guests: r.guestCount ?? r.guests ?? 2,
+    date: r.reservationDate || r.date || "",
+    time: r.reservationTime || r.time || "",
+    notes: r.specialRequests || r.notes || undefined,
+    tableNumber: r.assignedTable
+      ? String(r.assignedTable).replace(/^Masa\s*/i, "").trim()
+      : r.tableNumber || undefined,
+  }));
+  if (!rawPhone) return mapped;
   const norm = normalizePhone(rawPhone);
-  return rows.filter((r) => normalizePhone(r.customerPhone) === norm);
+  return mapped.filter((r) => normalizePhone(r.customerPhone) === norm);
 }
 
 export function createReservation(
@@ -1763,6 +1778,95 @@ export function closeTableOrdersWithPayment(
   return getOrders();
 }
 
+/** Masadan erken kalkan kişinin seçilen ürünlerini tahsil edip adisyondan düşer, kalan ürünleri masada açık bırakır */
+export function payPartialTableItems(
+  tableNumber: string,
+  selectedCompositeKeys: string[],
+  paymentMethod: Order["paymentMethod"]
+): Order[] {
+  const db = getDb();
+  const cleanTable = String(tableNumber).trim();
+  const keySet = new Set(selectedCompositeKeys);
+  if (keySet.size === 0) return getOrders();
+
+  const allOrders = getOrders();
+  const tableActive = allOrders.filter(
+    (o) =>
+      o.orderType === "dine_in" &&
+      String(o.tableNumber) === cleanTable &&
+      (o.status === "pending" || o.status === "accepted" || o.status === "ready")
+  );
+  if (tableActive.length === 0) return allOrders;
+
+  const paidItems: Order["items"] = [];
+  const now = new Date().toISOString();
+
+  for (const ord of tableActive) {
+    const remaining: Order["items"] = [];
+    for (const item of ord.items) {
+      const compKey = `${ord.id}__${item.id}`;
+      if (keySet.has(compKey) || keySet.has(item.id)) {
+        paidItems.push(item);
+      } else {
+        remaining.push(item);
+      }
+    }
+
+    if (remaining.length !== ord.items.length) {
+      if (remaining.length === 0) {
+        db.prepare("DELETE FROM orders WHERE id = ?").run(ord.id);
+      } else {
+        const nextSub = remaining.reduce(
+          (sum, it) => sum + Number(it.totalPrice || 0),
+          0
+        );
+        const nextTot = Math.max(0, nextSub - (ord.discountAmount || 0));
+        db.prepare(`
+          UPDATE orders
+          SET itemsJson = ?, subtotal = ?, totalAmount = ?, updatedAt = ?
+          WHERE id = ?
+        `).run(JSON.stringify(remaining), nextSub, nextTot, now, ord.id);
+      }
+    }
+  }
+
+  if (paidItems.length > 0) {
+    const paidSubtotal = paidItems.reduce(
+      (sum, it) => sum + Number(it.totalPrice || 0),
+      0
+    );
+    const maxRow = db
+      .prepare("SELECT MAX(orderNumber) as maxNum FROM orders")
+      .get() as { maxNum: number | null };
+    const nextOrderNum = (maxRow?.maxNum || 100) + 1;
+    const paidOrderId = `ord-partial-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 6)}`;
+
+    db.prepare(`
+      INSERT INTO orders (
+        id, orderNumber, orderType, status, tableNumber, customerName, customerPhone,
+        orderNote, paymentMethod, subtotal, discountAmount, deliveryFee, totalAmount,
+        itemsJson, createdAt, updatedAt
+      ) VALUES (?, ?, 'dine_in', 'completed', ?, ?, '-', ?, ?, ?, 0, 0, ?, ?, ?, ?)
+    `).run(
+      paidOrderId,
+      nextOrderNum,
+      cleanTable,
+      `Masa ${cleanTable} (Kısmi Tahsilat)`,
+      "Masadan kısmi ürün ödemesi alındı",
+      paymentMethod,
+      paidSubtotal,
+      paidSubtotal,
+      JSON.stringify(paidItems),
+      now,
+      now
+    );
+  }
+
+  return getOrders();
+}
+
 // --- WhatsApp OTP & Customer Membership Functions ---
 
 export function createOtpCode(rawPhone: string): { phone: string; code: string } {
@@ -2124,7 +2228,7 @@ export function mergeActivityFromCloud(payload: {
     for (const r of payload.reservations) {
       upsertRes.run(
         r.id,
-        r.reservationNumber,
+        r.reservationNumber || 501,
         r.customerName,
         r.customerPhone,
         r.guestCount,

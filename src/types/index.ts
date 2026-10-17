@@ -121,15 +121,20 @@ export interface Order {
 
 export interface TableReservation {
   id: string;
-  reservationNumber: number;
+  reservationNumber?: number;
   customerName: string;
   customerPhone: string;
   guestCount: number;
+  guests?: number;
   reservationDate: string; // YYYY-MM-DD
+  date?: string;
   reservationTime: string; // HH:mm
+  time?: string;
   specialRequests?: string;
+  notes?: string;
   assignedTable?: string;
-  status: "pending" | "confirmed" | "rejected";
+  tableNumber?: string;
+  status: "pending" | "confirmed" | "rejected" | "seated" | "cancelled";
   rejectReason?: string;
   createdAt: string;
 }
@@ -301,6 +306,7 @@ export interface RestaurantSettings {
   happyHourConfig?: HappyHourConfig;
   cashExpenses?: CashExpense[];
   creditAccounts?: CreditAccount[];
+  reservations?: TableReservation[];
   announcementBar?: AnnouncementBarConfig;
   deliveryZones?: DeliveryZone[];
   coupons?: Coupon[];

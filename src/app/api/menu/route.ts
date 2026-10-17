@@ -8,12 +8,16 @@ import {
   deleteMenuItem,
   createCategory,
   deleteCategory,
+  createReservation,
+  updateReservationStatus,
 } from "@/lib/db";
 import {
   pullActivityFromCloud,
   pullCatalogFromCloud,
   pushCatalogToCloud,
+  syncActivityWithCloud,
 } from "@/lib/cloud-sync";
+import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
 export async function GET(req: NextRequest) {
   try {
@@ -61,12 +65,70 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const body = await req.json();
+
+    // 5. ÖZELLİK: Müşteri Online Masa Rezervasyonu Talebi (Herkese açık)
+    if (body.type === "create_reservation") {
+      const customerName = String(body.customerName || "").trim();
+      const customerPhone = String(body.customerPhone || "").trim();
+      const guests = Math.max(1, Number(body.guests || body.guestCount || 2));
+      const date = String(body.date || body.reservationDate || "").trim();
+      const time = String(body.time || body.reservationTime || "").trim();
+      const note = body.note || body.specialRequests ? String(body.note || body.specialRequests).trim() : undefined;
+
+      if (!customerName || !customerPhone || !date || !time) {
+        return NextResponse.json(
+          { error: "İsim, telefon, tarih ve saat zorunludur." },
+          { status: 400 }
+        );
+      }
+
+      const newRes = createReservation({
+        customerName,
+        customerPhone,
+        guestCount: guests,
+        reservationDate: date,
+        reservationTime: time,
+        specialRequests: note,
+      });
+
+      await syncActivityWithCloud();
+      return NextResponse.json({ reservation: newRes, settings: getSettings() });
+    }
+
     const role = req.cookies.get("restoran_staff_role")?.value;
     if (role !== "admin" && role !== "kitchen") {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 403 });
     }
 
-    const body = await req.json();
+    // Personel / Admin Rezervasyon Durumu Güncelleme & Masa Atama
+    if (body.type === "update_reservation") {
+      const resId = String(body.reservationId || body.id || "");
+      const nextStatus = body.status || "confirmed";
+      const nextTable = body.tableNumber !== undefined ? String(body.tableNumber) : undefined;
+
+      const updated = updateReservationStatus(
+        resId,
+        nextStatus,
+        nextTable,
+        body.rejectReason
+      );
+      if (!updated) {
+        return NextResponse.json({ error: "Rezervasyon bulunamadı" }, { status: 404 });
+      }
+
+      const settings = getSettings();
+      if (nextStatus === "confirmed" && updated.customerPhone) {
+        const msg = `📅 *${settings.name} — Rezervasyon Onayı*\nSayın ${updated.customerName}, ${updated.reservationDate} saat ${updated.reservationTime} (${updated.guestCount} Kişilik)${
+          nextTable ? ` Masa ${nextTable}` : ""
+        } rezervasyonunuz onaylanmıştır. Sizi ağırlamaktan mutluluk duyarız!`;
+        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
+      }
+
+      await syncActivityWithCloud();
+      return NextResponse.json({ reservation: updated, settings: getSettings() });
+    }
+
     if (body.type === "category") {
       const cat = createCategory({
         name: body.name,

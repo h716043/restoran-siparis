@@ -1854,6 +1854,287 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
+            {/* 👨‍💼 4. GARSON & KURYE PERFORMANS RAPORU + 📅 5. MASA REZERVASYON TALEPLERİ */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Sol: Garson & Kurye Performans Analizi */}
+              <div className="lg:col-span-6 bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <h3 className="font-bold text-base text-slate-900">
+                    👨‍💼 Personel Performans Raporu (Garson & Kurye Analizi)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Seçili dönemde ({reportPeriodLabel}) garsonların açtığı masa cirosu ve kuryelerin teslimat performansı
+                  </p>
+                </div>
+
+                {/* Garson Satış Tablosu */}
+                <div className="space-y-2">
+                  <div className="text-xs font-extrabold uppercase text-orange-600">
+                    🍽️ Salon & Garson Masa Satış Performansı
+                  </div>
+                  {(() => {
+                    const waiterMap = new Map<
+                      string,
+                      { count: number; itemsQty: number; revenue: number }
+                    >();
+                    validOrders
+                      .filter((o) => o.orderType === "dine_in")
+                      .forEach((o) => {
+                        let waiterName = "QR Müşteri (Self-Servis)";
+                        const match = (o.orderNote || "").match(
+                          /Garson:\s*([^|•\n]+)/i
+                        );
+                        if (match && match[1]) {
+                          waiterName = `👨‍💼 ${match[1].trim()}`;
+                        } else if (o.customerPhone === "Garson Siparişi") {
+                          waiterName = "👨‍💼 Garson Terminali";
+                        } else if (o.customerPhone === "Kasa Siparişi") {
+                          waiterName = "🖥️ Kasa POS";
+                        }
+                        const prev = waiterMap.get(waiterName) || {
+                          count: 0,
+                          itemsQty: 0,
+                          revenue: 0,
+                        };
+                        const qty = o.items.reduce(
+                          (s, it) => s + it.quantity,
+                          0
+                        );
+                        waiterMap.set(waiterName, {
+                          count: prev.count + 1,
+                          itemsQty: prev.itemsQty + qty,
+                          revenue: prev.revenue + o.totalAmount,
+                        });
+                      });
+                    const rows = Array.from(waiterMap.entries()).sort(
+                      (a, b) => b[1].revenue - a[1].revenue
+                    );
+
+                    if (rows.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-400 py-3">
+                          Seçili dönemde masa siparişi bulunmuyor.
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="space-y-1.5">
+                        {rows.map(([wName, st]) => (
+                          <div
+                            key={wName}
+                            className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs"
+                          >
+                            <div>
+                              <span className="font-extrabold text-slate-900">
+                                {wName}
+                              </span>
+                              <span className="ml-2 text-slate-500">
+                                ({st.count} Adisyon • {st.itemsQty} Ürün)
+                              </span>
+                            </div>
+                            <span className="font-black text-emerald-700">
+                              {st.revenue.toFixed(2)} {settings?.currency}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Kurye Teslimat Performans Tablosu */}
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="text-xs font-extrabold uppercase text-emerald-700">
+                    🛵 Kurye Paket Teslimat Performansı
+                  </div>
+                  {(() => {
+                    const cMap = new Map<
+                      string,
+                      { count: number; revenue: number }
+                    >();
+                    validOrders
+                      .filter((o) => o.orderType === "delivery")
+                      .forEach((o) => {
+                        const cName = o.courierName || "Atanmamış / Genel Kurye";
+                        const prev = cMap.get(cName) || {
+                          count: 0,
+                          revenue: 0,
+                        };
+                        cMap.set(cName, {
+                          count: prev.count + 1,
+                          revenue: prev.revenue + o.totalAmount,
+                        });
+                      });
+                    const rows = Array.from(cMap.entries()).sort(
+                      (a, b) => b[1].count - a[1].count
+                    );
+                    if (rows.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-400 py-3">
+                          Seçili dönemde paket servis siparişi bulunmuyor.
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="space-y-1.5">
+                        {rows.map(([cName, st]) => (
+                          <div
+                            key={cName}
+                            className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-50/50 border border-emerald-200/70 text-xs"
+                          >
+                            <div>
+                              <span className="font-extrabold text-slate-900">
+                                🛵 {cName}
+                              </span>
+                              <span className="ml-2 text-slate-600 font-bold">
+                                ({st.count} Paket Teslimat)
+                              </span>
+                            </div>
+                            <span className="font-black text-emerald-800">
+                              {st.revenue.toFixed(2)} {settings?.currency}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Sağ: Masa Rezervasyon Talepleri & Masa Atama */}
+              <div className="lg:col-span-6 bg-white p-6 rounded-2xl border border-purple-200 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      📅 Online Masa Rezervasyon Talepleri
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Müşterilerin vitrinden gönderdiği rezervasyonlara masa atayın ve tek tıkla WhatsApp onayı gönderin
+                    </p>
+                  </div>
+                  <span className="text-xs font-black bg-purple-100 text-purple-800 px-3 py-1 rounded-full">
+                    {(settings?.reservations || []).length} Kayıt
+                  </span>
+                </div>
+
+                {(settings?.reservations || []).length === 0 ? (
+                  <p className="text-xs text-slate-400 py-10 text-center">
+                    Henüz masa rezervasyon talebi bulunmuyor.
+                  </p>
+                ) : (
+                  <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                    {(settings?.reservations || []).map((res) => (
+                      <div
+                        key={res.id}
+                        className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                            <span>{res.customerName}</span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                res.status === "confirmed"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : res.status === "pending"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-slate-200 text-slate-700"
+                              }`}
+                            >
+                              {res.status === "confirmed"
+                                ? "✓ Onaylandı"
+                                : res.status === "pending"
+                                ? "⏳ Onay Bekliyor"
+                                : res.status === "seated"
+                                ? "🪑 Masaya Oturdu"
+                                : "İptal"}
+                            </span>
+                          </div>
+                          <span className="font-bold text-purple-700">
+                            📅 {res.date || res.reservationDate} • ⏰{" "}
+                            {res.time || res.reservationTime} • 👥{" "}
+                            {res.guests || res.guestCount} Kişi
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-slate-500">
+                            📞 {res.customerPhone}
+                            {res.notes || res.specialRequests
+                              ? ` • 📝 ${res.notes || res.specialRequests}`
+                              : ""}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={res.tableNumber || res.assignedTable || ""}
+                              onChange={async (e) => {
+                                const r = await fetch("/api/menu", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    type: "update_reservation",
+                                    reservationId: res.id,
+                                    status: res.status,
+                                    tableNumber: e.target.value,
+                                  }),
+                                });
+                                if (r.ok) {
+                                  const d = await r.json();
+                                  if (d.settings) setSettings(d.settings);
+                                }
+                              }}
+                              className="px-2 py-1 rounded-lg border border-slate-300 bg-white font-bold text-slate-800"
+                            >
+                              <option value="">Masa Ata...</option>
+                              {Array.from(
+                                { length: settings?.tableCount || 15 },
+                                (_, i) => String(i + 1)
+                              ).map((t) => (
+                                <option key={t} value={t}>
+                                  Masa {t}
+                                </option>
+                              ))}
+                            </select>
+                            {res.status === "pending" && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const r = await fetch("/api/menu", {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      type: "update_reservation",
+                                      reservationId: res.id,
+                                      status: "confirmed",
+                                      tableNumber:
+                                        res.tableNumber || res.assignedTable,
+                                    }),
+                                  });
+                                  if (r.ok) {
+                                    const d = await r.json();
+                                    if (d.settings) setSettings(d.settings);
+                                    setSavingMsg(
+                                      "Rezervasyon onaylandı ve WhatsApp bildirimi gönderildi!"
+                                    );
+                                    setTimeout(() => setSavingMsg(""), 3000);
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold cursor-pointer"
+                              >
+                                ✓ Onayla + WhatsApp
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Alt Tablo: Seçili Dönem Sipariş Geçmişi & Tek Tık 80mm Fiş Yazdır */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">

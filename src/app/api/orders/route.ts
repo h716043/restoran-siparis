@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   adjustUserLoyaltyPoints,
+  appendItemsToOrder,
   closeTableOrdersWithPayment,
   createOrder,
+  getMenuItems,
   getOrders,
   getSettings,
   getUserByPhone,
+  payPartialTableItems,
   recordCreditAccountTransaction,
   settleCourierOrders,
   transferTableOrders,
@@ -22,7 +25,7 @@ export async function GET(req: NextRequest) {
     await pullActivityFromCloud();
     const settings = getSettings();
 
-    // TV Müşteri Sıra Çağrı Ekranı (/tv) için şifresiz, kişisel veri içermeyen özet akış
+    // TV Müşteri Sıra Çağrı Ekranı (/tv) için şifresiz, kişisel veri içermeyen özet akış + Digital Signage kampanya bandı
     if (req.nextUrl.searchParams.get("publicTv") === "1") {
       const allowedTvTypes = Array.isArray(settings.tvDisplayOrderTypes)
         ? settings.tvDisplayOrderTypes
@@ -46,12 +49,53 @@ export async function GET(req: NextRequest) {
           createdAt: o.createdAt,
           updatedAt: o.updatedAt,
         }));
+
+      const featuredItems = getMenuItems()
+        .filter((i) => i.available && (i.popular || i.categoryId === "cat-kampanya"))
+        .slice(0, 6)
+        .map((i) => ({
+          id: i.id,
+          name: i.name,
+          price: i.price,
+        }));
+
       return NextResponse.json({
         orders: tvOrders,
         restaurantName: settings.name,
         slogan: settings.slogan,
+        currency: settings.currency || "₺",
         tvDisplayOrderTypes: allowedTvTypes,
+        announcementBar: settings.announcementBar || null,
+        happyHourConfig: settings.happyHourConfig || null,
+        featuredItems,
       });
+    }
+
+    // Masa QR müşterisinin kendi masasının açık adisyonunu görebilmesi için şifresiz masa özeti
+    const publicTable = req.nextUrl.searchParams.get("publicTable");
+    if (publicTable) {
+      const cleanT = String(publicTable).trim();
+      const tableOrders = getOrders()
+        .filter(
+          (o) =>
+            o.orderType === "dine_in" &&
+            String(o.tableNumber) === cleanT &&
+            (o.status === "pending" ||
+              o.status === "accepted" ||
+              o.status === "ready")
+        )
+        .map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          tableNumber: o.tableNumber,
+          status: o.status,
+          items: o.items,
+          subtotal: o.subtotal,
+          discountAmount: o.discountAmount,
+          totalAmount: o.totalAmount,
+          createdAt: o.createdAt,
+        }));
+      return NextResponse.json({ orders: tableOrders });
     }
 
     const role = req.cookies.get("restoran_staff_role")?.value;
@@ -200,6 +244,38 @@ export async function POST(req: NextRequest) {
       ? Number(body.totalAmount)
       : Math.max(0, computedSubtotal - computedDiscount + computedDeliveryFee);
 
+    // 2. ÖZELLİK: Masa QR müşterisi açık masa adisyonuna ek sipariş veriyorsa mevcut masa adisyonuna birleştir
+    if (
+      body.orderType === "dine_in" &&
+      body.tableNumber &&
+      body.appendToActiveTableOrder
+    ) {
+      const cleanT = String(body.tableNumber).trim();
+      const existingOpenOrder = getOrders().find(
+        (o) =>
+          o.orderType === "dine_in" &&
+          String(o.tableNumber) === cleanT &&
+          (o.status === "pending" ||
+            o.status === "accepted" ||
+            o.status === "ready")
+      );
+      if (existingOpenOrder) {
+        const appended = appendItemsToOrder(
+          existingOpenOrder.id,
+          body.items,
+          body.orderNote
+        );
+        if (appended) {
+          await syncActivityWithCloud();
+          await pushCatalogToCloud();
+          return NextResponse.json(
+            { order: appended, appended: true },
+            { status: 201 }
+          );
+        }
+      }
+    }
+
     const order = createOrder({
       orderType: body.orderType,
       tableNumber: body.tableNumber,
@@ -274,6 +350,16 @@ export async function PATCH(req: NextRequest) {
       const orders = transferTableOrders(
         String(body.fromTable || ""),
         String(body.toTable || "")
+      );
+      await syncActivityWithCloud();
+      return NextResponse.json({ orders });
+    }
+
+    if (body.action === "partial_table_payment") {
+      const orders = payPartialTableItems(
+        String(body.tableNumber || ""),
+        Array.isArray(body.selectedItemKeys) ? body.selectedItemKeys : [],
+        body.paymentMethod || "cash"
       );
       await syncActivityWithCloud();
       return NextResponse.json({ orders });
