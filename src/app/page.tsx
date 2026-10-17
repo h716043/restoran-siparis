@@ -138,6 +138,7 @@ function CustomerMenuContent() {
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authStep, setAuthStep] = useState<"phone" | "otp">("phone");
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [authPhone, setAuthPhone] = useState("");
   const [authName, setAuthName] = useState("");
   const [authOtpCode, setAuthOtpCode] = useState("");
@@ -1295,124 +1296,216 @@ function CustomerMenuContent() {
         </div>
       )}
 
-      {/* Restoran Üst Başlık (Header) */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-2.5 sm:py-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
-                <Utensils className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-base sm:text-lg font-bold text-slate-900">
-                    {settings?.name}
-                  </h1>
-                  {isCurrentlyOpen ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Açık • {settings?.openingHours || "11:00 - 23:30"}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                      Kapalı ({settings?.openingHours || "11:00 - 23:30"})
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-500">{settings?.slogan}</p>
-              </div>
+      {/* Restoran Üst Başlık (Header - Sabit kalmaz, tek buton altında toplanmış kompakt görünüm) */}
+      <header className="bg-white border-b border-slate-200 relative z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center text-white shadow-md shadow-orange-500/20 shrink-0">
+              <Utensils className="w-5 h-5" />
             </div>
-
-            <div className="lg:hidden">{renderUserAuthBadge()}</div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <h1 className="text-sm sm:text-lg font-bold text-slate-900 truncate">
+                  {settings?.name}
+                </h1>
+                {isCurrentlyOpen ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Açık
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                    Kapalı ({settings?.openingHours || "11:00 - 23:30"})
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 truncate hidden sm:block">
+                {settings?.slogan}
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between lg:justify-end gap-2">
-            {/* Sipariş Tipi Seçici */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setOrderType("delivery")}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  orderType === "delivery"
-                    ? "bg-white text-orange-600 shadow-sm"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Truck className="w-3.5 h-3.5" />
-                Paket Servis
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderType("pickup")}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  orderType === "pickup"
-                    ? "bg-white text-orange-600 shadow-sm"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5" />
-                Gel-Al
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOrderType("dine_in");
-                  setPaymentMethod("pos_at_table");
-                }}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  orderType === "dine_in"
-                    ? "bg-white text-orange-600 shadow-sm"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <QrCode className="w-3.5 h-3.5" />
-                Masada {tableNumber ? `(Masa ${tableNumber})` : "(QR)"}
-              </button>
-            </div>
-
-            {/* 🎨 TEMA SEÇİCİ BUTONU (3 AÇIK + 3 KAPALI TEMA) */}
-            {settings?.allowCustomerThemeSwitch !== false && (
-              <button
-                type="button"
-                onClick={() => setThemeModalOpen(true)}
-                title="Tema Değiştir (3 Açık + 3 Kapalı Tema)"
-                className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold text-xs px-3 py-2 rounded-xl transition shadow-xs"
-              >
-                {getThemeDefinition(activeTheme).mode === "dark" ? (
-                  <Moon className="w-3.5 h-3.5 text-orange-500" />
-                ) : (
-                  <Sun className="w-3.5 h-3.5 text-orange-500" />
-                )}
-                <span className="hidden sm:inline">
-                  {getThemeDefinition(activeTheme).shortName}
-                </span>
-                <Palette className="w-3.5 h-3.5 text-slate-500 sm:hidden" />
-              </button>
-            )}
-
-            {/* 1. ÖZELLİK: MASA REZERVASYONU BUTONU */}
+          {/* Tek Buton Altında Toplanmış Sipariş Türü, Hesabım, Rezervasyon & Tema Menüsü */}
+          <div className="relative flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => {
-                setResSuccessMsg("");
-                if (currentUser?.phone) {
-                  fetchUserProfileAndOrders(currentUser.phone);
-                }
-                setReservationModalOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-xs"
+              onClick={() => setHeaderMenuOpen((prev) => !prev)}
+              className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl transition shadow-sm cursor-pointer"
             >
-              <CalendarDays className="w-4 h-4 text-orange-400" />
-              <span>Masa Rezervasyonu</span>
-              {myReservations.filter((r) => r.status === "pending").length >
-                0 && (
-                <span className="bg-orange-500 text-white text-[10px] px-1.5 py-0.2 rounded-full">
-                  {myReservations.filter((r) => r.status === "pending").length}
+              <span className="inline-flex items-center gap-1 text-orange-400">
+                {orderType === "delivery" ? (
+                  <>
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Paket</span>
+                  </>
+                ) : orderType === "pickup" ? (
+                  <>
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>Gel-Al</span>
+                  </>
+                ) : (
+                  <>
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>
+                      {tableNumber ? `Masa ${tableNumber}` : "Masada"}
+                    </span>
+                  </>
+                )}
+              </span>
+              <span className="text-slate-500">•</span>
+              <span>☰ Menü & Hesabım</span>
+              {currentUser && isLoyaltyEnabled && (
+                <span className="hidden sm:inline-flex bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                  🎁 {(currentUser.loyaltyPoints || 0).toFixed(0)}{" "}
+                  {settings?.currency}
                 </span>
               )}
+              <span className="text-[10px] opacity-80">
+                {headerMenuOpen ? "▲" : "▾"}
+              </span>
             </button>
 
-            <div className="hidden lg:block">{renderUserAuthBadge()}</div>
+            {headerMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setHeaderMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl p-3.5 z-50 space-y-3 text-slate-800">
+                  {/* 1. Sipariş Tipi Seçici */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+                      Sipariş Türü Seçin
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderType("delivery");
+                          setHeaderMenuOpen(false);
+                        }}
+                        className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          orderType === "delivery"
+                            ? "bg-white text-orange-600 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Truck className="w-4 h-4" />
+                        <span>Paket Servis</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderType("pickup");
+                          setHeaderMenuOpen(false);
+                        }}
+                        className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          orderType === "pickup"
+                            ? "bg-white text-orange-600 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <ShoppingBag className="w-4 h-4" />
+                        <span>Gel-Al</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOrderType("dine_in");
+                          setPaymentMethod("pos_at_table");
+                          setHeaderMenuOpen(false);
+                        }}
+                        className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          orderType === "dine_in"
+                            ? "bg-white text-orange-600 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <QrCode className="w-4 h-4" />
+                        <span>
+                          {tableNumber ? `Masa ${tableNumber}` : "Masada (QR)"}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2. Müşteri Hesabım / Siparişlerim & Adreslerim */}
+                  <div
+                    className="space-y-1.5 border-t border-slate-100 pt-2.5"
+                    onClick={() => setHeaderMenuOpen(false)}
+                  >
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+                      Müşteri Hesabım & Siparişlerim
+                    </div>
+                    <div className="[&>button]:w-full [&>button]:justify-between">
+                      {renderUserAuthBadge()}
+                    </div>
+                  </div>
+
+                  {/* 3. Masa Rezervasyonu & Tema Seçimi */}
+                  <div className="space-y-1.5 border-t border-slate-100 pt-2.5">
+                    <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
+                      Rezervasyon & Görünüm
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          setResSuccessMsg("");
+                          if (currentUser?.phone) {
+                            fetchUserProfileAndOrders(currentUser.phone);
+                          }
+                          setReservationModalOpen(true);
+                        }}
+                        className="w-full flex items-center justify-between bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2">
+                          <CalendarDays className="w-4 h-4 text-orange-400" />
+                          <span>Masa Rezervasyonu Yap</span>
+                        </span>
+                        {myReservations.filter((r) => r.status === "pending")
+                          .length > 0 && (
+                          <span className="bg-orange-500 text-white text-[10px] px-2 py-0.5 rounded-full">
+                            {
+                              myReservations.filter(
+                                (r) => r.status === "pending"
+                              ).length
+                            }{" "}
+                            Talep
+                          </span>
+                        )}
+                      </button>
+
+                      {settings?.allowCustomerThemeSwitch !== false && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderMenuOpen(false);
+                            setThemeModalOpen(true);
+                          }}
+                          className="w-full flex items-center justify-between bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold text-xs px-3.5 py-2.5 rounded-xl transition cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2">
+                            {getThemeDefinition(activeTheme).mode === "dark" ? (
+                              <Moon className="w-4 h-4 text-orange-500" />
+                            ) : (
+                              <Sun className="w-4 h-4 text-orange-500" />
+                            )}
+                            <span>
+                              Tema: {getThemeDefinition(activeTheme).shortName}
+                            </span>
+                          </span>
+                          <span className="text-[11px] text-orange-600 font-extrabold">
+                            Değiştir →
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
