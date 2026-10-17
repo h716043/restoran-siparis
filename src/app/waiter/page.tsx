@@ -60,6 +60,7 @@ export default function WaiterTerminalPage() {
 
   // Cart & Modifier Modal for Waiter POS
   const [cart, setCart] = useState<OrderItem[]>([]);
+  const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
   const [orderNote, setOrderNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -444,6 +445,7 @@ export default function WaiterTerminalPage() {
         if (res.ok) {
           setCart([]);
           setOrderNote("");
+          setIsCartDrawerOpen(false);
           await fetchAllData();
           showToast(
             `🚀 Masa ${selectedTable} açık adisyonuna ek ürünler eklendi ve mutfağa iletildi!`
@@ -479,6 +481,7 @@ export default function WaiterTerminalPage() {
       if (res.ok) {
         setCart([]);
         setOrderNote("");
+        setIsCartDrawerOpen(false);
         await fetchAllData();
         showToast(`🚀 Masa ${selectedTable} siparişi mutfağa iletildi!`);
         setActiveTab("tables");
@@ -1045,19 +1048,19 @@ export default function WaiterTerminalPage() {
         )}
 
         {/* =========================================================
-            TAB 2: HIZLI SİPARİŞ AL (ÜRÜN, PORSİYON, EKSTRA, NOT)
+            TAB 2: HIZLI SİPARİŞ AL (SOL: KATEGORİLER, SAĞ: ÜRÜNLER + BUTONLA EKLENENLER)
            ========================================================= */}
         {activeTab === "order" && (
           <div className="space-y-3">
-            {/* Table Selector & Active Bill Banner */}
-            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+            {/* Table Selector, Search & Added Items Button Bar */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-2.5 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
                   <span className="text-xs font-bold text-stone-400">Masa:</span>
                   <select
                     value={selectedTable}
                     onChange={(e) => setSelectedTable(e.target.value)}
-                    className="bg-stone-950 border border-amber-500/50 text-amber-300 font-black text-sm rounded-xl px-3 py-1.5"
+                    className="bg-stone-950 border border-amber-500/50 text-amber-300 font-black text-xs sm:text-sm rounded-xl px-2.5 py-1.5"
                   >
                     {Array.from({ length: totalTables }, (_, i) =>
                       String(i + 1)
@@ -1068,17 +1071,39 @@ export default function WaiterTerminalPage() {
                     ))}
                   </select>
                 </div>
+
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="🔍 Ürün veya menü ara..."
-                  className="flex-1 bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  placeholder="🔍 Ürün ara..."
+                  className="flex-1 min-w-[120px] bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                 />
+
+                {/* Eklenen Ürünleri Göster Butonu */}
+                <button
+                  type="button"
+                  onClick={() => setIsCartDrawerOpen(true)}
+                  className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition shadow ${
+                    cart.length > 0
+                      ? "bg-emerald-500 hover:bg-emerald-400 text-stone-950 animate-pulse"
+                      : "bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700"
+                  }`}
+                >
+                  <span>🛒 Eklenen Ürünler</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-stone-950/30 text-[11px]">
+                    {cart.reduce((s, i) => s + i.quantity, 0)}
+                  </span>
+                  {cart.length > 0 && (
+                    <span className="hidden sm:inline font-black">
+                      • {formatCurrency(cart.reduce((s, i) => s + i.totalPrice, 0))}
+                    </span>
+                  )}
+                </button>
               </div>
 
               {selectedTableOrders.length > 0 && (
-                <div className="flex items-center justify-between bg-amber-950/40 border border-amber-500/40 rounded-xl px-3 py-2 text-xs">
+                <div className="flex items-center justify-between bg-amber-950/40 border border-amber-500/40 rounded-xl px-3 py-1.5 text-xs">
                   <div>
                     <span className="text-amber-300 font-black">
                       Masa {selectedTable} Açık Adisyon:{" "}
@@ -1100,198 +1125,289 @@ export default function WaiterTerminalPage() {
               )}
             </div>
 
-            {/* Category Bar */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              <button
-                type="button"
-                onClick={() => setActiveCategory("all")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap ${
-                  activeCategory === "all"
-                    ? "bg-amber-500 text-stone-950 font-black"
-                    : "bg-stone-900 text-stone-300 border border-stone-800"
-                }`}
-              >
-                Tümü
-              </button>
-              {categories.map((cat) => (
+            {/* Split Layout: SOL TARAF KATEGORİLER | SAĞ TARAF ÜRÜNLER */}
+            <div className="flex items-start gap-2.5 min-h-[66vh]">
+              {/* SOL TARAF: Dikey Kategori Sütunu */}
+              <aside className="w-28 sm:w-44 shrink-0 bg-stone-900 border border-stone-800 rounded-2xl p-1.5 flex flex-col gap-1.5 max-h-[70vh] overflow-y-auto sticky top-16">
+                <div className="px-2 py-1 text-[10px] font-black text-stone-400 uppercase tracking-wider border-b border-stone-800">
+                  📂 Kategoriler
+                </div>
                 <button
-                  key={cat.id}
                   type="button"
-                  onClick={() => setActiveCategory(cat.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap ${
-                    activeCategory === cat.id
-                      ? "bg-amber-500 text-stone-950 font-black"
-                      : "bg-stone-900 text-stone-300 border border-stone-800"
+                  onClick={() => setActiveCategory("all")}
+                  className={`w-full px-2.5 py-2.5 rounded-xl text-left text-xs font-bold transition flex items-center gap-1.5 ${
+                    activeCategory === "all"
+                      ? "bg-amber-500 text-stone-950 font-black shadow"
+                      : "bg-stone-950/70 text-stone-300 hover:bg-stone-800 border border-stone-800/80"
                   }`}
                 >
-                  {cat.icon} {cat.name}
+                  <span>🍽️</span>
+                  <span className="truncate">Tümü</span>
                 </button>
-              ))}
-            </div>
-
-            {/* Items Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {filteredItems.map((item) => {
-                const inCartQty = cart
-                  .filter((c) => c.menuItemId === item.id)
-                  .reduce((s, c) => s + c.quantity, 0);
-                return (
+                {categories.map((cat) => (
                   <button
-                    key={item.id}
+                    key={cat.id}
                     type="button"
-                    onClick={() => openItemModal(item)}
-                    className={`bg-stone-900 hover:bg-stone-800/90 border rounded-2xl p-3 text-left flex flex-col justify-between transition active:scale-95 ${
-                      inCartQty > 0
-                        ? "border-amber-500/80 bg-amber-950/20"
-                        : "border-stone-800"
+                    onClick={() => setActiveCategory(cat.id)}
+                    className={`w-full px-2.5 py-2.5 rounded-xl text-left text-xs font-bold transition flex items-center gap-1.5 ${
+                      activeCategory === cat.id
+                        ? "bg-amber-500 text-stone-950 font-black shadow"
+                        : "bg-stone-950/70 text-stone-300 hover:bg-stone-800 border border-stone-800/80"
                     }`}
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-1">
-                        <div className="text-xs font-black text-white line-clamp-2">
-                          {item.name}
-                        </div>
-                        {inCartQty > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-stone-950 font-black text-[10px] shrink-0">
-                            {inCartQty}x
-                          </span>
-                        )}
-                      </div>
-                      {item.dailyStock !== null &&
-                        item.dailyStock !== undefined && (
-                          <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
-                            Stok: {item.dailyStock}
-                          </span>
-                        )}
-                    </div>
-                    <div className="mt-2.5 flex items-center justify-between">
-                      <span className="text-xs font-black text-amber-400">
-                        {formatCurrency(item.price)}
-                      </span>
-                      <span className="w-6 h-6 rounded-lg bg-amber-500 text-stone-950 font-black text-xs flex items-center justify-center">
-                        +
-                      </span>
-                    </div>
+                    <span className="shrink-0">{cat.icon}</span>
+                    <span className="line-clamp-2 leading-tight">{cat.name}</span>
                   </button>
-                );
-              })}
+                ))}
+              </aside>
+
+              {/* SAĞ TARAF: Ürünler Izgarası */}
+              <section className="flex-1 min-w-0">
+                {filteredItems.length === 0 ? (
+                  <div className="bg-stone-900 border border-stone-800 rounded-2xl p-8 text-center text-xs text-stone-400">
+                    Bu kategoride veya aramada ürün bulunamadı.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {filteredItems.map((item) => {
+                      const inCartQty = cart
+                        .filter((c) => c.menuItemId === item.id)
+                        .reduce((s, c) => s + c.quantity, 0);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => openItemModal(item)}
+                          className={`bg-stone-900 hover:bg-stone-800/90 border rounded-2xl p-3 text-left flex flex-col justify-between transition active:scale-95 ${
+                            inCartQty > 0
+                              ? "border-amber-500/80 bg-amber-950/20"
+                              : "border-stone-800"
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div className="text-xs font-black text-white line-clamp-2">
+                                {item.name}
+                              </div>
+                              {inCartQty > 0 && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-stone-950 font-black text-[10px] shrink-0">
+                                  {inCartQty}x Eklendi
+                                </span>
+                              )}
+                            </div>
+                            {item.description && (
+                              <p className="text-[10px] text-stone-400 line-clamp-1 mt-0.5">
+                                {item.description}
+                              </p>
+                            )}
+                            {item.dailyStock !== null &&
+                              item.dailyStock !== undefined && (
+                                <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
+                                  Stok: {item.dailyStock}
+                                </span>
+                              )}
+                          </div>
+                          <div className="mt-2.5 flex items-center justify-between">
+                            <span className="text-xs font-black text-amber-400">
+                              {formatCurrency(item.price)}
+                            </span>
+                            <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-stone-950 font-black text-[11px] flex items-center justify-center">
+                              + Ekle
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             </div>
 
-            {/* Waiter Cart Box */}
+            {/* Sabit Yüzen Buton: Sepette ürün varsa tek dokunuşla Eklenen Ürünler penceresini açar */}
             {cart.length > 0 && (
-              <div className="bg-stone-900 border-2 border-amber-500/70 rounded-2xl p-3.5 space-y-3 mt-4 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-black text-amber-400">
-                    📝 Masa {selectedTable} Sepeti (
-                    {cart.reduce((s, i) => s + i.quantity, 0)} Adet)
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setCart([])}
-                    className="text-[11px] text-red-400 font-bold hover:underline"
-                  >
-                    Sepeti Boşalt
-                  </button>
-                </div>
-
-                <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                  {cart.map((c, idx) => (
-                    <div
-                      key={c.id}
-                      className="flex items-center justify-between bg-stone-950/90 px-3 py-2 rounded-xl text-xs border border-stone-800"
-                    >
-                      <div className="flex-1 pr-2">
-                        <div className="font-bold text-white">{c.name}</div>
-                        {c.selectedModifiers.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {c.selectedModifiers.map((m, mIdx) => (
-                              <span
-                                key={mIdx}
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300"
-                              >
-                                {m.productTag ? `${m.productTag}: ` : ""}
-                                {m.optionName}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {c.itemNote && (
-                          <div className="text-[10px] text-amber-300 mt-0.5">
-                            📝 Not: {c.itemNote}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="flex items-center gap-1 bg-stone-900 border border-stone-800 rounded-lg px-1 py-0.5">
-                          <button
-                            type="button"
-                            onClick={() => updateCartItemQty(idx, -1)}
-                            className="w-5 h-5 rounded bg-stone-800 text-white font-black text-xs"
-                          >
-                            -
-                          </button>
-                          <span className="text-xs font-black px-1">
-                            {c.quantity}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => updateCartItemQty(idx, 1)}
-                            className="w-5 h-5 rounded bg-stone-800 text-white font-black text-xs"
-                          >
-                            +
-                          </button>
-                        </div>
-                        <span className="font-black text-amber-300 w-16 text-right">
-                          {formatCurrency(c.totalPrice)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Quick Waiter Note Chips */}
-                <div className="space-y-1.5">
-                  <div className="text-[10px] font-bold text-stone-400">
-                    ⚡ Hızlı Garson / Mutfak Notları (Dokun Ekle):
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {QUICK_WAITER_NOTES.map((chip) => (
-                      <button
-                        key={chip}
-                        type="button"
-                        onClick={() => appendQuickWaiterNote(chip)}
-                        className="px-2 py-1 rounded-lg bg-stone-950 hover:bg-stone-800 border border-stone-800 text-[10px] text-stone-300 font-semibold"
-                      >
-                        + {chip}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="text"
-                    value={orderNote}
-                    onChange={(e) => setOrderNote(e.target.value)}
-                    placeholder="Garson mutfak notu (opsiyonel)..."
-                    className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-800 text-xs text-white"
-                  />
-                </div>
-
+              <div className="fixed bottom-16 inset-x-0 z-30 px-3 max-w-3xl mx-auto pointer-events-none">
                 <button
                   type="button"
-                  onClick={handleSendTableOrder}
-                  disabled={submitting}
-                  className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-black text-sm shadow-lg transition"
+                  onClick={() => setIsCartDrawerOpen(true)}
+                  className="pointer-events-auto w-full py-3 px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-black text-xs sm:text-sm shadow-2xl border-2 border-emerald-300 flex items-center justify-between transition"
                 >
-                  {submitting
-                    ? "Mutfağa İletiliyor..."
-                    : selectedTableOrders.length > 0
-                    ? `🚀 Açık Adisyona Ekle & Mutfağa Gönder (+${formatCurrency(
-                        cart.reduce((s, i) => s + i.totalPrice, 0)
-                      )})`
-                    : `🚀 Yeni Adisyon Aç & Mutfağa Gönder (${formatCurrency(
-                        cart.reduce((s, i) => s + i.totalPrice, 0)
-                      )})`}
+                  <span>
+                    🛒 Eklenen Ürünleri Gör ({cart.reduce((s, i) => s + i.quantity, 0)} Adet)
+                  </span>
+                  <span>
+                    {formatCurrency(cart.reduce((s, i) => s + i.totalPrice, 0))} • Aç & Gönder →
+                  </span>
                 </button>
+              </div>
+            )}
+
+            {/* EKLENEN ÜRÜNLER (SEPET) AYRI MODAL / ÇEKMECE ALANI */}
+            {isCartDrawerOpen && (
+              <div className="fixed inset-0 z-50 bg-black/80 flex items-end sm:items-center justify-center p-0 sm:p-4">
+                <div className="bg-stone-900 border-t-2 sm:border-2 border-amber-500/70 rounded-t-3xl sm:rounded-3xl w-full max-w-lg max-h-[88vh] flex flex-col overflow-hidden shadow-2xl">
+                  <div className="p-4 border-b border-stone-800 flex items-center justify-between bg-stone-950">
+                    <div>
+                      <h3 className="text-sm font-black text-amber-400">
+                        🛒 Masa {selectedTable} — Eklenen Ürünler (
+                        {cart.reduce((s, i) => s + i.quantity, 0)} Adet)
+                      </h3>
+                      <p className="text-[11px] text-stone-400">
+                        Siparişi kontrol edip mutfağa gönderebilirsiniz
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {cart.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCart([])}
+                          className="px-2.5 py-1 rounded-lg bg-red-950/70 border border-red-800 text-[11px] text-red-300 font-bold"
+                        >
+                          Temizle
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsCartDrawerOpen(false)}
+                        className="w-8 h-8 rounded-full bg-stone-800 text-stone-300 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  {cart.length === 0 ? (
+                    <div className="p-8 text-center space-y-3">
+                      <div className="text-3xl">🛒</div>
+                      <div className="text-sm font-black text-white">
+                        Henüz Ürün Eklenmedi
+                      </div>
+                      <p className="text-xs text-stone-400">
+                        Sol taraftan kategori seçip sağdaki ürünlere dokunarak
+                        sipariş ekleyebilirsiniz.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsCartDrawerOpen(false)}
+                        className="px-4 py-2 rounded-xl bg-amber-500 text-stone-950 font-black text-xs"
+                      >
+                        ← Ürün Seçimine Dön
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-4 space-y-2 overflow-y-auto flex-1">
+                        {cart.map((c, idx) => (
+                          <div
+                            key={c.id}
+                            className="flex items-center justify-between bg-stone-950 px-3 py-2.5 rounded-xl text-xs border border-stone-800"
+                          >
+                            <div className="flex-1 pr-2">
+                              <div className="font-black text-white">{c.name}</div>
+                              {c.selectedModifiers.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {c.selectedModifiers.map((m, mIdx) => (
+                                    <span
+                                      key={mIdx}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-300"
+                                    >
+                                      {m.productTag ? `${m.productTag}: ` : ""}
+                                      {m.optionName}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {c.itemNote && (
+                                <div className="text-[10px] text-amber-300 mt-0.5">
+                                  📝 Not: {c.itemNote}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center gap-1 bg-stone-900 border border-stone-800 rounded-lg px-1 py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartItemQty(idx, -1)}
+                                  className="w-6 h-6 rounded bg-stone-800 text-white font-black text-xs"
+                                >
+                                  -
+                                </button>
+                                <span className="text-xs font-black px-1.5">
+                                  {c.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartItemQty(idx, 1)}
+                                  className="w-6 h-6 rounded bg-stone-800 text-white font-black text-xs"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <span className="font-black text-amber-300 w-16 text-right">
+                                {formatCurrency(c.totalPrice)}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Quick Waiter Note Chips */}
+                        <div className="pt-2 space-y-1.5">
+                          <div className="text-[10px] font-bold text-stone-400">
+                            ⚡ Hızlı Garson / Mutfak Notları (Dokun Ekle):
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {QUICK_WAITER_NOTES.map((chip) => (
+                              <button
+                                key={chip}
+                                type="button"
+                                onClick={() => appendQuickWaiterNote(chip)}
+                                className="px-2 py-1 rounded-lg bg-stone-950 hover:bg-stone-800 border border-stone-800 text-[10px] text-stone-300 font-semibold"
+                              >
+                                + {chip}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="text"
+                            value={orderNote}
+                            onChange={(e) => setOrderNote(e.target.value)}
+                            placeholder="Garson mutfak notu (opsiyonel)..."
+                            className="w-full px-3 py-2 rounded-xl bg-stone-950 border border-stone-800 text-xs text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-4 border-t border-stone-800 bg-stone-950 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-stone-400 font-bold">
+                            Eklenecek Toplam Tutar:
+                          </span>
+                          <span className="text-base font-black text-amber-400">
+                            {formatCurrency(
+                              cart.reduce((s, i) => s + i.totalPrice, 0)
+                            )}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSendTableOrder}
+                          disabled={submitting}
+                          className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-black text-sm shadow-lg transition"
+                        >
+                          {submitting
+                            ? "Mutfağa İletiliyor..."
+                            : selectedTableOrders.length > 0
+                            ? `🚀 Açık Adisyona Ekle & Mutfağa Gönder (+${formatCurrency(
+                                cart.reduce((s, i) => s + i.totalPrice, 0)
+                              )})`
+                            : `🚀 Yeni Adisyon Aç & Mutfağa Gönder (${formatCurrency(
+                                cart.reduce((s, i) => s + i.totalPrice, 0)
+                              )})`}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
