@@ -211,7 +211,7 @@ export default function TvOrderQueuePage() {
         .animate-tv-marquee {
           display: flex;
           width: max-content;
-          animation: tvMarqueeScroll 26s linear infinite;
+          animation: tvMarqueeScroll 85s linear infinite;
           will-change: transform;
         }
       `}</style>

@@ -300,7 +300,7 @@ body {
 .animate-tv-marquee {
   display: flex;
   width: max-content;
-  animation: tv-marquee 28s linear infinite;
+  animation: tv-marquee 85s linear infinite;
   will-change: transform;
 }
 
