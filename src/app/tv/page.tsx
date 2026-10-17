@@ -202,7 +202,19 @@ export default function TvOrderQueuePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col select-none">
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col select-none overflow-x-hidden">
+      <style>{`
+        @keyframes tvMarqueeScroll {
+          0% { transform: translate3d(0%, 0, 0); }
+          100% { transform: translate3d(-50%, 0, 0); }
+        }
+        .animate-tv-marquee {
+          display: flex;
+          width: max-content;
+          animation: tvMarqueeScroll 26s linear infinite;
+          will-change: transform;
+        }
+      `}</style>
       {/* Üst TV Başlık Çubuğu */}
       <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -408,42 +420,67 @@ export default function TvOrderQueuePage() {
         </section>
       </main>
 
-      {/* 7. ÖZELLİK: TV Digital Signage Alt Kampanya, Happy Hour & Popüler Menü Bandı */}
-      {(announcementText || happyHourSummary || featuredItems.length > 0) && (
-        <footer className="bg-gradient-to-r from-slate-900 via-orange-950/60 to-slate-900 border-t border-orange-500/30 px-6 py-3 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            {announcementText && (
-              <span className="inline-flex items-center gap-2 bg-orange-500/20 border border-orange-500/40 text-orange-200 text-xs sm:text-sm font-black px-3.5 py-1.5 rounded-xl">
-                {announcementText}
-              </span>
-            )}
-            {happyHourSummary && (
-              <span className="inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs sm:text-sm font-black px-3.5 py-1.5 rounded-xl">
-                {happyHourSummary}
-              </span>
-            )}
-          </div>
+      {/* 7. ÖZELLİK: TV Digital Signage Alt Kayan Yazı (Kampanya, Happy Hour & Popüler Menü Bandı) */}
+      <footer className="bg-gradient-to-r from-slate-950 via-orange-950/80 to-slate-950 border-t-2 border-orange-500/40 py-3 overflow-hidden flex items-center relative">
+        <div className="z-10 bg-orange-600 text-white font-black text-xs sm:text-sm uppercase tracking-wider px-4 py-2 ml-4 rounded-xl shadow-lg shrink-0 flex items-center gap-2">
+          <span className="animate-pulse">📢</span>
+          <span>FIRSAT & MENÜ</span>
+        </div>
 
-          {featuredItems.length > 0 && (
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                ⭐ Öne Çıkanlar:
-              </span>
-              {featuredItems.map((fi) => (
-                <span
-                  key={fi.id}
-                  className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-3 py-1 rounded-xl text-xs font-bold text-white whitespace-nowrap"
-                >
-                  <span>{fi.name}</span>
-                  <strong className="text-amber-400">
-                    {fi.price} {currency}
-                  </strong>
-                </span>
-              ))}
-            </div>
-          )}
-        </footer>
-      )}
+        <div className="flex-1 overflow-hidden relative ml-4">
+          <div className="animate-tv-marquee items-center">
+            {[0, 1].map((halfIdx) => (
+              <div
+                key={halfIdx}
+                className="flex items-center gap-6 pr-6 shrink-0"
+              >
+                {[0, 1].map((repeatIdx) => (
+                  <React.Fragment key={`${halfIdx}-${repeatIdx}`}>
+                    {announcementText ? (
+                      <span className="inline-flex items-center gap-2 bg-orange-500/20 border border-orange-500/40 text-orange-200 text-sm sm:text-base font-black px-4 py-1.5 rounded-xl whitespace-nowrap">
+                        {announcementText}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 bg-orange-500/20 border border-orange-500/40 text-orange-200 text-sm sm:text-base font-black px-4 py-1.5 rounded-xl whitespace-nowrap">
+                        🍽️ {restaurantName} — {slogan} • Sıcak & Taze Lezzetler!
+                      </span>
+                    )}
+
+                    {happyHourSummary && (
+                      <span className="inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-sm sm:text-base font-black px-4 py-1.5 rounded-xl whitespace-nowrap">
+                        {happyHourSummary}
+                      </span>
+                    )}
+
+                    {featuredItems.length > 0 && (
+                      <div className="flex items-center gap-4">
+                        <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-400 whitespace-nowrap">
+                          ⭐ ÖNE ÇIKAN LEZZETLERİMİZ:
+                        </span>
+                        {featuredItems.map((fi) => (
+                          <span
+                            key={`${halfIdx}-${repeatIdx}-${fi.id}`}
+                            className="inline-flex items-center gap-2 bg-slate-900/90 border border-slate-700 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-extrabold text-white whitespace-nowrap shadow"
+                          >
+                            <span>🔥 {fi.name}</span>
+                            <strong className="text-amber-400 font-black">
+                              {fi.price} {currency}
+                            </strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <span className="inline-flex items-center gap-2 text-xs sm:text-sm font-extrabold text-emerald-300 whitespace-nowrap">
+                      📱 Masanızdaki QR Kodu Okutarak veya Online Menümüzden Hemen Sipariş Verebilirsiniz!
+                    </span>
+                  </React.Fragment>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

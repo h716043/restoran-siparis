@@ -287,6 +287,27 @@ body {
   scrollbar-width: none;
 }
 
+/* TV Ekranı Sonsuz Kayan Yazı (Marquee / Ticker) Animasyonu */
+@keyframes tv-marquee {
+  0% {
+    transform: translate3d(0%, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-tv-marquee {
+  display: flex;
+  width: max-content;
+  animation: tv-marquee 28s linear infinite;
+  will-change: transform;
+}
+
+.animate-tv-marquee:hover {
+  animation-play-state: paused;
+}
+
 /* 80mm Termal Yazıcı Fiş, Z Raporu ve QR Kart Görünümü */
 @media print {
   @page {
