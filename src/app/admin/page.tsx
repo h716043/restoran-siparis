@@ -92,6 +92,7 @@ export default function AdminDashboardPage() {
     | "qr"
     | "widget"
     | "cloud"
+    | "pos"
     | "settings"
   >("reports");
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
@@ -116,6 +117,15 @@ export default function AdminDashboardPage() {
     ok?: boolean;
     message?: string;
   } | null>(null);
+  const [posTesting, setPosTesting] = useState(false);
+  const [posTestStatus, setPosTestStatus] = useState<{
+    ok?: boolean;
+    message?: string;
+  } | null>(null);
+  const [posSyncingOrderId, setPosSyncingOrderId] = useState<string | null>(
+    null
+  );
+  const [posBulkSyncing, setPosBulkSyncing] = useState(false);
 
   // Rapor ve Z Raporu Filtreleri
   const [reportPeriod, setReportPeriod] = useState<
@@ -361,6 +371,146 @@ export default function AdminDashboardPage() {
     metaAccessToken: "",
     sendOrderUpdates: true,
     requireAuthForDeliveryAndPickup: true,
+  };
+
+  const posIntegrationConfig = settings?.posIntegrationConfig || {
+    activeProvider: "none" as const,
+  };
+
+  const sambaConfig = posIntegrationConfig.sambaPos || {
+    enabled: false,
+    connectionMode: "graphql" as const,
+    syncTrigger: "on_accepted" as const,
+    serverUrl: "http://localhost:9000",
+    clientId: "restoran_pos",
+    clientSecret: "1234",
+    username: "Admin",
+    password: "1234",
+    departmentName: "Restoran",
+    ticketTypeName: "Adisyon",
+    terminalName: "Sunucu",
+    tableEntityTypeName: "Masalar",
+    customerEntityTypeName: "Müşteriler",
+    defaultOrderTagGroupName: "Seçenekler",
+    fallbackMenuItemName: "Online Sipariş Ürünü",
+    sendDeliveryFeeAsItem: true,
+    deliveryFeeItemName: "Paket Servis Ücreti",
+  };
+
+  const updateSambaConfigField = (patch: Partial<typeof sambaConfig>) => {
+    if (!settings) return;
+    const nextSamba = { ...sambaConfig, ...patch };
+    setSettings({
+      ...settings,
+      posIntegrationConfig: {
+        activeProvider: nextSamba.enabled ? "sambapos" : "none",
+        sambaPos: nextSamba,
+      },
+    });
+  };
+
+  const handleSavePosConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!settings) return;
+    const nextConfig = {
+      activeProvider: sambaConfig.enabled
+        ? ("sambapos" as const)
+        : ("none" as const),
+      sambaPos: sambaConfig,
+    };
+    const nextSettings: RestaurantSettings = {
+      ...settings,
+      posIntegrationConfig: nextConfig,
+    };
+    await persistSettings(
+      nextSettings,
+      sambaConfig.enabled
+        ? "SambaPOS entegrasyon ayarları kaydedildi ve aktif edildi!"
+        : "SambaPOS entegrasyon ayarları kaydedildi (Şu an pasif)."
+    );
+  };
+
+  const handleTestPosConnection = async () => {
+    setPosTesting(true);
+    setPosTestStatus(null);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test_connection",
+          sambaPosConfig: sambaConfig,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message || (data.ok ? "Bağlantı başarılı!" : "Hata oluştu"),
+      });
+    } catch (err: unknown) {
+      setPosTestStatus({
+        ok: false,
+        message:
+          err instanceof Error
+            ? err.message
+            : "SambaPOS bağlantı testi sırasında hata oluştu.",
+      });
+    } finally {
+      setPosTesting(false);
+    }
+  };
+
+  const handleManualSyncOrderToPos = async (orderId: string) => {
+    setPosSyncingOrderId(orderId);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_order",
+          orderId,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      await fetchAll();
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "Sipariş SambaPOS'a aktarılırken hata oluştu.",
+      });
+    } finally {
+      setPosSyncingOrderId(null);
+    }
+  };
+
+  const handleBulkSyncPendingToPos = async () => {
+    setPosBulkSyncing(true);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_all_pending",
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      await fetchAll();
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "Toplu SambaPOS aktarımı sırasında hata oluştu.",
+      });
+    } finally {
+      setPosBulkSyncing(false);
+    }
   };
 
   // Tarih Aralığına Göre Sipariş Filtreleme (Z Raporu ve İstatistikler)
@@ -1144,6 +1294,22 @@ export default function AdminDashboardPage() {
           >
             <Cloud className="w-4 h-4" />
             Netlify & Bulut Senkronizasyon
+          </button>
+          <button
+            onClick={() => setActiveTab("pos")}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition whitespace-nowrap ${
+              activeTab === "pos"
+                ? "bg-indigo-600 text-white"
+                : "text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200"
+            }`}
+          >
+            <RefreshCw className="w-4 h-4" />
+            🔌 POS Entegrasyonu (SambaPOS)
+            {sambaConfig.enabled && (
+              <span className="bg-emerald-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                AKTİF
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab("settings")}
@@ -5835,6 +6001,616 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               <Save className="w-4 h-4" />
               Ayarları Kaydet
             </button>
+          </form>
+        )}
+
+        {/* 8. POS ENTEGRASYONU (SAMBAPOS & DİĞER POS SİSTEMLERİ) SEKMESİ */}
+        {activeTab === "pos" && settings && (
+          <form
+            onSubmit={handleSavePosConfig}
+            className="max-w-5xl space-y-6"
+          >
+            {/* Üst Bilgi & İsteğe Bağlı Aç/Kapat Kartı */}
+            <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white p-6 rounded-2xl border border-indigo-500/30 shadow-lg space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-2 bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-xs font-extrabold px-3 py-1 rounded-full">
+                    🔌 İsteğe Bağlı & Tamamen Bağımsız POS Köprüsü
+                  </div>
+                  <h2 className="text-xl font-black text-white">
+                    SambaPOS V5 Sipariş Aktarım Entegrasyonu
+                  </h2>
+                  <p className="text-xs text-indigo-200/90 max-w-2xl leading-relaxed">
+                    Müşterilerinizin web sitesinden (Netlify), QR masadan veya kasadan verdiği siparişleri mevcut sistemi hiç bozmadan otomatik veya tek tıkla <strong>SambaPOS V5</strong> adisyonuna aktarabilirsiniz. Kullanmak istemeyen işletmelerde kapalı kalır ve sistemi hiçbir şekilde etkilemez.
+                  </p>
+                </div>
+
+                <label className="inline-flex items-center gap-3 bg-white/10 hover:bg-white/15 border border-white/20 px-4 py-3 rounded-2xl cursor-pointer shrink-0 transition">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(sambaConfig.enabled)}
+                    onChange={(e) =>
+                      updateSambaConfigField({ enabled: e.target.checked })
+                    }
+                    className="w-5 h-5 accent-emerald-500 rounded cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-sm font-black text-white">
+                      {sambaConfig.enabled
+                        ? "✅ SambaPOS Aktarımı AÇIK"
+                        : "⏸️ SambaPOS Aktarımı KAPALI"}
+                    </div>
+                    <div className="text-[11px] text-indigo-200">
+                      İsteğe bağlı açıp kapatabilirsiniz
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* POS Sağlayıcı Seçimi (İleride Eklenecek POS Sistemleri İçin Modüler Yapı) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10">
+                <div className="bg-indigo-600/30 border-2 border-indigo-400 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-black text-white">
+                      🍽️ SambaPOS V5 (GraphQL / Webhook)
+                    </div>
+                    <div className="text-[11px] text-indigo-200">
+                      Masa, Paket ve Gel-Al Adisyon Aktarımı
+                    </div>
+                  </div>
+                  <span className="bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                    AKTİF MODÜL
+                  </span>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 opacity-60 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-slate-300">
+                      🏪 Adisyo / Kurye POS
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Çoklu POS Altyapısı Hazır
+                    </div>
+                  </div>
+                  <span className="bg-slate-700 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    Yakında
+                  </span>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 opacity-60 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-slate-300">
+                      🖥️ NarPOS / Kerzz / Özel API
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Webhook modu ile şimdiden bağlanabilir
+                    </div>
+                  </div>
+                  <span className="bg-slate-700 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    Yakında
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {posTestStatus && (
+              <div
+                className={`p-4 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 ${
+                  posTestStatus.ok
+                    ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                    : "bg-rose-50 border-rose-300 text-rose-900"
+                }`}
+              >
+                <span>
+                  {posTestStatus.ok ? "✅ " : "⚠️ "}
+                  {posTestStatus.message}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPosTestStatus(null)}
+                  className="text-slate-500 hover:text-slate-800 font-black px-2"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Bağlantı Modu ve Tetikleme Zamanı */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    1. Aktarım Zamanı & Bağlantı Yöntemi
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Siparişlerin SambaPOS&apos;a ne zaman ve hangi protokolle gönderileceğini seçin.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestPosConnection}
+                    disabled={posTesting}
+                    className="inline-flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-extrabold px-3.5 py-2 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${posTesting ? "animate-spin" : ""}`}
+                    />
+                    {posTesting
+                      ? "SambaPOS Test Ediliyor..."
+                      : "🔌 SambaPOS Bağlantısını Test Et"}
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold px-4 py-2 rounded-xl transition cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Ayarları Kaydet
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Sipariş Ne Zaman SambaPOS&apos;a Aktarılsın?
+                  </label>
+                  <select
+                    value={sambaConfig.syncTrigger}
+                    onChange={(e) =>
+                      updateSambaConfigField({
+                        syncTrigger: e.target.value as
+                          | "on_accepted"
+                          | "on_created"
+                          | "manual",
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                  >
+                    <option value="on_accepted">
+                      ✅ Mutfak / Kasa Siparişi &quot;Kabul Et&quot; Dediğinde Otomatik Aktar (Önerilen)
+                    </option>
+                    <option value="on_created">
+                      ⚡ Sipariş Geldiği Anda (Onay Beklemeden) Anında Otomatik Aktar
+                    </option>
+                    <option value="manual">
+                      🖐️ Sadece Manuel (Mutfak/Yönetim Ekranında Butona Basınca Aktar)
+                    </option>
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Netlify bulut sitesinden gelen siparişler de Kasa PC tarafından çekildiği anda bu kurala göre otomatik SambaPOS&apos;a düşer.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Bağlantı Türü (Protokol)
+                  </label>
+                  <select
+                    value={sambaConfig.connectionMode}
+                    onChange={(e) =>
+                      updateSambaConfigField({
+                        connectionMode: e.target.value as "graphql" | "webhook",
+                      })
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                  >
+                    <option value="graphql">
+                      🍽️ SambaPOS V5 Message Server (GraphQL API - Port 9000)
+                    </option>
+                    <option value="webhook">
+                      🌐 Özel HTTP Webhook / JSON Köprüsü (Herhangi Bir POS İçin)
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              {sambaConfig.connectionMode === "graphql" ? (
+                <div className="space-y-4 pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-700">
+                    2. SambaPOS V5 Message Server & Eşleştirme Ayarları
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Message Server Adresi (Port 9000)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.serverUrl}
+                        onChange={(e) =>
+                          updateSambaConfigField({ serverUrl: e.target.value })
+                        }
+                        placeholder="http://localhost:9000"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Uygulama (Application) Client ID
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.clientId}
+                        onChange={(e) =>
+                          updateSambaConfigField({ clientId: e.target.value })
+                        }
+                        placeholder="restoran_pos"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        SambaPOS Kullanıcı Şifresi / PIN
+                      </label>
+                      <input
+                        type="password"
+                        value={sambaConfig.password}
+                        onChange={(e) =>
+                          updateSambaConfigField({ password: e.target.value })
+                        }
+                        placeholder="1234"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        SambaPOS Kullanıcı Adı
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.username}
+                        onChange={(e) =>
+                          updateSambaConfigField({ username: e.target.value })
+                        }
+                        placeholder="Admin"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Departman Adı (Department)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.departmentName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            departmentName: e.target.value,
+                          })
+                        }
+                        placeholder="Restoran"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Fiş / Adisyon Tipi (Ticket Type)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.ticketTypeName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            ticketTypeName: e.target.value,
+                          })
+                        }
+                        placeholder="Adisyon"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Terminal Adı
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.terminalName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            terminalName: e.target.value,
+                          })
+                        }
+                        placeholder="Sunucu"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Masa Varlık Tipi (Entity Type)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.tableEntityTypeName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            tableEntityTypeName: e.target.value,
+                          })
+                        }
+                        placeholder="Masalar"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Müşteri Varlık Tipi (Entity Type)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.customerEntityTypeName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            customerEntityTypeName: e.target.value,
+                          })
+                        }
+                        placeholder="Müşteriler"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Sipariş Etiketi Grubu (Order Tag)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.defaultOrderTagGroupName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            defaultOrderTagGroupName: e.target.value,
+                          })
+                        }
+                        placeholder="Seçenekler"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
+                      <label className="block text-xs font-extrabold text-amber-900 mb-1">
+                        🛡️ Yedek (Fallback) Ürün Adı (Ürün İsmi Eşleşmezse)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.fallbackMenuItemName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            fallbackMenuItemName: e.target.value,
+                          })
+                        }
+                        placeholder="Online Sipariş Ürünü"
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                      <p className="text-[11px] text-amber-800 mt-1">
+                        Web sitesindeki bir ürün adı SambaPOS menüsünde birebir yoksa, siparişin hata vermemesi için SambaPOS&apos;ta açacağınız bu genel ürün adıyla (gerçek fiyat ve ürün adı notta yazarak) adisyon oluşturulur.
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-extrabold text-slate-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(sambaConfig.sendDeliveryFeeAsItem)}
+                          onChange={(e) =>
+                            updateSambaConfigField({
+                              sendDeliveryFeeAsItem: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-indigo-600 rounded"
+                        />
+                        Paket Servis Ücretini Kalem Olarak Gönder
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.deliveryFeeItemName}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            deliveryFeeItemName: e.target.value,
+                          })
+                        }
+                        placeholder="Paket Servis Ücreti"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        Bölge gönderim ücreti varsa SambaPOS adisyonuna bu ürün adıyla eklenir.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-700">
+                    2. Özel HTTP Webhook / JSON Köprüsü Ayarları
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Webhook Hedef URL (POST)
+                      </label>
+                      <input
+                        type="text"
+                        value={sambaConfig.webhookUrl || ""}
+                        onChange={(e) =>
+                          updateSambaConfigField({ webhookUrl: e.target.value })
+                        }
+                        placeholder="http://localhost:9005/sambapos-bridge"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Gizli Anahtar (Bearer Token / X-POS-Secret)
+                      </label>
+                      <input
+                        type="password"
+                        value={sambaConfig.webhookSecret || ""}
+                        onChange={(e) =>
+                          updateSambaConfigField({
+                            webhookSecret: e.target.value,
+                          })
+                        }
+                        placeholder="İsteğe bağlı güvenlik anahtarı"
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Canlı Sipariş Aktarım Tablosu & Tek Tıkla Manuel Aktarım */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    📋 Son Siparişlerin SambaPOS Aktarım Durumu
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Aktarılmayan veya hata veren siparişleri buradan tek tıkla SambaPOS&apos;a gönderebilirsiniz.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleBulkSyncPendingToPos}
+                  disabled={posBulkSyncing}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 ${posBulkSyncing ? "animate-spin" : ""}`}
+                  />
+                  {posBulkSyncing
+                    ? "Aktarılıyor..."
+                    : "🔄 Aktarılmamış Tüm Siparişleri Şimdi SambaPOS'a Gönder"}
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-extrabold">
+                      <th className="py-2.5 px-3">Sipariş</th>
+                      <th className="py-2.5 px-3">Müşteri / Masa</th>
+                      <th className="py-2.5 px-3">Tutar</th>
+                      <th className="py-2.5 px-3">Durum</th>
+                      <th className="py-2.5 px-3">SambaPOS Aktarım Durumu</th>
+                      <th className="py-2.5 px-3 text-right">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {orders.slice(0, 15).map((ord) => {
+                      const sync = ord.posSyncInfo;
+                      return (
+                        <tr key={ord.id} className="hover:bg-slate-50/80">
+                          <td className="py-2.5 px-3 font-black text-slate-900">
+                            #{ord.orderNumber}
+                            <div className="text-[10px] font-normal text-slate-400">
+                              {new Date(ord.createdAt).toLocaleTimeString(
+                                "tr-TR",
+                                { hour: "2-digit", minute: "2-digit" }
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-800">
+                              {ord.orderType === "dine_in"
+                                ? `🪑 Masa ${ord.tableNumber || "?"}`
+                                : ord.customerName}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {ord.orderType === "delivery"
+                                ? "🛵 Paket Servis"
+                                : ord.orderType === "pickup"
+                                ? "🛍️ Gel-Al"
+                                : "🍽️ Masada"}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 font-extrabold text-emerald-700">
+                            {ord.totalAmount.toFixed(2)} {settings.currency}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
+                              {ord.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {sync?.synced ? (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                  ✅ SambaPOS&apos;a Aktarıldı
+                                  {sync.externalTicketNumber
+                                    ? ` (Fiş #${sync.externalTicketNumber})`
+                                    : ""}
+                                </span>
+                                {sync.lastError && (
+                                  <div className="text-[10px] text-amber-700">
+                                    ℹ️ {sync.lastError}
+                                  </div>
+                                )}
+                              </div>
+                            ) : sync?.lastError ? (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 bg-rose-100 text-rose-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                  ⚠️ Hata Oluştu
+                                </span>
+                                <div className="text-[10px] text-rose-600 max-w-xs truncate" title={sync.lastError}>
+                                  {sync.lastError}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 font-semibold px-2.5 py-0.5 rounded-full text-[11px]">
+                                ⏳ Henüz Aktarılmadı
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleManualSyncOrderToPos(ord.id)}
+                              disabled={posSyncingOrderId === ord.id}
+                              className="inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                            >
+                              <RefreshCw
+                                className={`w-3 h-3 ${
+                                  posSyncingOrderId === ord.id
+                                    ? "animate-spin"
+                                    : ""
+                                }`}
+                              />
+                              {sync?.synced
+                                ? "Tekrar Gönder"
+                                : "SambaPOS'a Aktar"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 3 Adımda SambaPOS V5 Hazırlık Rehberi */}
+            <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-5 space-y-3">
+              <h4 className="font-extrabold text-sm text-indigo-950 flex items-center gap-2">
+                📖 SambaPOS V5 Tarafında Yapılması Gereken 3 Kısa Ayar (1 Dakika)
+              </h4>
+              <ol className="list-decimal list-inside space-y-2 text-xs text-indigo-900 leading-relaxed">
+                <li>
+                  <strong>SambaPOS Message Server&apos;ı Açın:</strong> Kasa bilgisayarında SambaPOS kurulum klasöründeki <code>Samba.MessagingServerServiceTool.exe</code> (veya Message Server) aracında portun <strong>9000</strong> olduğundan ve servisin çalıştığından emin olun.
+                </li>
+                <li>
+                  <strong>Uygulama (Application) Tanımlayın:</strong> SambaPOS içinde <strong>Yönetim (Manage) → Kullanıcılar (Users) → Uygulamalar (Applications) → Uygulama Ekle</strong> menüsüne girin. Uygulama Adı (Identifier / Client ID) kısmına <code>restoran_pos</code>, İzin Türü (Permission) kısmına <code>Password</code> yazıp kaydedin.
+                </li>
+                <li>
+                  <strong>Yedek Ürün Oluşturun (Önerilen):</strong> Online menüdeki bir ürünün ismi SambaPOS menüsüyle birebir tutmazsa bile siparişin eksiksiz düşmesi için SambaPOS Ürün Listesine <strong><code>Online Sipariş Ürünü</code></strong> adında (fiyatı 1 TL veya 0 TL olan) bir ürün ekleyin. Sistem gerçek ürün adını ve gerçek fiyatını otomatik olarak adisyona basacaktır!
+                </li>
+              </ol>
+            </div>
           </form>
         )}
       </main>

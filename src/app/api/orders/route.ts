@@ -19,6 +19,7 @@ import {
   pushCatalogToCloud,
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
+import { autoSyncOrdersWithPosIfNeeded } from "@/lib/sambapos";
 
 export async function GET(req: NextRequest) {
   try {
@@ -173,6 +174,10 @@ export async function GET(req: NextRequest) {
 
     if (!isAuthorized) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
+    }
+
+    if (role === "admin" || role === "kitchen") {
+      await autoSyncOrdersWithPosIfNeeded().catch(() => {});
     }
 
     const orders = getOrders();
@@ -413,6 +418,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    await autoSyncOrdersWithPosIfNeeded().catch(() => {});
     await syncActivityWithCloud();
     await pushCatalogToCloud();
     return NextResponse.json({ order }, { status: 201 });

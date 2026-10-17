@@ -117,6 +117,7 @@ export async function pushCatalogToCloud(): Promise<boolean> {
         ...settings,
         securityConfig: undefined,
         cloudSyncConfig: undefined,
+        posIntegrationConfig: undefined,
       },
       categories,
       menuItems,

@@ -1283,6 +1283,9 @@ export function getOrderById(id: string): Order | null {
   } | undefined;
 
   if (!r) return null;
+  const parsedSplit = r.splitPaymentJson
+    ? JSON.parse(r.splitPaymentJson)
+    : undefined;
   return {
     id: r.id,
     orderNumber: r.orderNumber,
@@ -1300,9 +1303,8 @@ export function getOrderById(id: string): Order | null {
     scheduledTime: r.scheduledTime || undefined,
     orderNote: r.orderNote || undefined,
     paymentMethod: r.paymentMethod,
-    splitPaymentInfo: r.splitPaymentJson
-      ? JSON.parse(r.splitPaymentJson)
-      : undefined,
+    splitPaymentInfo: parsedSplit,
+    posSyncInfo: parsedSplit?.posSyncInfo || undefined,
     subtotal: r.subtotal,
     discountAmount: r.discountAmount || 0,
     couponCode: r.couponCode || undefined,
@@ -1320,6 +1322,28 @@ export function getOrderById(id: string): Order | null {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
+}
+
+export function updateOrderPosSyncInfo(
+  orderId: string,
+  posSyncInfo: NonNullable<Order["posSyncInfo"]>
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+  const nextSplit = {
+    cashAmount: existing.splitPaymentInfo?.cashAmount || 0,
+    cardAmount: existing.splitPaymentInfo?.cardAmount || 0,
+    ...existing.splitPaymentInfo,
+    posSyncInfo,
+  };
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE orders
+    SET splitPaymentJson = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(JSON.stringify(nextSplit), now, orderId);
+  return getOrderById(orderId);
 }
 
 export function createOrder(

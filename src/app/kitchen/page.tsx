@@ -220,6 +220,75 @@ export default function KitchenTabletPage() {
     };
   }, []);
 
+  const [posSyncingOrderId, setPosSyncingOrderId] = useState<string | null>(
+    null
+  );
+
+  const handleManualSambaSync = async (orderId: string) => {
+    setPosSyncingOrderId(orderId);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync_order", orderId }),
+      });
+      const data = await res.json();
+      await fetchOrders();
+      if (!data.ok && data.message) {
+        alert(`SambaPOS Aktarım Uyarısı:\n${data.message}`);
+      }
+    } catch {
+      alert("SambaPOS bağlantı hatası.");
+    } finally {
+      setPosSyncingOrderId(null);
+    }
+  };
+
+  const renderSambaPosBadge = (order: Order) => {
+    if (!settings?.posIntegrationConfig?.sambaPos?.enabled) return null;
+    const sync = order.posSyncInfo;
+    const isSyncing = posSyncingOrderId === order.id;
+
+    if (sync?.synced) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-lg"
+          title={
+            sync.externalTicketNumber
+              ? `SambaPOS Fiş #${sync.externalTicketNumber}`
+              : "SambaPOS'a Aktarıldı"
+          }
+        >
+          ✅ SambaPOS{sync.externalTicketNumber ? ` #${sync.externalTicketNumber}` : ""}
+        </span>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => handleManualSambaSync(order.id)}
+        disabled={isSyncing}
+        className={`inline-flex items-center gap-1 text-[11px] font-extrabold px-2 py-0.5 rounded-lg border transition cursor-pointer disabled:opacity-50 ${
+          sync?.lastError
+            ? "bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40"
+            : "bg-indigo-600/25 hover:bg-indigo-600 text-indigo-200 hover:text-white border-indigo-500/40"
+        }`}
+        title={
+          sync?.lastError
+            ? `Son Hata: ${sync.lastError} (Tekrar göndermek için tıklayın)`
+            : "Bu siparişi şimdi SambaPOS'a aktar"
+        }
+      >
+        {isSyncing
+          ? "⏳ SambaPOS..."
+          : sync?.lastError
+          ? "⚠️ SambaPOS Tekrar Dene"
+          : "🔌 SambaPOS'a Aktar"}
+      </button>
+    );
+  };
+
   const handlePrint = (order: Order) => {
     setSelectedOrderForPrint(order);
     setTimeout(() => {
@@ -1478,6 +1547,7 @@ export default function KitchenTabletPage() {
                             )}
                             {renderOrderTypeBadge(order)}
                             {renderSlaTimerBadge(order.createdAt)}
+                            {renderSambaPosBadge(order)}
                             <button
                               type="button"
                               onClick={() => handleToggleOrderPriority(order.id)}
@@ -1858,6 +1928,7 @@ export default function KitchenTabletPage() {
                             )}
                             {renderOrderTypeBadge(order)}
                             {renderSlaTimerBadge(order.createdAt)}
+                            {renderSambaPosBadge(order)}
                             {order.scheduledTime && (
                               <span className="inline-flex items-center gap-1 text-xs font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-full">
                                 <Clock className="w-3.5 h-3.5" /> İLERİ SAAT:{" "}

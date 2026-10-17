@@ -220,6 +220,11 @@ export async function PATCH(
       }
     }
 
+    if (updated.status === "accepted") {
+      const { autoSyncOrdersWithPosIfNeeded } = await import("@/lib/sambapos");
+      await autoSyncOrdersWithPosIfNeeded().catch(() => {});
+    }
+
     await syncActivityWithCloud();
 
     return NextResponse.json({ order: updated });

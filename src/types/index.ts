@@ -85,12 +85,21 @@ export interface OrderItem {
   isComplimentary?: boolean;
 }
 
+export interface PosOrderSyncInfo {
+  provider: "sambapos" | string;
+  status: "synced" | "failed";
+  externalTicketId?: string;
+  syncedAt: string;
+  errorMessage?: string;
+}
+
 export interface SplitPaymentInfo {
   cashAmount: number;
   cardAmount: number;
   courierSettled?: boolean;
   creditAccountId?: string;
   creditAccountName?: string;
+  posSyncInfo?: PosOrderSyncInfo;
 }
 
 export interface Order {
@@ -113,6 +122,7 @@ export interface Order {
   orderNote?: string;
   paymentMethod: PaymentMethod;
   splitPaymentInfo?: SplitPaymentInfo;
+  posSyncInfo?: PosOrderSyncInfo;
   subtotal: number;
   discountAmount?: number;
   couponCode?: string;
@@ -296,6 +306,31 @@ export type StorefrontThemeId =
   | "dark-luxury"
   | "dark-neon";
 
+export interface SambaPosConfig {
+  enabled: boolean; // İsteğe bağlı: Müşteri SambaPOS isterse aktif eder
+  mode: "graphql" | "webhook"; // SambaPOS V5 Message Server (GraphQL) veya Özel Webhook/Köprü
+  serverUrl: string; // Örn: "http://localhost:9000"
+  clientId: string; // Örn: "restoran_pos" (SambaPOS Uygulama / Application ID)
+  username: string; // Örn: "Admin"
+  password: string; // Örn: "1234"
+  syncTrigger: "on_accepted" | "on_created" | "manual"; // Ne zaman aktarılsın?
+  departmentName: string; // Örn: "Restoran" veya "Paket Servis"
+  ticketTypeName: string; // Örn: "Paket Servis" veya "Adisyon" veya "Ticket"
+  terminalName: string; // Örn: "Sunucu" veya "Server"
+  userName: string; // Örn: "Admin"
+  customerEntityType: string; // Örn: "Müşteriler" veya "Customers"
+  tableEntityType: string; // Örn: "Masalar" veya "Tables"
+  tableEntityPrefix: string; // Örn: "Masa " (Masa 5 -> "Masa 5")
+  defaultOrderTagName: string; // Örn: "Default" (Porsiyon/Ekstra/Not için Order Tag grubu)
+  fallbackMenuItemName?: string; // Örn: "Online Sipariş" (SambaPOS menüsünde ürün eşleşmezse yedek kalem)
+  autoCreateCustomerEntity: boolean; // Paket serviste müşteri bilgilerini SambaPOS varlığı olarak ekle
+}
+
+export interface PosIntegrationConfig {
+  activeProvider: "none" | "sambapos"; // İleride "adisyo" | "narpos" | "simpra" vb. eklenebilir
+  sambaPos: SambaPosConfig;
+}
+
 export interface RestaurantSettings {
   name: string;
   slogan: string;
@@ -336,6 +371,7 @@ export interface RestaurantSettings {
   whatsappConfig?: WhatsAppConfig;
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;
+  posIntegrationConfig?: PosIntegrationConfig;
 }
 
 
