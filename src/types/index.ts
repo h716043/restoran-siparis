@@ -305,6 +305,7 @@ export interface RestaurantSettings {
   deliveryZones?: DeliveryZone[];
   coupons?: Coupon[];
   couriers?: string[];
+  tvDisplayOrderTypes?: OrderType[]; // TV Sıra Çağrı ekranında (/tv) hangi sipariş türlerinin gösterileceği (delivery, pickup, dine_in)
   whatsappConfig?: WhatsAppConfig;
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;

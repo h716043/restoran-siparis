@@ -33,6 +33,9 @@ export default function TvOrderQueuePage() {
   const [orders, setOrders] = useState<TvOrderSummary[]>([]);
   const [restaurantName, setRestaurantName] = useState("Restoran Sıra Ekranı");
   const [slogan, setSlogan] = useState("Canlı Sipariş Durumu");
+  const [tvOrderTypes, setTvOrderTypes] = useState<
+    Array<"dine_in" | "pickup" | "delivery">
+  >(["pickup", "dine_in", "delivery"]);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState("");
   const [highlightedReadyIds, setHighlightedReadyIds] = useState<string[]>([]);
@@ -67,6 +70,9 @@ export default function TvOrderQueuePage() {
       const data = await res.json();
       if (data.restaurantName) setRestaurantName(data.restaurantName);
       if (data.slogan) setSlogan(data.slogan);
+      if (Array.isArray(data.tvDisplayOrderTypes)) {
+        setTvOrderTypes(data.tvDisplayOrderTypes);
+      }
 
       const list: TvOrderSummary[] = data.orders || [];
       setOrders(list);
@@ -130,14 +136,20 @@ export default function TvOrderQueuePage() {
   };
 
   const preparingList = orders
-    .filter((o) => o.status === "accepted" || o.status === "pending")
+    .filter(
+      (o) =>
+        (o.status === "accepted" || o.status === "pending") &&
+        tvOrderTypes.includes(o.orderType)
+    )
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     );
 
   const readyList = orders
-    .filter((o) => o.status === "ready")
+    .filter(
+      (o) => o.status === "ready" && tvOrderTypes.includes(o.orderType)
+    )
     .sort(
       (a, b) =>
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -174,9 +186,28 @@ export default function TvOrderQueuePage() {
             <Tv className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-              {restaurantName}
-            </h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+                {restaurantName}
+              </h1>
+              <div className="flex items-center gap-1.5">
+                {tvOrderTypes.includes("pickup") && (
+                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                    🛍️ Gel-Al
+                  </span>
+                )}
+                {tvOrderTypes.includes("dine_in") && (
+                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                    🪑 Masa
+                  </span>
+                )}
+                {tvOrderTypes.includes("delivery") && (
+                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/40">
+                    🛵 Paket
+                  </span>
+                )}
+              </div>
+            </div>
             <p className="text-xs text-slate-400 font-semibold">
               📺 Canlı Müşteri Sipariş & Sıra Çağrı Ekranı • {slogan}
             </p>

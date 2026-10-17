@@ -4624,6 +4624,132 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
+            {/* 📺 Müşteri Sıra Çağrı Ekranı (/tv) Gösterilecek Sipariş Türleri */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                  <Tv className="w-4 h-4 text-orange-600" />
+                  <span>
+                    📺 TV Müşteri Sıra Çağrı Ekranında (/tv) Gösterilecek Sipariş Türleri
+                  </span>
+                </div>
+                <Link
+                  href="/tv"
+                  target="_blank"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition"
+                >
+                  <Tv className="w-3.5 h-3.5 text-orange-400" />
+                  <span>TV Ekranını Aç ↗</span>
+                </Link>
+              </div>
+              <p className="text-xs text-slate-500">
+                Salondaki TV ekranında hangi sipariş türlerinin (Paket Servis, Gel-Al, Masa Siparişi) listeleneceğini ve sesli anons edileceğini buradan seçebilirsiniz.
+              </p>
+
+              {/* Hızlı Ön Ayar Butonları */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-500 mr-1">
+                  Hızlı Seçim:
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSettings({
+                      ...settings,
+                      tvDisplayOrderTypes: ["pickup"],
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-slate-100 hover:bg-orange-600 hover:text-white text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  Sadece Gel-Al
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSettings({
+                      ...settings,
+                      tvDisplayOrderTypes: ["pickup", "dine_in"],
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-slate-100 hover:bg-orange-600 hover:text-white text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  Gel-Al + Masa
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSettings({
+                      ...settings,
+                      tvDisplayOrderTypes: ["pickup", "dine_in", "delivery"],
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-slate-100 hover:bg-orange-600 hover:text-white text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  Tümü (Paket + Gel-Al + Masa)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  {
+                    id: "pickup" as const,
+                    title: "🛍️ Gel-Al Siparişler",
+                    desc: "Kasadan / tezgahtan paket teslim alacak müşteriler",
+                  },
+                  {
+                    id: "dine_in" as const,
+                    title: "🪑 Masa / Salon Siparişleri",
+                    desc: "Salonda masada oturan veya self-servis masa siparişleri",
+                  },
+                  {
+                    id: "delivery" as const,
+                    title: "🛵 Paket Servis Siparişleri",
+                    desc: "Adrese kurye ile gidecek paket siparişler",
+                  },
+                ].map((opt) => {
+                  const currentTypes = Array.isArray(
+                    settings.tvDisplayOrderTypes
+                  )
+                    ? settings.tvDisplayOrderTypes
+                    : ["pickup", "dine_in", "delivery"];
+                  const isChecked = currentTypes.includes(opt.id);
+                  return (
+                    <label
+                      key={opt.id}
+                      className={`p-3.5 rounded-2xl border-2 cursor-pointer flex items-start gap-3 transition ${
+                        isChecked
+                          ? "border-orange-500 bg-orange-50/50"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? Array.from(new Set([...currentTypes, opt.id]))
+                            : currentTypes.filter((t) => t !== opt.id);
+                          setSettings({
+                            ...settings,
+                            tvDisplayOrderTypes: next,
+                          });
+                        }}
+                        className="mt-0.5 w-4 h-4 accent-orange-600 rounded"
+                      />
+                      <div>
+                        <div className="text-xs font-extrabold text-slate-900">
+                          {opt.title}
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                          {opt.desc}
+                        </p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Kurye Listesi Yönetimi */}
             <div className="border-t border-slate-200 pt-4 space-y-3">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">

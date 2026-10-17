@@ -799,6 +799,10 @@ export function getSettings(): RestaurantSettings {
     ];
     updated = true;
   }
+  if (!Array.isArray(parsed.tvDisplayOrderTypes)) {
+    parsed.tvDisplayOrderTypes = ["pickup", "dine_in", "delivery"];
+    updated = true;
+  }
   if (updated) {
     db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(JSON.stringify(parsed));
   }

@@ -24,13 +24,17 @@ export async function GET(req: NextRequest) {
 
     // TV Müşteri Sıra Çağrı Ekranı (/tv) için şifresiz, kişisel veri içermeyen özet akış
     if (req.nextUrl.searchParams.get("publicTv") === "1") {
+      const allowedTvTypes = Array.isArray(settings.tvDisplayOrderTypes)
+        ? settings.tvDisplayOrderTypes
+        : ["pickup", "dine_in", "delivery"];
       const allOrders = getOrders();
       const tvOrders = allOrders
         .filter(
           (o) =>
-            o.status === "accepted" ||
-            o.status === "ready" ||
-            o.status === "pending"
+            (o.status === "accepted" ||
+              o.status === "ready" ||
+              o.status === "pending") &&
+            allowedTvTypes.includes(o.orderType)
         )
         .map((o) => ({
           id: o.id,
@@ -46,6 +50,7 @@ export async function GET(req: NextRequest) {
         orders: tvOrders,
         restaurantName: settings.name,
         slogan: settings.slogan,
+        tvDisplayOrderTypes: allowedTvTypes,
       });
     }
 
