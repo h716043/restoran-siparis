@@ -138,17 +138,30 @@ export async function POST(req: NextRequest) {
     if (loyaltyEnabled && customerRecord) {
       const requestedPoints = Number(body.loyaltyPointsUsed || 0);
       const availablePoints = Number(customerRecord.loyaltyPoints || 0);
+      const rawSubtotal = Number(body.subtotal);
+      const safeSubtotal = Number.isFinite(rawSubtotal)
+        ? rawSubtotal
+        : Array.isArray(body.items)
+        ? body.items.reduce(
+            (sum: number, item: { totalPrice?: number; unitPrice?: number; quantity?: number }) =>
+              sum +
+              (Number.isFinite(Number(item.totalPrice))
+                ? Number(item.totalPrice)
+                : Number(item.unitPrice || 0) * Number(item.quantity || 1)),
+            0
+          )
+        : 0;
+
       if (requestedPoints > 0 && availablePoints >= minRedeem) {
         loyaltyPointsUsed = Math.min(
           requestedPoints,
           availablePoints,
-          Number(body.subtotal || 0)
+          safeSubtotal
         );
       }
       const netAmountForPoints = Math.max(
         0,
-        Number(body.subtotal || 0) -
-          Number(body.discountAmount || 0)
+        safeSubtotal - Number(body.discountAmount || 0)
       );
       if (earnPercent > 0 && netAmountForPoints > 0) {
         loyaltyPointsEarned = Math.round((netAmountForPoints * earnPercent) / 100);
@@ -158,6 +171,29 @@ export async function POST(req: NextRequest) {
         adjustUserLoyaltyPoints(customerRecord.phone, netPointDelta);
       }
     }
+
+    const fallbackSubtotal = Array.isArray(body.items)
+      ? body.items.reduce(
+          (sum: number, item: { totalPrice?: number; unitPrice?: number; quantity?: number }) =>
+            sum +
+            (Number.isFinite(Number(item.totalPrice))
+              ? Number(item.totalPrice)
+              : Number(item.unitPrice || 0) * Number(item.quantity || 1)),
+          0
+        )
+      : 0;
+    const computedSubtotal = Number.isFinite(Number(body.subtotal))
+      ? Number(body.subtotal)
+      : fallbackSubtotal;
+    const computedDiscount = Number.isFinite(Number(body.discountAmount))
+      ? Number(body.discountAmount)
+      : 0;
+    const computedDeliveryFee = Number.isFinite(Number(body.deliveryFee))
+      ? Number(body.deliveryFee)
+      : 0;
+    const computedTotal = Number.isFinite(Number(body.totalAmount))
+      ? Number(body.totalAmount)
+      : Math.max(0, computedSubtotal - computedDiscount + computedDeliveryFee);
 
     const order = createOrder({
       orderType: body.orderType,
@@ -180,11 +216,11 @@ export async function POST(req: NextRequest) {
               creditAccountName: body.creditAccountName || body.customerName,
             }
           : undefined,
-      subtotal: Number(body.subtotal),
-      discountAmount: Number(body.discountAmount || 0),
+      subtotal: computedSubtotal,
+      discountAmount: computedDiscount,
       couponCode: body.couponCode || undefined,
-      deliveryFee: Number(body.deliveryFee || 0),
-      totalAmount: Number(body.totalAmount),
+      deliveryFee: computedDeliveryFee,
+      totalAmount: computedTotal,
       estimatedMinutes: isStaffPosOrder
         ? settings.estimatedPrepMinutes || 25
         : undefined,
@@ -194,13 +230,13 @@ export async function POST(req: NextRequest) {
       items: body.items,
     });
 
-    if (body.paymentMethod === "credit" && Number(body.totalAmount) > 0) {
+    if (body.paymentMethod === "credit" && computedTotal > 0) {
       recordCreditAccountTransaction({
         accountId: body.creditAccountId,
         customerName: body.creditAccountName || body.customerName || "Veresiye Müşterisi",
         customerPhone: body.customerPhone,
         type: "debt",
-        amount: Number(body.totalAmount),
+        amount: computedTotal,
         description: `Sipariş #${order.orderNumber} (Cari / Veresiye)`,
         orderNumber: order.orderNumber,
       });

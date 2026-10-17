@@ -217,6 +217,7 @@ export default function WaiterTerminalPage() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
+      const subtotalAmount = cart.reduce((sum, item) => sum + item.totalPrice, 0);
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -227,6 +228,11 @@ export default function WaiterTerminalPage() {
           customerPhone: "05000000000",
           paymentMethod: "pos_at_table",
           orderNote: orderNote.trim() || undefined,
+          subtotal: subtotalAmount,
+          discountAmount: 0,
+          deliveryFee: 0,
+          totalAmount: subtotalAmount,
+          isStaffPosOrder: true,
           items: cart,
         }),
       });
