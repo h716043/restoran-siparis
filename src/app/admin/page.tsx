@@ -118,7 +118,7 @@ export default function AdminDashboardPage() {
     message?: string;
   } | null>(null);
   const [selectedPosSubTab, setSelectedPosSubTab] = useState<
-    "sambapos" | "adisyo"
+    "sambapos" | "adisyo" | "custom_pos"
   >("sambapos");
   const [posTesting, setPosTesting] = useState(false);
   const [posTestStatus, setPosTestStatus] = useState<{
@@ -467,6 +467,28 @@ export default function AdminDashboardPage() {
     productMappings: {} as Record<string, string>,
   };
 
+  const customPosConfig = settings?.posIntegrationConfig?.customPos || {
+    enabled: false,
+    systemPreset: "simulation" as
+      | "narpos"
+      | "kerzz"
+      | "posentegra"
+      | "custom_webhook"
+      | "simulation",
+    apiBaseUrl: "https://api.narpos.com.tr/api/v1",
+    ordersEndpointPath: "/orders",
+    statusEndpointPath: "/orders/status",
+    menuEndpointPath: "/products",
+    authType: "bearer" as "bearer" | "api_key_header" | "basic",
+    apiKey: "",
+    apiSecret: "",
+    branchId: "SUBE-01",
+    syncTrigger: "on_accepted" as const,
+    autoSyncCourierAndStatus: true,
+    webhookSecret: "pos_webhook_2026",
+    productMappings: {} as Record<string, string>,
+  };
+
   const updateSambaConfigField = (patch: Partial<typeof sambaConfig>) => {
     if (!settings) return;
     const nextSamba = { ...sambaConfig, ...patch };
@@ -477,9 +499,12 @@ export default function AdminDashboardPage() {
           ? "sambapos"
           : adisyoConfig.enabled
           ? "adisyo"
+          : customPosConfig.enabled
+          ? "custom_pos"
           : "none",
         sambaPos: nextSamba,
         adisyoPos: adisyoConfig,
+        customPos: customPosConfig,
       },
     });
   };
@@ -494,9 +519,34 @@ export default function AdminDashboardPage() {
           ? "adisyo"
           : sambaConfig.enabled
           ? "sambapos"
+          : customPosConfig.enabled
+          ? "custom_pos"
           : "none",
         sambaPos: sambaConfig,
         adisyoPos: nextAdisyo,
+        customPos: customPosConfig,
+      },
+    });
+  };
+
+  const updateCustomPosConfigField = (
+    patch: Partial<typeof customPosConfig>
+  ) => {
+    if (!settings) return;
+    const nextCustomPos = { ...customPosConfig, ...patch };
+    setSettings({
+      ...settings,
+      posIntegrationConfig: {
+        activeProvider: nextCustomPos.enabled
+          ? "custom_pos"
+          : adisyoConfig.enabled
+          ? "adisyo"
+          : sambaConfig.enabled
+          ? "sambapos"
+          : "none",
+        sambaPos: sambaConfig,
+        adisyoPos: adisyoConfig,
+        customPos: nextCustomPos,
       },
     });
   };
@@ -505,18 +555,23 @@ export default function AdminDashboardPage() {
     if (e) e.preventDefault();
     if (!settings) return;
     const nextActiveProvider =
-      selectedPosSubTab === "adisyo" && adisyoConfig.enabled
+      selectedPosSubTab === "custom_pos" && customPosConfig.enabled
+        ? ("custom_pos" as const)
+        : selectedPosSubTab === "adisyo" && adisyoConfig.enabled
         ? ("adisyo" as const)
         : sambaConfig.enabled
         ? ("sambapos" as const)
         : adisyoConfig.enabled
         ? ("adisyo" as const)
+        : customPosConfig.enabled
+        ? ("custom_pos" as const)
         : ("none" as const);
 
     const nextConfig = {
       activeProvider: nextActiveProvider,
       sambaPos: sambaConfig,
       adisyoPos: adisyoConfig,
+      customPos: customPosConfig,
     };
     const nextSettings: RestaurantSettings = {
       ...settings,
@@ -524,7 +579,11 @@ export default function AdminDashboardPage() {
     };
     await persistSettings(
       nextSettings,
-      selectedPosSubTab === "adisyo"
+      selectedPosSubTab === "custom_pos"
+        ? customPosConfig.enabled
+          ? "NarPOS / Kerzz / Özel API entegrasyon ayarları kaydedildi ve aktif edildi!"
+          : "NarPOS / Kerzz / Özel API ayarları kaydedildi (Şu an pasif)."
+        : selectedPosSubTab === "adisyo"
         ? adisyoConfig.enabled
           ? "Adisyo / Kurye POS entegrasyon ayarları kaydedildi ve aktif edildi!"
           : "Adisyo / Kurye POS ayarları kaydedildi (Şu an pasif)."
@@ -542,7 +601,12 @@ export default function AdminDashboardPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          selectedPosSubTab === "adisyo"
+          selectedPosSubTab === "custom_pos"
+            ? {
+                action: "test_custom_pos_connection",
+                customPos: customPosConfig,
+              }
+            : selectedPosSubTab === "adisyo"
             ? {
                 action: "test_adisyo_connection",
                 adisyoPos: adisyoConfig,
@@ -601,6 +665,38 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleSyncMenuToCustomPos = async () => {
+    setPosMenuSyncing(true);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_menu_to_custom_pos",
+          updatePrices: true,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      if (data.ok) {
+        showToast(
+          data.message || "Ürünler NarPOS / Kerzz / Özel API ile eşitlendi!"
+        );
+        await loadData();
+      }
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "NarPOS / Kerzz / Özel API ürün eşitleme sırasında hata oluştu.",
+      });
+    } finally {
+      setPosMenuSyncing(false);
+    }
+  };
+
   const handleSaveAdisyoProductMapping = async (
     siteItemId: string,
     adisyoProductName: string
@@ -623,6 +719,33 @@ export default function AdminDashboardPage() {
         });
       }
       showToast("✅ Adisyo / Kurye POS ürün eşleştirmesi kaydedildi!");
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSaveCustomPosProductMapping = async (
+    siteItemId: string,
+    customPosProductName: string
+  ) => {
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_custom_pos_product_mapping",
+          siteItemId,
+          customPosProductName,
+        }),
+      });
+      const data = await res.json();
+      if (data.posIntegrationConfig && settings) {
+        setSettings({
+          ...settings,
+          posIntegrationConfig: data.posIntegrationConfig,
+        });
+      }
+      showToast("✅ NarPOS / Kerzz / Özel API PLU eşleştirmesi kaydedildi!");
     } catch {
       // ignore
     }
@@ -661,9 +784,43 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleSimulateCustomPosEvent = async (
+    orderId: string,
+    status: string,
+    courierName?: string
+  ) => {
+    setPosSyncingOrderId(orderId);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "simulate_custom_pos_event",
+          orderId,
+          status,
+          courierName,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      await loadData();
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message:
+          "NarPOS / Kerzz / Özel API durum güncellemesi sırasında hata oluştu.",
+      });
+    } finally {
+      setPosSyncingOrderId(null);
+    }
+  };
+
   const handleManualSyncOrderToPos = async (
     orderId: string,
-    providerOverride?: "sambapos" | "adisyo"
+    providerOverride?: "sambapos" | "adisyo" | "custom_pos"
   ) => {
     setPosSyncingOrderId(orderId);
     const targetProvider = providerOverride || selectedPosSubTab;
@@ -6417,12 +6574,18 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     🔌 İsteğe Bağlı &amp; Tamamen Bağımsız Çoklu POS Köprüsü
                   </div>
                   <h2 className="text-xl font-black text-white">
-                    {selectedPosSubTab === "adisyo"
+                    {selectedPosSubTab === "custom_pos"
+                      ? "🖥️ NarPOS / Kerzz POS / Özel REST API Entegrasyonu"
+                      : selectedPosSubTab === "adisyo"
                       ? "🏪 Adisyo Bulut POS & Kurye POS Entegrasyonu"
                       : "🍽️ SambaPOS V5 Sipariş Aktarım Entegrasyonu"}
                   </h2>
                   <p className="text-xs text-indigo-200/90 max-w-2xl leading-relaxed">
-                    {selectedPosSubTab === "adisyo" ? (
+                    {selectedPosSubTab === "custom_pos" ? (
+                      <>
+                        Müşterilerinizin web sitesinden (Netlify), QR masadan veya kasadan verdiği siparişleri otomatik veya tek tıkla <strong>NarPOS</strong>, <strong>Kerzz POS</strong>, <strong>PosEntegra</strong> veya kendi <strong>Özel HTTP REST API &amp; Webhook</strong> sisteminize aktarabilir, PLU kodlarını eşleştirebilir ve kurye ataması ile teslimat durumlarını çift yönlü senkronize edebilirsiniz.
+                      </>
+                    ) : selectedPosSubTab === "adisyo" ? (
                       <>
                         Müşterilerinizin web sitesinden (Netlify), QR masadan veya kasadan verdiği siparişleri otomatik veya tek tıkla <strong>Adisyo Bulut POS (External API v2)</strong> veya <strong>Kurye POS</strong> sistemine aktarabilir, Adisyo&apos;dan yapılan kurye ataması ve teslimat durumlarını sitede otomatik güncelleyebilirsiniz.
                       </>
@@ -6434,7 +6597,30 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   </p>
                 </div>
 
-                {selectedPosSubTab === "adisyo" ? (
+                {selectedPosSubTab === "custom_pos" ? (
+                  <label className="inline-flex items-center gap-3 bg-white/10 hover:bg-white/15 border border-white/20 px-4 py-3 rounded-2xl cursor-pointer shrink-0 transition">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(customPosConfig.enabled)}
+                      onChange={(e) =>
+                        updateCustomPosConfigField({
+                          enabled: e.target.checked,
+                        })
+                      }
+                      className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-sm font-black text-white">
+                        {customPosConfig.enabled
+                          ? "✅ NarPOS / Kerzz / API AÇIK"
+                          : "⏸️ NarPOS / Kerzz / API KAPALI"}
+                      </div>
+                      <div className="text-[11px] text-indigo-200">
+                        İsteğe bağlı açıp kapatabilirsiniz
+                      </div>
+                    </div>
+                  </label>
+                ) : selectedPosSubTab === "adisyo" ? (
                   <label className="inline-flex items-center gap-3 bg-white/10 hover:bg-white/15 border border-white/20 px-4 py-3 rounded-2xl cursor-pointer shrink-0 transition">
                     <input
                       type="checkbox"
@@ -6479,7 +6665,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                 )}
               </div>
 
-              {/* POS Sağlayıcı Seçimi (SambaPOS V5 & Adisyo / Kurye POS Aktif Modüller) */}
+              {/* POS Sağlayıcı Seçimi (SambaPOS V5, Adisyo / Kurye POS & NarPOS / Kerzz / Özel API Aktif Modüller) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10">
                 <button
                   type="button"
@@ -6543,19 +6729,36 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   </span>
                 </button>
 
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3 opacity-75 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPosSubTab("custom_pos");
+                    setPosTestStatus(null);
+                  }}
+                  className={`text-left rounded-xl p-3 flex items-center justify-between transition cursor-pointer ${
+                    selectedPosSubTab === "custom_pos"
+                      ? "bg-amber-600/40 border-2 border-amber-400 shadow-md"
+                      : "bg-white/10 hover:bg-white/15 border border-white/20"
+                  }`}
+                >
                   <div>
-                    <div className="text-xs font-bold text-slate-300">
+                    <div className="text-xs font-black text-white">
                       🖥️ NarPOS / Kerzz / Özel API
                     </div>
-                    <div className="text-[11px] text-slate-400">
-                      Webhook modu ile şimdiden bağlanabilir
+                    <div className="text-[11px] text-amber-200">
+                      PLU Eşleştirme, REST API &amp; Çift Yönlü Webhook
                     </div>
                   </div>
-                  <span className="bg-slate-700 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    Webhook Hazır
+                  <span
+                    className={`${
+                      customPosConfig.enabled
+                        ? "bg-emerald-500 text-white"
+                        : "bg-amber-500/30 text-amber-100"
+                    } text-[10px] font-black px-2 py-0.5 rounded-full shrink-0`}
+                  >
+                    {customPosConfig.enabled ? "AÇIK" : "AKTİF MODÜL"}
                   </span>
-                </div>
+                </button>
               </div>
             </div>
 
@@ -6581,7 +6784,584 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             )}
 
-            {selectedPosSubTab === "adisyo" ? (
+            {selectedPosSubTab === "custom_pos" ? (
+              <div className="space-y-6">
+                {/* 1. NarPOS / Kerzz / Özel API Aktarım Zamanı & Sistem Seçimi */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900">
+                        1. NarPOS / Kerzz POS / Özel REST API Bağlantı &amp; Aktarım Ayarları
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Kullandığınız POS sistemini (NarPOS, Kerzz POS, PosEntegra veya Özel Webhook) ve sipariş aktarım zamanını seçin.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleTestPosConnection}
+                        disabled={posTesting}
+                        className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-extrabold px-3.5 py-2 rounded-xl transition cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw
+                          className={`w-3.5 h-3.5 ${posTesting ? "animate-spin" : ""}`}
+                        />
+                        {posTesting
+                          ? "Test Ediliyor..."
+                          : "🔌 NarPOS / Kerzz / API Bağlantısını Test Et"}
+                      </button>
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold px-4 py-2 rounded-xl transition cursor-pointer"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Ayarları Kaydet
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Kullandığınız POS Sistemi (Preset)
+                      </label>
+                      <select
+                        value={customPosConfig.systemPreset}
+                        onChange={(e) =>
+                          updateCustomPosConfigField({
+                            systemPreset: e.target.value as
+                              | "narpos"
+                              | "kerzz"
+                              | "posentegra"
+                              | "custom_webhook"
+                              | "simulation",
+                          })
+                        }
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                      >
+                        <option value="narpos">
+                          🖥️ NarPOS (Bulut &amp; Yerel Kasa REST API)
+                        </option>
+                        <option value="kerzz">
+                          🏢 Kerzz POS (REST API &amp; Sipariş Köprüsü)
+                        </option>
+                        <option value="posentegra">
+                          🔗 PosEntegra / Genel Restoran POS Köprüsü
+                        </option>
+                        <option value="custom_webhook">
+                          🌐 Özel HTTP REST API &amp; JSON Webhook (Herhangi Bir Yazılım)
+                        </option>
+                        <option value="simulation">
+                          🧪 Simülasyon &amp; Canlı Test Modu (Sunucu Kurmadan Test Et)
+                        </option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Sipariş Ne Zaman POS Sistemine Aktarılsın?
+                      </label>
+                      <select
+                        value={customPosConfig.syncTrigger}
+                        onChange={(e) =>
+                          updateCustomPosConfigField({
+                            syncTrigger: e.target.value as
+                              | "on_accepted"
+                              | "on_created"
+                              | "manual",
+                          })
+                        }
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                      >
+                        <option value="on_accepted">
+                          ✅ Mutfak / Kasa Siparişi &quot;Kabul Et&quot; Dediğinde Otomatik Aktar (Önerilen)
+                        </option>
+                        <option value="on_created">
+                          ⚡ Sipariş Geldiği Anda (Onay Beklemeden) Anında Otomatik Aktar
+                        </option>
+                        <option value="manual">
+                          🖐️ Sadece Manuel (Mutfak/Yönetim Ekranında Butona Basınca Aktar)
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 2. API Adresi, Şube Kodu & Endpoint Ayarları */}
+                  <div className="space-y-4 pt-3 border-t border-slate-100">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-amber-800">
+                      2. Sunucu Adresi, API Anahtarları &amp; Endpoint Yolları
+                    </h4>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          POS API / Webhook Sunucu Adresi
+                        </label>
+                        <input
+                          type="text"
+                          value={customPosConfig.apiBaseUrl}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              apiBaseUrl: e.target.value,
+                            })
+                          }
+                          placeholder="https://api.narpos.com.tr/api/v1"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          API Key / Bearer Token (x-api-key)
+                        </label>
+                        <input
+                          type="text"
+                          value={customPosConfig.apiKey}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              apiKey: e.target.value,
+                            })
+                          }
+                          placeholder="POS API Anahtarı"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          API Secret / Gizli Anahtar
+                        </label>
+                        <input
+                          type="password"
+                          value={customPosConfig.apiSecret}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              apiSecret: e.target.value,
+                            })
+                          }
+                          placeholder="Gizli Anahtar"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Şube ID (Branch ID) &amp; Webhook Secret
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={customPosConfig.branchId}
+                            onChange={(e) =>
+                              updateCustomPosConfigField({
+                                branchId: e.target.value,
+                              })
+                            }
+                            placeholder="SUBE-01"
+                            className="w-1/2 px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+                          />
+                          <input
+                            type="text"
+                            value={customPosConfig.webhookSecret || ""}
+                            onChange={(e) =>
+                              updateCustomPosConfigField({
+                                webhookSecret: e.target.value,
+                              })
+                            }
+                            placeholder="pos_webhook_2026"
+                            className="w-1/2 px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Kimlik Doğrulama Tipi
+                        </label>
+                        <select
+                          value={customPosConfig.authType}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              authType: e.target.value as
+                                | "bearer"
+                                | "api_key_header"
+                                | "basic",
+                            })
+                          }
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                        >
+                          <option value="bearer">Bearer Token</option>
+                          <option value="api_key_header">X-Api-Key Header</option>
+                          <option value="basic">Basic Auth</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Sipariş Gönderim Endpoint Yolu
+                        </label>
+                        <input
+                          type="text"
+                          value={customPosConfig.ordersEndpointPath}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              ordersEndpointPath: e.target.value,
+                            })
+                          }
+                          placeholder="/orders"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Durum &amp; Kurye Endpoint Yolu
+                        </label>
+                        <input
+                          type="text"
+                          value={customPosConfig.statusEndpointPath}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              statusEndpointPath: e.target.value,
+                            })
+                          }
+                          placeholder="/orders/status"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Menü &amp; PLU Endpoint Yolu
+                        </label>
+                        <input
+                          type="text"
+                          value={customPosConfig.menuEndpointPath}
+                          onChange={(e) =>
+                            updateCustomPosConfigField({
+                              menuEndpointPath: e.target.value,
+                            })
+                          }
+                          placeholder="/products"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Çift Yönlü Push & Pull Endpoint Bilgisi */}
+                    <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 space-y-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="text-xs font-extrabold text-amber-950">
+                          📡 NarPOS / Kerzz / Özel POS Çift Yönlü Sipariş Çekme (Pull) &amp; Kurye Bildirim (Push) Adresleri
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-xs font-bold text-amber-950 shrink-0 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={
+                              customPosConfig.autoSyncCourierAndStatus !== false
+                            }
+                            onChange={(e) =>
+                              updateCustomPosConfigField({
+                                autoSyncCourierAndStatus: e.target.checked,
+                              })
+                            }
+                            className="w-4 h-4 accent-amber-600 rounded"
+                          />
+                          Kurye &amp; Teslimat Durumunu Otomatik Eşitle
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-amber-900">
+                        <div className="bg-white border border-amber-200 rounded-lg p-2.5 space-y-1">
+                          <div className="font-bold text-slate-700">
+                            📥 1. POS Kasa Programının Siparişleri Çekeceği Adres (GET Pull):
+                          </div>
+                          <code className="block font-mono text-amber-900 break-all">
+                            GET {originUrl}/api/pos-sync/custom-webhook?status=pending
+                          </code>
+                        </div>
+                        <div className="bg-white border border-amber-200 rounded-lg p-2.5 space-y-1">
+                          <div className="font-bold text-slate-700">
+                            📤 2. POS&apos;tan Kurye Ataması &amp; Teslimat Bildirimi Adresi (POST Webhook):
+                          </div>
+                          <code className="block font-mono text-amber-900 break-all">
+                            POST {originUrl}/api/pos-sync/custom-webhook
+                          </code>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. NarPOS / Kerzz / Özel API PLU & Ürün Eşleştirme Tablosu */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900">
+                        3. 🔄 NarPOS / Kerzz POS / Özel API Menü &amp; PLU Kodu Eşleştirme
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Sitedeki ürünlerinizin NarPOS / Kerzz POS üzerindeki PLU kodlarını otomatik oluşturun veya özel PLU kodu girin.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSyncMenuToCustomPos}
+                      disabled={posMenuSyncing}
+                      className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`w-4 h-4 ${posMenuSyncing ? "animate-spin" : ""}`}
+                      />
+                      {posMenuSyncing
+                        ? "Eşitleniyor..."
+                        : `🚀 Tüm Site Ürünlerini NarPOS / Kerzz PLU Kodlarıyla Eşitle (${items.length} Ürün)`}
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-96">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-600 font-extrabold">
+                        <tr>
+                          <th className="py-2.5 px-3">Site Ürünü</th>
+                          <th className="py-2.5 px-3">Kategori</th>
+                          <th className="py-2.5 px-3">Fiyat</th>
+                          <th className="py-2.5 px-3">POS PLU Kodu / Ürün Kodu Eşleştirmesi</th>
+                          <th className="py-2.5 px-3 text-right">Durum</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {items.map((item, idx) => {
+                          const catName =
+                            categories.find((c) => c.id === item.categoryId)
+                              ?.name || "Genel";
+                          const defaultPlu = `PLU-${1001 + idx}`;
+                          const mappedVal =
+                            customPosConfig.productMappings?.[item.id] || "";
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/80">
+                              <td className="py-2 px-3 font-bold text-slate-900">
+                                {item.name}
+                              </td>
+                              <td className="py-2 px-3 text-slate-600">
+                                {catName}
+                              </td>
+                              <td className="py-2 px-3 font-extrabold text-amber-700">
+                                {item.price.toFixed(2)} {settings.currency}
+                              </td>
+                              <td className="py-2 px-3">
+                                <input
+                                  type="text"
+                                  defaultValue={mappedVal || defaultPlu}
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (val !== (mappedVal || defaultPlu)) {
+                                      handleSaveCustomPosProductMapping(
+                                        item.id,
+                                        val
+                                      );
+                                    }
+                                  }}
+                                  placeholder={defaultPlu}
+                                  className="w-full max-w-xs px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-mono font-semibold"
+                                />
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-900 font-bold px-2.5 py-0.5 rounded-full text-[11px]">
+                                  ✅ Eşleşti ({mappedVal || defaultPlu})
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 4. Son Siparişlerin NarPOS / Kerzz / Özel API Aktarım & Canlı Kurye/Teslimat Tablosu */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900">
+                        4. 📋 Son Siparişlerin NarPOS / Kerzz / Özel API Aktarım &amp; Kurye Durumu
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Siparişleri NarPOS / Kerzz POS&apos;a gönderebilir veya POS üzerinden kurye ataması ve teslimat durumunu tek tıkla test edebilirsiniz.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleBulkSyncPendingToPos}
+                      disabled={posBulkSyncing}
+                      className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`w-4 h-4 ${posBulkSyncing ? "animate-spin" : ""}`}
+                      />
+                      {posBulkSyncing
+                        ? "Aktarılıyor..."
+                        : "🔄 Aktarılmamış Siparişleri NarPOS / Kerzz'e Gönder"}
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-extrabold">
+                          <th className="py-2.5 px-3">Sipariş</th>
+                          <th className="py-2.5 px-3">Müşteri / Masa</th>
+                          <th className="py-2.5 px-3">Tutar</th>
+                          <th className="py-2.5 px-3">Durum &amp; Kurye</th>
+                          <th className="py-2.5 px-3">POS Aktarım Durumu</th>
+                          <th className="py-2.5 px-3 text-right">NarPOS / Kerzz / API İşlemleri</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {orders.slice(0, 15).map((ord) => {
+                          const sync = ord.posSyncInfo;
+                          return (
+                            <tr key={ord.id} className="hover:bg-slate-50/80">
+                              <td className="py-2.5 px-3 font-black text-slate-900">
+                                #{ord.orderNumber}
+                                <div className="text-[10px] font-normal text-slate-400">
+                                  {new Date(ord.createdAt).toLocaleTimeString(
+                                    "tr-TR",
+                                    { hour: "2-digit", minute: "2-digit" }
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-slate-800">
+                                  {ord.orderType === "dine_in"
+                                    ? `🪑 Masa ${ord.tableNumber || "?"}`
+                                    : ord.customerName}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {ord.orderType === "delivery"
+                                    ? "🛵 Paket Servis"
+                                    : ord.orderType === "pickup"
+                                    ? "🛍️ Gel-Al"
+                                    : "🍽️ Masada"}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 font-extrabold text-amber-700">
+                                {ord.totalAmount.toFixed(2)} {settings.currency}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="flex flex-col gap-1 items-start">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                      ord.status === "completed"
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : ord.status === "ready"
+                                        ? "bg-indigo-100 text-indigo-800"
+                                        : ord.status === "accepted"
+                                        ? "bg-amber-100 text-amber-800"
+                                        : ord.status === "rejected"
+                                        ? "bg-rose-100 text-rose-800"
+                                        : "bg-slate-100 text-slate-700"
+                                    }`}
+                                  >
+                                    {ord.status === "completed"
+                                      ? "🎉 Teslim Edildi"
+                                      : ord.status === "ready"
+                                      ? "🛵 Kuryede / Hazır"
+                                      : ord.status === "accepted"
+                                      ? "🔥 Hazırlanıyor"
+                                      : ord.status === "rejected"
+                                      ? "❌ İptal"
+                                      : "⏳ Bekliyor"}
+                                  </span>
+                                  {ord.courierName && (
+                                    <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-900 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
+                                      🛵 {ord.courierName}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {sync?.status === "synced" ? (
+                                  <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    ✅ Aktarıldı
+                                    {sync.externalTicketId
+                                      ? ` (#${sync.externalTicketId})`
+                                      : ""}
+                                  </span>
+                                ) : sync?.errorMessage ? (
+                                  <div className="space-y-0.5">
+                                    <span className="inline-flex items-center gap-1 bg-rose-100 text-rose-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                      ⚠️ Hata
+                                    </span>
+                                    <div
+                                      className="text-[10px] text-rose-600 max-w-xs truncate"
+                                      title={sync.errorMessage}
+                                    >
+                                      {sync.errorMessage}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 font-semibold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    ⏳ Bekliyor
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <div className="inline-flex flex-wrap justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleManualSyncOrderToPos(
+                                        ord.id,
+                                        "custom_pos"
+                                      )
+                                    }
+                                    disabled={posSyncingOrderId === ord.id}
+                                    className="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                                  >
+                                    📤 POS&apos;a Aktar
+                                  </button>
+                                  {ord.orderType === "delivery" &&
+                                    ord.status !== "completed" && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleSimulateCustomPosEvent(
+                                            ord.id,
+                                            "ON_WAY",
+                                            "NarPOS Kurye-1"
+                                          )
+                                        }
+                                        disabled={posSyncingOrderId === ord.id}
+                                        className="inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                                        title="NarPOS / Kerzz POS'tan Kurye Atamasını Siteye Yansıt"
+                                      >
+                                        🛵 Kurye Ata
+                                      </button>
+                                    )}
+                                  {ord.status !== "completed" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSimulateCustomPosEvent(
+                                          ord.id,
+                                          "DELIVERED"
+                                        )
+                                      }
+                                      disabled={posSyncingOrderId === ord.id}
+                                      className="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-900 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                                      title="NarPOS / Kerzz POS'tan Teslim Edildi Durumunu Siteye Yansıt"
+                                    >
+                                      🎉 Teslim Edildi
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : selectedPosSubTab === "adisyo" ? (
               <div className="space-y-6">
                 {/* 1. Adisyo / Kurye POS Aktarım Zamanı & Bağlantı Modu */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">

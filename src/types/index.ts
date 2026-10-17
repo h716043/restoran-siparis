@@ -348,10 +348,34 @@ export interface AdisyoPosConfig {
   lastMenuSyncedAt?: string; // Son menü eşitleme zamanı
 }
 
+export interface CustomPosConfig {
+  enabled: boolean; // İsteğe bağlı: Müşteri NarPOS / Kerzz / Özel API isterse aktif eder
+  systemPreset:
+    | "narpos"
+    | "kerzz"
+    | "posentegra"
+    | "custom_webhook"
+    | "simulation";
+  apiBaseUrl: string; // Örn: "https://api.narpos.com.tr/api/v1" veya "https://api.kerzz.com/v1"
+  ordersEndpointPath: string; // Örn: "/orders"
+  statusEndpointPath: string; // Örn: "/orders/status"
+  menuEndpointPath: string; // Örn: "/products"
+  authType: "bearer" | "api_key_header" | "basic";
+  apiKey: string; // Bearer Token veya X-Api-Key
+  apiSecret: string; // Opsiyonel X-Api-Secret veya Basic Auth şifresi
+  branchId: string; // Şube / Restoran / Tenant ID (X-Branch-Id)
+  syncTrigger: "on_accepted" | "on_created" | "manual";
+  autoSyncCourierAndStatus: boolean; // POS'tan kurye ataması ve teslimat durumunu siteye eşitle
+  webhookSecret?: string; // /api/pos-sync/custom-webhook güvenlik anahtarı
+  productMappings?: Record<string, string>; // Site Ürün ID -> PLU / Barkod / Ürün Kodu eşleştirmesi
+  lastMenuSyncedAt?: string;
+}
+
 export interface PosIntegrationConfig {
-  activeProvider: "none" | "sambapos" | "adisyo";
+  activeProvider: "none" | "sambapos" | "adisyo" | "custom_pos";
   sambaPos: SambaPosConfig;
   adisyoPos?: AdisyoPosConfig;
+  customPos?: CustomPosConfig;
 }
 
 export interface RestaurantSettings {

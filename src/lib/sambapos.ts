@@ -40,6 +40,12 @@ import {
   syncOrderToAdisyoPos,
   syncSiteOrderUpdateToAdisyoPos,
 } from "@/lib/adisyo";
+import {
+  getResolvedCustomPosConfig,
+  syncOrderStatusesFromCustomPos,
+  syncOrderToCustomPos,
+  syncSiteOrderUpdateToCustomPos,
+} from "@/lib/custom-pos";
 
 export const DEFAULT_SAMBAPOS_CONFIG: SambaPosConfig = {
   enabled: false,
@@ -82,6 +88,7 @@ export function getResolvedPosConfig(): PosIntegrationConfig {
   const settings = getSettings();
   const saved = settings.posIntegrationConfig;
   const resolvedAdisyo = getResolvedAdisyoConfig(saved?.adisyoPos);
+  const resolvedCustom = getResolvedCustomPosConfig(saved?.customPos);
   return {
     activeProvider:
       saved?.activeProvider ||
@@ -89,6 +96,8 @@ export function getResolvedPosConfig(): PosIntegrationConfig {
         ? "sambapos"
         : resolvedAdisyo.enabled
         ? "adisyo"
+        : resolvedCustom.enabled
+        ? "custom_pos"
         : "none"),
     sambaPos: {
       ...DEFAULT_SAMBAPOS_CONFIG,
@@ -99,6 +108,7 @@ export function getResolvedPosConfig(): PosIntegrationConfig {
       },
     },
     adisyoPos: resolvedAdisyo,
+    customPos: resolvedCustom,
   };
 }
 
@@ -1336,6 +1346,9 @@ export async function syncSiteOrderUpdateToSambaPos(
   if (posCfg.adisyoPos?.enabled) {
     await syncSiteOrderUpdateToAdisyoPos(order).catch(() => {});
   }
+  if (posCfg.customPos?.enabled) {
+    await syncSiteOrderUpdateToCustomPos(order).catch(() => {});
+  }
 
   const cfg = posCfg.sambaPos;
   if (!cfg.enabled || cfg.mode !== "graphql") return;
@@ -1432,8 +1445,8 @@ export async function syncSiteOrderUpdateToSambaPos(
 
 /**
  * Kasa PC üzerinde (yerelde) çalışırken:
- * 1) Hem yerel hem de Netlify/Turso buluttan yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS veya Adisyo / Kurye POS'a aktarır.
- * 2) SambaPOS veya Adisyo / Kurye POS'ta kurye ataması veya "Teslim Edildi / Ödendi" yapılan siparişleri otomatik olarak sitede de günceller.
+ * 1) Hem yerel hem de Netlify/Turso buluttan yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS, Adisyo veya NarPOS/Kerzz/Özel POS'a aktarır.
+ * 2) POS sistemlerinde kurye ataması veya "Teslim Edildi / Ödendi" yapılan siparişleri otomatik olarak sitede de günceller.
  */
 export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
   if (
@@ -1448,7 +1461,8 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
   const posCfg = getResolvedPosConfig();
   const sambaCfg = posCfg.sambaPos;
   const adisyoCfg = posCfg.adisyoPos;
-  if (!sambaCfg.enabled && !adisyoCfg?.enabled) {
+  const customCfg = posCfg.customPos;
+  if (!sambaCfg.enabled && !adisyoCfg?.enabled && !customCfg?.enabled) {
     return;
   }
 
@@ -1509,7 +1523,33 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
       }
     }
 
-    // B) POS -> Site (SambaPOS veya Adisyo / Kurye POS'ta kurye atanan veya teslim edilen siparişleri sitede güncelle)
+    // A3) Site -> NarPOS / Kerzz / Özel API
+    if (customCfg?.enabled && customCfg.syncTrigger !== "manual") {
+      const customCandidates = allOrders.filter((o) => {
+        if (o.posSyncInfo?.status === "synced") return false;
+        if (o.posSyncInfo?.status === "failed") return false;
+        const createdMs = new Date(o.createdAt).getTime();
+        if (createdMs < cutoffMs) return false;
+
+        if (customCfg.syncTrigger === "on_created") {
+          return o.status !== "rejected";
+        }
+        if (customCfg.syncTrigger === "on_accepted") {
+          return (
+            o.status === "accepted" ||
+            o.status === "ready" ||
+            o.status === "completed"
+          );
+        }
+        return false;
+      });
+
+      for (const ord of customCandidates) {
+        await syncOrderToCustomPos(ord);
+      }
+    }
+
+    // B) POS -> Site (SambaPOS, Adisyo veya NarPOS/Kerzz'de kurye atanan veya teslim edilen siparişleri sitede güncelle)
     const now = Date.now();
     if (now - lastReverseSyncMs >= 2500) {
       lastReverseSyncMs = now;
@@ -1518,6 +1558,9 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
       }
       if (adisyoCfg?.enabled && adisyoCfg.autoAssignCourierFromAdisyo !== false) {
         await syncOrderStatusesFromAdisyoPos();
+      }
+      if (customCfg?.enabled && customCfg.autoSyncCourierAndStatus !== false) {
+        await syncOrderStatusesFromCustomPos();
       }
     }
   } catch (e) {
