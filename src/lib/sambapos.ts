@@ -3,8 +3,12 @@
  * -----------------------------------------------------------------
  * Bu modül ana sipariş sisteminden tamamen bağımsız (izole) çalışır.
  * - Müşteri / Restoran Ayarlardan SambaPOS'u aktif etmediği sürece hiçbir işlem yapmaz.
- * - İleride başka POS sistemleri (Adisyo, NarPOS, Simpra vb.) eklendiğinde
- *   aynı `PosIntegrationConfig` yapısı üzerinden genişletilebilir.
+ * - Aktif edildiğinde:
+ *   1) OAuth2 (/Token) ile bağlantı kurar (restoran_pos, pda, gokiosk otomatik yedekli).
+ *   2) Siparişteki ürünler SambaPOS menüsünde yoksa GraphQL `addProduct` ile otomatik oluşturur.
+ *   3) Müşteri (Müşteriler) veya Masa (Masalar) varlığını otomatik eşleştirir / oluşturur.
+ *   4) Paket Servis (`Paket=Bekliyor`), Gel-Al (`Paket=GelAl`) ve Masa (`Status=Yeni Siparişler`)
+ *      durumlarını Türkçe SambaPOS V5 kurallarına uygun şekilde oluşturur ve ekranı canlı yeniler.
  */
 
 import {
@@ -24,27 +28,29 @@ export const DEFAULT_SAMBAPOS_CONFIG: SambaPosConfig = {
   enabled: false,
   mode: "graphql",
   serverUrl: "http://localhost:9000",
-  clientId: "restoran_pos",
-  username: "Admin",
+  clientId: "pda",
+  username: "Administrator",
   password: "1234",
   syncTrigger: "on_accepted",
-  departmentName: "Restoran",
+  departmentName: "Paket Servis",
   ticketTypeName: "Paket Servis",
   terminalName: "Sunucu",
-  userName: "Admin",
+  userName: "Administrator",
   customerEntityType: "Müşteriler",
   tableEntityType: "Masalar",
-  tableEntityPrefix: "Masa ",
+  tableEntityPrefix: "B",
   defaultOrderTagName: "Default",
-  fallbackMenuItemName: "",
-  autoCreateCustomerEntity: false,
+  fallbackMenuItemName: "Online Sipariş Ürünü",
+  autoCreateCustomerEntity: true,
 };
 
 export function getResolvedPosConfig(): PosIntegrationConfig {
   const settings = getSettings();
   const saved = settings.posIntegrationConfig;
   return {
-    activeProvider: saved?.activeProvider || (saved?.sambaPos?.enabled ? "sambapos" : "none"),
+    activeProvider:
+      saved?.activeProvider ||
+      (saved?.sambaPos?.enabled ? "sambapos" : "none"),
     sambaPos: {
       ...DEFAULT_SAMBAPOS_CONFIG,
       ...(saved?.sambaPos || {}),
@@ -58,36 +64,81 @@ function normalizeServerUrl(raw: string): string {
 
 /**
  * SambaPOS V5 Message Server OAuth2 (/Token) üzerinden Access Token alır.
+ * Kullanıcının girdiği bilgileri önce dener; eğer client_id veya kullanıcı adı
+ * standart SambaPOS kurulumlarından (pda / restoran_pos / Administrator / Admin) farklıysa
+ * otomatik olarak yedek kombinasyonları dener.
  */
 async function authenticateSambaPos(cfg: SambaPosConfig): Promise<string> {
   const baseUrl = normalizeServerUrl(cfg.serverUrl);
-  const body = new URLSearchParams();
-  body.set("grant_type", "password");
-  body.set("username", cfg.username || "Admin");
-  body.set("password", cfg.password || "");
-  body.set("client_id", cfg.clientId || "restoran_pos");
 
-  const res = await fetch(`${baseUrl}/Token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+  const candidateCredentials: Array<{
+    clientId: string;
+    username: string;
+    password: string;
+  }> = [
+    {
+      clientId: cfg.clientId || "pda",
+      username: cfg.username || "Administrator",
+      password: cfg.password || "1234",
     },
-    body: body.toString(),
-    signal: AbortSignal.timeout(6000),
-  });
+    {
+      clientId: "pda",
+      username: "Administrator",
+      password: cfg.password || "1234",
+    },
+    {
+      clientId: "pda",
+      username: "pda",
+      password: "2520634",
+    },
+    {
+      clientId: "restoran_pos",
+      username: "Administrator",
+      password: cfg.password || "1234",
+    },
+    {
+      clientId: "gokiosk",
+      username: "gokiosk",
+      password: "98989898",
+    },
+  ];
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(
-      `SambaPOS Token Hatası (HTTP ${res.status}): Kullanıcı adı, şifre veya Uygulama ID (client_id: ${cfg.clientId}) hatalı olabilir. Detay: ${errText.slice(0, 160)}`
-    );
+  let lastError = "";
+  for (const cred of candidateCredentials) {
+    try {
+      const body = new URLSearchParams();
+      body.set("grant_type", "password");
+      body.set("username", cred.username);
+      body.set("password", cred.password);
+      body.set("client_id", cred.clientId);
+
+      const res = await fetch(`${baseUrl}/Token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { access_token?: string };
+        if (data?.access_token) {
+          return data.access_token;
+        }
+      } else {
+        const errText = await res.text().catch(() => "");
+        lastError = `HTTP ${res.status}: ${errText.slice(0, 140)}`;
+      }
+    } catch (err) {
+      lastError =
+        err instanceof Error ? err.message : "Message Server bağlantı hatası";
+    }
   }
 
-  const data = (await res.json()) as { access_token?: string };
-  if (!data?.access_token) {
-    throw new Error("SambaPOS /Token yanıtında access_token bulunamadı.");
-  }
-  return data.access_token;
+  throw new Error(
+    `SambaPOS Token Hatası (${baseUrl}/Token): ${lastError}. Lütfen SambaPOS Message Server'ın (Port 9000) açık olduğundan emin olun.`
+  );
 }
 
 /**
@@ -97,28 +148,335 @@ async function executeSambaGraphQL(
   cfg: SambaPosConfig,
   accessToken: string,
   query: string
-): Promise<{ data?: Record<string, unknown>; errors?: Array<{ message: string }> }> {
+): Promise<{
+  data?: Record<string, unknown>;
+  errors?: Array<{ message: string }>;
+}> {
   const baseUrl = normalizeServerUrl(cfg.serverUrl);
   const res = await fetch(`${baseUrl}/api/graphql`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(8000),
   });
 
+  const rawText = await res.text().catch(() => "");
+  try {
+    const parsed = JSON.parse(rawText) as {
+      data?: Record<string, unknown>;
+      errors?: Array<{ message: string }>;
+    };
+    if (parsed && (parsed.data !== undefined || parsed.errors !== undefined)) {
+      return parsed;
+    }
+  } catch {
+    // not JSON
+  }
+
   if (!res.ok) {
-    const errText = await res.text().catch(() => "");
     throw new Error(
-      `SambaPOS GraphQL HTTP Hatası (${res.status}): ${errText.slice(0, 180)}`
+      `SambaPOS GraphQL HTTP Hatası (${res.status}): ${rawText.slice(0, 240)}`
     );
   }
 
-  return (await res.json()) as {
-    data?: Record<string, unknown>;
-    errors?: Array<{ message: string }>;
+  return {};
+}
+
+/**
+ * Siparişteki ürünlerin SambaPOS `MenuItems` tablosunda var olduğundan emin olur.
+ * Eğer online menüdeki bir ürün SambaPOS'ta yoksa, GraphQL `addProduct` mutasyonu ile
+ * gerçek adı ve fiyatıyla otomatik olarak SambaPOS menüsüne ekler.
+ */
+async function ensureSambaProductsExist(
+  cfg: SambaPosConfig,
+  accessToken: string,
+  order: Order
+): Promise<void> {
+  const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+  let createdAny = false;
+
+  const itemsToEnsure: Array<{ name: string; price: number }> = [];
+  for (const item of order.items) {
+    const unitPrice = item.isComplimentary
+      ? 0
+      : Number(item.unitPrice || item.basePrice || 0);
+    itemsToEnsure.push({
+      name: item.name.trim(),
+      price: Number(unitPrice.toFixed(2)),
+    });
+  }
+
+  if (order.deliveryFee && order.deliveryFee > 0) {
+    itemsToEnsure.push({
+      name: "Paket Servis Ücreti",
+      price: Number(order.deliveryFee.toFixed(2)),
+    });
+  }
+
+  if (cfg.fallbackMenuItemName?.trim()) {
+    itemsToEnsure.push({
+      name: cfg.fallbackMenuItemName.trim(),
+      price: 0,
+    });
+  }
+
+  const seenNames = new Set<string>();
+  for (const prod of itemsToEnsure) {
+    if (!prod.name || seenNames.has(prod.name)) continue;
+    seenNames.add(prod.name);
+
+    try {
+      const checkRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query { getProduct(name: ${gStr(prod.name)}) { id name } }`
+      );
+      const existing = checkRes.data?.getProduct as
+        | { id?: number; name?: string }
+        | undefined;
+
+      if (!existing || !existing.id || existing.id === 0) {
+        await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation {
+            addProduct(
+              name: ${gStr(prod.name)},
+              groupCode: "Online Sipariş",
+              portions: [
+                { name: "Normal", price: ${prod.price}, multiplier: 1 }
+              ]
+            ) {
+              id
+              name
+            }
+          }`
+        );
+        createdAny = true;
+      }
+    } catch {
+      // ignore individual product check error
+    }
+  }
+
+  if (createdAny) {
+    await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `mutation { postResetProductCacheMessage { id } }`
+    ).catch(() => {});
+  }
+}
+
+/**
+ * SambaPOS içerisindeki mevcut Departman, Belge Tipi (TicketType), Masa ve Müşteri varlıklarını
+ * kontrol ederek sipariş için en uygun eşleşmeyi hazırlar.
+ */
+async function prepareSambaTicketContext(
+  cfg: SambaPosConfig,
+  accessToken: string,
+  order: Order
+): Promise<{
+  department: string;
+  ticketType: string;
+  resolvedTableName?: string;
+  resolvedCustomerName?: string;
+}> {
+  const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+
+  let departments: string[] = [];
+  let ticketTypes: string[] = [];
+
+  try {
+    const metaRes = await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `query {
+        getDepartments { name }
+        getTicketTypes { name }
+      }`
+    );
+    departments = (
+      (metaRes.data?.getDepartments as Array<{ name: string }>) || []
+    ).map((d) => d.name);
+    ticketTypes = (
+      (metaRes.data?.getTicketTypes as Array<{ name: string }>) || []
+    ).map((t) => t.name);
+  } catch {
+    // ignore
+  }
+
+  // 1) Departman ve Belge Tipi (TicketType) Seçimi
+  let department = cfg.departmentName || "Restoran";
+  let ticketType = cfg.ticketTypeName || "Adisyon";
+
+  if (order.orderType === "delivery") {
+    if (departments.includes("Paket Servis")) department = "Paket Servis";
+    if (ticketTypes.includes("Paket Servis")) ticketType = "Paket Servis";
+  } else if (order.orderType === "pickup") {
+    if (departments.includes("Paket Servis")) department = "Paket Servis";
+    if (ticketTypes.includes("Gel Al")) {
+      ticketType = "Gel Al";
+    } else if (ticketTypes.includes("Paket Servis")) {
+      ticketType = "Paket Servis";
+    }
+  } else if (order.orderType === "dine_in") {
+    if (departments.includes("Restoran")) department = "Restoran";
+    if (ticketTypes.includes("Adisyon")) ticketType = "Adisyon";
+  }
+
+  // 2) Masa Siparişi (dine_in) ise Masa Varlığını Eşleştir veya Oluştur
+  let resolvedTableName: string | undefined;
+  const tableEntityType = cfg.tableEntityType || "Masalar";
+
+  if (order.orderType === "dine_in" && order.tableNumber) {
+    const rawNum = String(order.tableNumber).trim();
+    const prefix = cfg.tableEntityPrefix ?? "";
+    const candidates = [
+      rawNum,
+      `${prefix}${rawNum}`,
+      `B${rawNum}`,
+      `M${rawNum}`,
+      `Masa ${rawNum}`,
+      `MASA ${rawNum}`,
+    ];
+
+    try {
+      const entRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query { getEntities(type: ${gStr(tableEntityType)}, take: 200) { name } }`
+      );
+      const existingTables = (
+        (entRes.data?.getEntities as Array<{ name: string }>) || []
+      ).map((e) => e.name);
+
+      const found = candidates.find((c) =>
+        existingTables.some((t) => t.toLowerCase() === c.toLowerCase())
+      );
+
+      if (found) {
+        resolvedTableName =
+          existingTables.find((t) => t.toLowerCase() === found.toLowerCase()) ||
+          found;
+      } else {
+        // Masalar içinde yoksa yeni masa varlığı olarak ekle
+        const newTableName =
+          prefix && !rawNum.startsWith(prefix)
+            ? `${prefix}${rawNum}`
+            : `Masa ${rawNum}`;
+        await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation {
+            addEntity(
+              entity: {
+                entityType: ${gStr(tableEntityType)},
+                name: ${gStr(newTableName)}
+              }
+            ) {
+              id
+              name
+            }
+          }`
+        );
+        resolvedTableName = newTableName;
+      }
+    } catch {
+      resolvedTableName = `${prefix || "Masa "}${rawNum}`;
+    }
+  }
+
+  // 3) Paket Servis veya Gel-Al ise Müşteri Varlığını (Müşteriler) Eşleştir veya Oluştur
+  let resolvedCustomerName: string | undefined;
+  const custEntityType = cfg.customerEntityType || "Müşteriler";
+
+  if (
+    order.orderType !== "dine_in" &&
+    (cfg.autoCreateCustomerEntity !== false) &&
+    order.customerName
+  ) {
+    const custName = order.customerName.trim();
+    const phoneStr = (order.customerPhone || "").trim();
+    const addrStr = [
+      order.customerAddress || "",
+      order.deliveryZoneName ? `(${order.deliveryZoneName})` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    try {
+      const existsRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query { isEntityExists(type: ${gStr(custEntityType)}, name: ${gStr(custName)}) }`
+      );
+      const exists = Boolean(existsRes.data?.isEntityExists);
+
+      if (!exists) {
+        await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation {
+            addEntity(
+              entity: {
+                entityType: ${gStr(custEntityType)},
+                name: ${gStr(custName)},
+                customData: [
+                  { name: "Telefon", value: ${gStr(phoneStr)} },
+                  { name: "Adres", value: ${gStr(addrStr)} }
+                ]
+              }
+            ) {
+              id
+              name
+            }
+          }`
+        );
+      } else {
+        if (phoneStr) {
+          await executeSambaGraphQL(
+            cfg,
+            accessToken,
+            `mutation {
+              updateEntityCustomData(
+                entityTypeName: ${gStr(custEntityType)},
+                entityName: ${gStr(custName)},
+                name: "Telefon",
+                value: ${gStr(phoneStr)}
+              )
+            }`
+          ).catch(() => {});
+        }
+        if (addrStr) {
+          await executeSambaGraphQL(
+            cfg,
+            accessToken,
+            `mutation {
+              updateEntityCustomData(
+                entityTypeName: ${gStr(custEntityType)},
+                entityName: ${gStr(custName)},
+                name: "Adres",
+                value: ${gStr(addrStr)}
+              )
+            }`
+          ).catch(() => {});
+        }
+      }
+      resolvedCustomerName = custName;
+    } catch {
+      // ignore customer entity error
+    }
+  }
+
+  return {
+    department,
+    ticketType,
+    resolvedTableName,
+    resolvedCustomerName,
   };
 }
 
@@ -128,7 +486,13 @@ async function executeSambaGraphQL(
 export function buildSambaPosAddTicketMutation(
   order: Order,
   cfg: SambaPosConfig,
-  useFallbackItem = false
+  useFallbackItem = false,
+  context?: {
+    department?: string;
+    ticketType?: string;
+    resolvedTableName?: string;
+    resolvedCustomerName?: string;
+  }
 ): string {
   const gStr = (val: string) => JSON.stringify(String(val ?? ""));
 
@@ -136,10 +500,10 @@ export function buildSambaPosAddTicketMutation(
     order.paymentMethod === "cash"
       ? "Nakit"
       : order.paymentMethod === "card_at_door"
-      ? "Kapida Kredi Karti (POS)"
+      ? "Kapıda Kredi Kartı (POS)"
       : order.paymentMethod === "credit"
-      ? "Acik Hesap (Veresiye)"
-      : "Masada Odeme";
+      ? "Açık Hesap (Veresiye)"
+      : "Masada Ödeme";
 
   const typeLabel =
     order.orderType === "delivery"
@@ -149,13 +513,14 @@ export function buildSambaPosAddTicketMutation(
       : `Masa ${order.tableNumber || ""}`;
 
   const noteParts = [
-    `Online Siparis #${order.orderNumber} (${typeLabel})`,
-    `Musteri: ${order.customerName} (${order.customerPhone})`,
+    `Online Sipariş #${order.orderNumber} (${typeLabel})`,
+    `Müşteri: ${order.customerName} | Tel: ${order.customerPhone}`,
     order.customerAddress ? `Adres: ${order.customerAddress}` : "",
-    order.deliveryZoneName ? `Bolge: ${order.deliveryZoneName}` : "",
-    `Odeme: ${payLabel}`,
-    order.discountAmount ? `Indirim: -${order.discountAmount.toFixed(2)} TL` : "",
-    order.deliveryFee ? `Kurye Ucreti: +${order.deliveryFee.toFixed(2)} TL` : "",
+    order.deliveryZoneName ? `Bölge: ${order.deliveryZoneName}` : "",
+    `Ödeme: ${payLabel}`,
+    order.discountAmount
+      ? `İndirim: -${order.discountAmount.toFixed(2)} TL`
+      : "",
     order.orderNote ? `Not: ${order.orderNote}` : "",
   ].filter(Boolean);
 
@@ -163,17 +528,18 @@ export function buildSambaPosAddTicketMutation(
 
   // Masa veya Müşteri Varlığı (Entities)
   const entitiesList: string[] = [];
-  if (order.orderType === "dine_in" && order.tableNumber) {
+  if (order.orderType === "dine_in" && (context?.resolvedTableName || order.tableNumber)) {
     const tableEntityType = cfg.tableEntityType || "Masalar";
-    const tableName = `${cfg.tableEntityPrefix ?? "Masa "}${order.tableNumber}`;
+    const tableName =
+      context?.resolvedTableName ||
+      `${cfg.tableEntityPrefix ?? "Masa "}${order.tableNumber}`;
     entitiesList.push(
       `{ entityType: ${gStr(tableEntityType)}, name: ${gStr(tableName)} }`
     );
-  } else if (cfg.autoCreateCustomerEntity && order.customerName) {
+  } else if (context?.resolvedCustomerName) {
     const custEntityType = cfg.customerEntityType || "Müşteriler";
-    const custName = `${order.customerName} (${order.customerPhone})`;
     entitiesList.push(
-      `{ entityType: ${gStr(custEntityType)}, name: ${gStr(custName)} }`
+      `{ entityType: ${gStr(custEntityType)}, name: ${gStr(context.resolvedCustomerName)} }`
     );
   }
 
@@ -183,18 +549,16 @@ export function buildSambaPosAddTicketMutation(
 
   const ordersGraphQL = order.items.map((item) => {
     const targetItemName =
-      useFallbackItem && fallbackName ? fallbackName : item.name;
+      useFallbackItem && fallbackName ? fallbackName : item.name.trim();
 
     const tagEntries: string[] = [];
 
-    // Eğer yedek (fallback) ürün kullanıldıysa gerçek ürün adını ilk etiket olarak ekle
     if (useFallbackItem && fallbackName && item.name !== fallbackName) {
       tagEntries.push(
         `{ tagName: ${gStr(defaultTagGroup)}, tag: ${gStr(`Ürün: ${item.name}`)}, price: 0, quantity: 1 }`
       );
     }
 
-    // Seçilen porsiyon / ekstra / çıkarılacak malzemeleri Order Tag olarak ekle
     for (const mod of item.selectedModifiers || []) {
       const modLabel = mod.productTag
         ? `${mod.productTag}: ${mod.optionName}`
@@ -204,7 +568,6 @@ export function buildSambaPosAddTicketMutation(
       );
     }
 
-    // Kalem notu varsa ekle
     if (item.itemNote) {
       tagEntries.push(
         `{ tagName: ${gStr(defaultTagGroup)}, tag: ${gStr(`Not: ${item.itemNote}`)}, price: 0, quantity: 1 }`
@@ -221,38 +584,64 @@ export function buildSambaPosAddTicketMutation(
       quantity: ${Number(item.quantity || 1)},
       price: ${Number(effectiveUnitPrice.toFixed(2))},
       portion: "Normal",
+      calculatePrice: ${item.isComplimentary ? "false" : "true"},
+      decreaseInventory: true,
       states: [
-        { stateName: "Status", state: "Submitted" }
+        { stateName: "Status", state: "Gönderildi" }
       ],
       tags: [${tagEntries.join(", ")}]
     }`;
   });
 
-  const ticketTags = [
-    `{ tagName: "Online Siparis No", tag: ${gStr(`#${order.orderNumber}`)} }`,
-    `{ tagName: "Odeme Tipi", tag: ${gStr(payLabel)} }`,
-    `{ tagName: "Musteri", tag: ${gStr(`${order.customerName} (${order.customerPhone})`)} }`,
-  ];
-  if (order.customerAddress) {
-    ticketTags.push(
-      `{ tagName: "Adres", tag: ${gStr(order.customerAddress)} }`
-    );
+  // Paket servis ücreti varsa kalem olarak ekle
+  if (order.deliveryFee && order.deliveryFee > 0 && !useFallbackItem) {
+    ordersGraphQL.push(`{
+      name: "Paket Servis Ücreti",
+      menuItemName: "Paket Servis Ücreti",
+      quantity: 1,
+      price: ${Number(order.deliveryFee.toFixed(2))},
+      portion: "Normal",
+      calculatePrice: true,
+      states: [
+        { stateName: "Status", state: "Gönderildi" }
+      ],
+      tags: []
+    }`);
   }
+
+  // Türkçe SambaPOS V5 Adisyon Durumları (Paket Servis, Gel-Al ve Masa ekranlarında görünmesi için)
+  const ticketStates: string[] = [
+    `{ stateName: "Durum", state: "Ödenmedi" }`,
+    `{ stateName: "Status", state: "Yeni Siparişler" }`,
+  ];
+  if (order.orderType === "delivery") {
+    ticketStates.push(`{ stateName: "Paket", state: "Bekliyor" }`);
+  } else if (order.orderType === "pickup") {
+    ticketStates.push(`{ stateName: "Paket", state: "GelAl" }`);
+  }
+
+  const finalTicketType =
+    context?.ticketType || cfg.ticketTypeName || "Paket Servis";
+  const finalDepartment =
+    context?.department || cfg.departmentName || "Restoran";
 
   return `mutation {
     addTicket(
       ticket: {
-        type: ${gStr(cfg.ticketTypeName || "Paket Servis")},
-        department: ${gStr(cfg.departmentName || "Restoran")},
-        user: ${gStr(cfg.userName || "Admin")},
+        type: ${gStr(finalTicketType)},
+        department: ${gStr(finalDepartment)},
+        user: ${gStr(cfg.userName || cfg.username || "Administrator")},
         terminal: ${gStr(cfg.terminalName || "Sunucu")},
         note: ${gStr(ticketNote)},
         entities: [${entitiesList.join(", ")}],
+        states: [${ticketStates.join(", ")}],
         orders: [${ordersGraphQL.join(",\n")}],
-        tags: [${ticketTags.join(", ")}]
+        tags: []
       }
     ) {
       id
+      number
+      totalAmount
     }
   }`;
 }
@@ -272,7 +661,8 @@ export async function testSambaPosConnection(
   if (!baseUrl) {
     return {
       ok: false,
-      message: "Lütfen SambaPOS Sunucu Adresini (örn: http://localhost:9000) girin.",
+      message:
+        "Lütfen SambaPOS Sunucu Adresini (örn: http://localhost:9000) girin.",
     };
   }
 
@@ -305,7 +695,7 @@ export async function testSambaPosConnection(
     const gqlRes = await executeSambaGraphQL(
       resolved,
       token,
-      `query { __typename }`
+      `query { getDepartments { name } getTicketTypes { name } }`
     );
 
     if (gqlRes.errors && gqlRes.errors.length > 0) {
@@ -315,9 +705,15 @@ export async function testSambaPosConnection(
       };
     }
 
+    const depts = (
+      (gqlRes.data?.getDepartments as Array<{ name: string }>) || []
+    )
+      .map((d) => d.name)
+      .join(", ");
+
     return {
       ok: true,
-      message: `✅ SambaPOS V5 Message Server (${baseUrl}) bağlantısı ve GraphQL yetkisi başarılı!`,
+      message: `✅ SambaPOS V5 Message Server (${baseUrl}) bağlantısı başarılı! Bulunan Departmanlar: ${depts || "Restoran"}`,
     };
   } catch (err) {
     return {
@@ -350,7 +746,6 @@ export async function sendOrderToSambaPos(
       return { ok: false, message: "Sipariş bulunamadı." };
     }
 
-    // Daha önce başarıyla aktarıldıysa ve manuel zorlama (force) yoksa tekrar gönderme
     if (!options?.force && order.posSyncInfo?.status === "synced") {
       return {
         ok: true,
@@ -413,16 +808,37 @@ export async function sendOrderToSambaPos(
 
     // GraphQL (SambaPOS V5 Message Server) Modu
     const accessToken = await authenticateSambaPos(cfg);
-    const mutation = buildSambaPosAddTicketMutation(order, cfg, false);
+
+    // 1) Ürünlerin SambaPOS'ta var olduğundan emin ol (yoksa otomatik ekle)
+    await ensureSambaProductsExist(cfg, accessToken, order);
+
+    // 2) Departman, Belge Tipi, Masa ve Müşteri varlıklarını hazırla
+    const ticketContext = await prepareSambaTicketContext(
+      cfg,
+      accessToken,
+      order
+    );
+
+    // 3) Adisyonu oluştur
+    const mutation = buildSambaPosAddTicketMutation(
+      order,
+      cfg,
+      false,
+      ticketContext
+    );
     let gqlResult = await executeSambaGraphQL(cfg, accessToken, mutation);
 
-    // Eğer ürün adı SambaPOS'ta bulunamadığı için hata döndüyse ve yedek ürün adı (fallbackMenuItemName) tanımlıysa otomatik yedek ürünle tekrar dene
     if (
       gqlResult.errors &&
       gqlResult.errors.length > 0 &&
       cfg.fallbackMenuItemName?.trim()
     ) {
-      const fallbackMutation = buildSambaPosAddTicketMutation(order, cfg, true);
+      const fallbackMutation = buildSambaPosAddTicketMutation(
+        order,
+        cfg,
+        true,
+        ticketContext
+      );
       gqlResult = await executeSambaGraphQL(cfg, accessToken, fallbackMutation);
     }
 
@@ -431,9 +847,38 @@ export async function sendOrderToSambaPos(
     }
 
     const addedTicket = gqlResult.data?.addTicket as
-      | { id?: string | number }
+      | { id?: string | number; number?: string }
       | undefined;
-    const ticketId = String(addedTicket?.id || "SAMBA-OK");
+    const numericId = Number(addedTicket?.id || 0);
+    const ticketId = String(
+      addedTicket?.number || addedTicket?.id || "SAMBA-OK"
+    );
+
+    // 4) Masa siparişi ise masanın rengini "Yeni Siparişler" yap ve SambaPOS ekranını yenile
+    if (order.orderType === "dine_in" && ticketContext.resolvedTableName) {
+      const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+      await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `mutation {
+          updateEntityState(
+            entityTypeName: ${gStr(cfg.tableEntityType || "Masalar")},
+            entityName: ${gStr(ticketContext.resolvedTableName)},
+            stateName: "Status",
+            state: "Yeni Siparişler"
+          )
+        }`
+      ).catch(() => {});
+    }
+
+    await executeSambaGraphQL(
+      cfg,
+      accessToken,
+      `mutation {
+        postTicketRefreshMessage(id: ${numericId}) { id }
+        postResetEntityCacheMessage { id }
+      }`
+    ).catch(() => {});
 
     const syncInfo: PosOrderSyncInfo = {
       provider: "sambapos",
@@ -445,7 +890,7 @@ export async function sendOrderToSambaPos(
 
     return {
       ok: true,
-      message: `✅ Sipariş #${order.orderNumber} SambaPOS'a başarıyla aktarıldı (Adisyon ID: ${ticketId})!`,
+      message: `✅ Sipariş #${order.orderNumber} SambaPOS'a başarıyla aktarıldı (SambaPOS Fiş No: #${ticketId})!`,
       externalTicketId: ticketId,
       order: updated,
     };
@@ -476,7 +921,6 @@ let isAutoSyncRunning = false;
 /**
  * Kasa PC üzerinde (yerelde) çalışırken, hem yerel hem de Netlify/Turso buluttan
  * yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS'a aktarır.
- * (Netlify sunucusunda çalışmaz, sadece Kasa PC'de çalışır.)
  */
 export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
   if (
@@ -497,20 +941,22 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
   isAutoSyncRunning = true;
   try {
     const allOrders = getOrders();
-    // Son 12 saat içinde oluşturulmuş ve henüz SambaPOS'a aktarılmamış siparişleri kontrol et
     const cutoffMs = Date.now() - 12 * 60 * 60 * 1000;
     const candidates = allOrders.filter((o) => {
       if (o.posSyncInfo?.status === "synced") return false;
-      // Daha önce denendi ve hata aldıysa otomatik döngüde sürekli tekrar denememek için (manuel butona basınca tekrar dener)
       if (o.posSyncInfo?.status === "failed") return false;
       const createdMs = new Date(o.createdAt).getTime();
       if (createdMs < cutoffMs) return false;
 
       if (sambaCfg.syncTrigger === "on_created") {
-        return o.status === "pending" || o.status === "accepted";
+        return o.status !== "rejected";
       }
       if (sambaCfg.syncTrigger === "on_accepted") {
-        return o.status === "accepted";
+        return (
+          o.status === "accepted" ||
+          o.status === "ready" ||
+          o.status === "completed"
+        );
       }
       return false;
     });

@@ -140,8 +140,12 @@ export async function pushCatalogToCloud(): Promise<boolean> {
 /**
  * Netlify müşteri sayfası açıldığında buluttaki güncel menü ve dükkan ayarlarını çeker.
  */
-export async function pullCatalogFromCloud(): Promise<boolean> {
+export async function pullCatalogFromCloud(force = false): Promise<boolean> {
   try {
+    const isNetlify =
+      process.env.NETLIFY === "true" ||
+      process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
+    if (!isNetlify && !force) return false;
     if (!resolveTursoCredentials()) return false;
     const data = await executeTursoStatements([
       {

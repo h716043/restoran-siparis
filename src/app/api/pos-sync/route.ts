@@ -87,14 +87,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(res);
     }
 
-    // 4) Aktarılmamış Tüm Aktif Siparişleri Toplu Olarak SambaPOS'a Aktarma
+    // 4) Aktarılmamış Tüm Siparişleri Toplu Olarak SambaPOS'a Aktarma
     if (body.action === "sync_all_pending") {
+      const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
       const activeOrders = getOrders().filter(
         (o) =>
-          (o.status === "pending" ||
-            o.status === "accepted" ||
-            o.status === "ready") &&
-          o.posSyncInfo?.status !== "synced"
+          o.status !== "rejected" &&
+          o.posSyncInfo?.status !== "synced" &&
+          new Date(o.createdAt).getTime() >= cutoffMs
       );
       let syncedCount = 0;
       let lastError = "";

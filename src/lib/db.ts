@@ -1195,43 +1195,47 @@ export function getOrders(): Order[] {
     updatedAt: string;
   }>;
 
-  return rows.map((r) => ({
-    id: r.id,
-    orderNumber: r.orderNumber,
-    orderType: r.orderType,
-    status: r.status,
-    tableNumber: r.tableNumber || undefined,
-    guestCount: r.guestCount ? Number(r.guestCount) : undefined,
-    isPriority: Boolean(r.isPriority),
-    userId: r.userId || undefined,
-    customerName: r.customerName,
-    customerPhone: r.customerPhone,
-    customerAddress: r.customerAddress || undefined,
-    deliveryZoneId: r.deliveryZoneId || undefined,
-    deliveryZoneName: r.deliveryZoneName || undefined,
-    scheduledTime: r.scheduledTime || undefined,
-    orderNote: r.orderNote || undefined,
-    paymentMethod: r.paymentMethod,
-    splitPaymentInfo: r.splitPaymentJson
+  return rows.map((r) => {
+    const parsedSplit = r.splitPaymentJson
       ? JSON.parse(r.splitPaymentJson)
-      : undefined,
-    subtotal: r.subtotal,
-    discountAmount: r.discountAmount || 0,
-    couponCode: r.couponCode || undefined,
-    deliveryFee: r.deliveryFee,
-    totalAmount: r.totalAmount,
-    estimatedMinutes: r.estimatedMinutes || undefined,
-    courierName: r.courierName || undefined,
-    rejectReason: r.rejectReason || undefined,
-    loyaltyPointsEarned: r.loyaltyPointsEarned || 0,
-    loyaltyPointsUsed: r.loyaltyPointsUsed || 0,
-    rating: r.rating || undefined,
-    reviewText: r.reviewText || undefined,
-    reviewedAt: r.reviewedAt || undefined,
-    items: JSON.parse(r.itemsJson || "[]"),
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  }));
+      : undefined;
+    return {
+      id: r.id,
+      orderNumber: r.orderNumber,
+      orderType: r.orderType,
+      status: r.status,
+      tableNumber: r.tableNumber || undefined,
+      guestCount: r.guestCount ? Number(r.guestCount) : undefined,
+      isPriority: Boolean(r.isPriority),
+      userId: r.userId || undefined,
+      customerName: r.customerName,
+      customerPhone: r.customerPhone,
+      customerAddress: r.customerAddress || undefined,
+      deliveryZoneId: r.deliveryZoneId || undefined,
+      deliveryZoneName: r.deliveryZoneName || undefined,
+      scheduledTime: r.scheduledTime || undefined,
+      orderNote: r.orderNote || undefined,
+      paymentMethod: r.paymentMethod,
+      splitPaymentInfo: parsedSplit,
+      posSyncInfo: parsedSplit?.posSyncInfo,
+      subtotal: r.subtotal,
+      discountAmount: r.discountAmount || 0,
+      couponCode: r.couponCode || undefined,
+      deliveryFee: r.deliveryFee,
+      totalAmount: r.totalAmount,
+      estimatedMinutes: r.estimatedMinutes || undefined,
+      courierName: r.courierName || undefined,
+      rejectReason: r.rejectReason || undefined,
+      loyaltyPointsEarned: r.loyaltyPointsEarned || 0,
+      loyaltyPointsUsed: r.loyaltyPointsUsed || 0,
+      rating: r.rating || undefined,
+      reviewText: r.reviewText || undefined,
+      reviewedAt: r.reviewedAt || undefined,
+      items: JSON.parse(r.itemsJson || "[]"),
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
+  });
 }
 
 export function getOrdersByCustomer(rawPhone: string, userId?: string): Order[] {
@@ -2391,6 +2395,9 @@ export function mergeCatalogFromCloud(payload: {
         payload.settings.securityConfig || localSettings.securityConfig,
       cloudSyncConfig:
         localSettings.cloudSyncConfig || payload.settings.cloudSyncConfig,
+      posIntegrationConfig:
+        localSettings.posIntegrationConfig ||
+        payload.settings.posIntegrationConfig,
     };
     db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(
       JSON.stringify(merged)
@@ -2442,6 +2449,14 @@ export function mergeActivityFromCloud(payload: {
   const db = getDb();
 
   if (payload.orders) {
+    const existingRows = db
+      .prepare("SELECT id, splitPaymentJson FROM orders")
+      .all() as Array<{ id: string; splitPaymentJson: string | null }>;
+    const existingSplitMap = new Map<string, string | null>();
+    for (const row of existingRows) {
+      existingSplitMap.set(row.id, row.splitPaymentJson);
+    }
+
     const upsertOrder = db.prepare(`
       INSERT INTO orders (
         id, orderNumber, orderType, status, tableNumber, userId,
@@ -2471,6 +2486,29 @@ export function mergeActivityFromCloud(payload: {
         updatedAt = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.updatedAt ELSE orders.updatedAt END
     `);
     for (const o of payload.orders) {
+      let localPosSyncInfo = undefined;
+      const localSplitRaw = existingSplitMap.get(o.id);
+      if (localSplitRaw) {
+        try {
+          localPosSyncInfo = JSON.parse(localSplitRaw)?.posSyncInfo;
+        } catch {
+          // ignore
+        }
+      }
+      const mergedPosSync =
+        localPosSyncInfo?.status === "synced"
+          ? localPosSyncInfo
+          : o.posSyncInfo || o.splitPaymentInfo?.posSyncInfo || localPosSyncInfo;
+      const mergedSplit =
+        o.splitPaymentInfo || mergedPosSync
+          ? {
+              cashAmount: o.splitPaymentInfo?.cashAmount || 0,
+              cardAmount: o.splitPaymentInfo?.cardAmount || 0,
+              ...(o.splitPaymentInfo || {}),
+              ...(mergedPosSync ? { posSyncInfo: mergedPosSync } : {}),
+            }
+          : null;
+
       upsertOrder.run(
         o.id,
         o.orderNumber,
@@ -2486,7 +2524,7 @@ export function mergeActivityFromCloud(payload: {
         o.scheduledTime || null,
         o.orderNote || null,
         o.paymentMethod,
-        o.splitPaymentInfo ? JSON.stringify(o.splitPaymentInfo) : null,
+        mergedSplit ? JSON.stringify(mergedSplit) : null,
         o.subtotal,
         o.discountAmount || 0,
         o.couponCode || null,

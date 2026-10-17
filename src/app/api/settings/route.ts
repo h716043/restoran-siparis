@@ -36,6 +36,8 @@ export async function PUT(req: NextRequest) {
       waiterPins: body.waiterPins || current.waiterPins,
       securityConfig: body.securityConfig || current.securityConfig,
       cloudSyncConfig: body.cloudSyncConfig || current.cloudSyncConfig,
+      posIntegrationConfig:
+        body.posIntegrationConfig || current.posIntegrationConfig,
     });
     await pushCatalogToCloud();
     return NextResponse.json(updated);
