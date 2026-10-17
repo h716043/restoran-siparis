@@ -11,6 +11,9 @@ import {
   RestaurantSettings,
   SelectedModifier,
   TableCall,
+  formatTableLabel,
+  getRestaurantTables,
+  isSameTableName,
 } from "@/types";
 
 function formatCurrency(val: number): string {
@@ -357,7 +360,20 @@ export default function WaiterTerminalPage() {
     return () => clearInterval(interval);
   }, [authenticated, fetchAllData]);
 
-  const totalTables = settings?.tableCount || 20;
+  const tableList = useMemo(
+    () => getRestaurantTables(settings, 20),
+    [settings]
+  );
+  const totalTables = tableList.length;
+
+  useEffect(() => {
+    if (
+      tableList.length > 0 &&
+      !tableList.some((t) => isSameTableName(t, selectedTable))
+    ) {
+      setSelectedTable(tableList[0]);
+    }
+  }, [tableList, selectedTable]);
 
   const activeDineInOrders = useMemo(
     () =>
@@ -396,8 +412,8 @@ export default function WaiterTerminalPage() {
   // Orders for the currently selected table
   const selectedTableOrders = useMemo(
     () =>
-      activeDineInOrders.filter(
-        (o) => String(o.tableNumber) === String(selectedTable)
+      activeDineInOrders.filter((o) =>
+        isSameTableName(o.tableNumber, selectedTable)
       ),
     [activeDineInOrders, selectedTable]
   );
@@ -1239,14 +1255,14 @@ export default function WaiterTerminalPage() {
 
             {/* Tables Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-              {Array.from({ length: totalTables }, (_, i) => String(i + 1))
+              {tableList
                 .filter((tNum) => {
-                  const tableOrders = activeDineInOrders.filter(
-                    (o) => String(o.tableNumber) === tNum
+                  const tableOrders = activeDineInOrders.filter((o) =>
+                    isSameTableName(o.tableNumber, tNum)
                   );
                   const isOccupied = tableOrders.length > 0;
-                  const hasCall = tableRequests.some(
-                    (r) => String(r.tableNumber) === tNum
+                  const hasCall = tableRequests.some((r) =>
+                    isSameTableName(r.tableNumber, tNum)
                   );
                   const hasReady = tableOrders.some((o) => o.status === "ready");
                   if (tableFilter === "occupied") return isOccupied;
@@ -1256,8 +1272,8 @@ export default function WaiterTerminalPage() {
                   return true;
                 })
                 .map((tNum) => {
-                  const tableOrders = activeDineInOrders.filter(
-                    (o) => String(o.tableNumber) === tNum
+                  const tableOrders = activeDineInOrders.filter((o) =>
+                    isSameTableName(o.tableNumber, tNum)
                   );
                   const isOccupied = tableOrders.length > 0;
                   const totalBill = tableOrders.reduce(
@@ -1283,8 +1299,8 @@ export default function WaiterTerminalPage() {
                   const idleMins = latestOrderIso
                     ? getElapsedMinutes(latestOrderIso)
                     : 0;
-                  const activeCall = tableRequests.find(
-                    (r) => String(r.tableNumber) === tNum
+                  const activeCall = tableRequests.find((r) =>
+                    isSameTableName(r.tableNumber, tNum)
                   );
                   const hasReady = tableOrders.some((o) => o.status === "ready");
                   const isPreparing = tableOrders.some(
@@ -1293,7 +1309,10 @@ export default function WaiterTerminalPage() {
                   const activeReservation = (settings?.reservations || []).find(
                     (r) =>
                       (r.status === "pending" || r.status === "confirmed") &&
-                      String(r.tableNumber || "") === tNum
+                      isSameTableName(
+                        r.tableNumber || r.assignedTable || "",
+                        tNum
+                      )
                   );
 
                   return (
@@ -1315,7 +1334,7 @@ export default function WaiterTerminalPage() {
                       <div>
                         <div className="flex items-center justify-between gap-1">
                           <span className="text-sm font-black text-white">
-                            Masa {tNum}
+                            {formatTableLabel(tNum)}
                           </span>
                           {activeCall ? (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white font-black animate-pulse">
@@ -1431,11 +1450,9 @@ export default function WaiterTerminalPage() {
                     onChange={(e) => setSelectedTable(e.target.value)}
                     className="bg-stone-950 border border-amber-500/50 text-amber-300 font-black text-xs sm:text-sm rounded-xl px-2.5 py-1.5"
                   >
-                    {Array.from({ length: totalTables }, (_, i) =>
-                      String(i + 1)
-                    ).map((tNum) => (
+                    {tableList.map((tNum) => (
                       <option key={tNum} value={tNum}>
-                        Masa {tNum}
+                        {formatTableLabel(tNum)}
                       </option>
                     ))}
                   </select>
@@ -1822,13 +1839,13 @@ export default function WaiterTerminalPage() {
                   }}
                   className="bg-stone-950 border border-amber-500/50 text-amber-300 font-black text-sm rounded-xl px-3 py-1.5"
                 >
-                  {Array.from({ length: totalTables }, (_, i) =>
-                    String(i + 1)
-                  ).map((tNum) => {
-                    const hasOrd = occupiedTableNumbers.has(tNum);
+                  {tableList.map((tNum) => {
+                    const hasOrd = activeDineInOrders.some((o) =>
+                      isSameTableName(o.tableNumber, tNum)
+                    );
                     return (
                       <option key={tNum} value={tNum}>
-                        Masa {tNum} {hasOrd ? "(Dolu)" : "(Boş)"}
+                        {formatTableLabel(tNum)} {hasOrd ? "(Dolu)" : "(Boş)"}
                       </option>
                     );
                   })}
@@ -1859,7 +1876,7 @@ export default function WaiterTerminalPage() {
               <div className="bg-stone-900 border border-stone-800 rounded-2xl p-8 text-center space-y-3">
                 <div className="text-3xl">🪑</div>
                 <div className="text-sm font-black text-white">
-                  Masa {selectedTable} Şu Anda Boş
+                  {formatTableLabel(selectedTable)} Şu Anda Boş
                 </div>
                 <p className="text-xs text-stone-400">
                   Bu masada açık adisyon bulunmuyor. Hemen yeni sipariş
@@ -1870,7 +1887,7 @@ export default function WaiterTerminalPage() {
                   onClick={() => setActiveTab("order")}
                   className="px-4 py-2.5 rounded-xl bg-amber-500 text-stone-950 font-black text-xs"
                 >
-                  ➕ Masa {selectedTable} İçin Sipariş Aç
+                  ➕ {formatTableLabel(selectedTable)} İçin Sipariş Aç
                 </button>
               </div>
             ) : (
@@ -1880,7 +1897,7 @@ export default function WaiterTerminalPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-black text-white">
-                        🧾 Masa {selectedTable} Açık Adisyon Kalemleri
+                        🧾 {formatTableLabel(selectedTable)} Açık Adisyon Kalemleri
                       </h3>
                       <p className="text-[11px] text-stone-400">
                         Alman usulü ara hesap için ürünlerin solundaki kutucuğu
@@ -2153,15 +2170,15 @@ export default function WaiterTerminalPage() {
                       className="flex-1 bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white font-bold"
                     >
                       <option value="">Hedef Masayı Seçin...</option>
-                      {Array.from({ length: totalTables }, (_, i) =>
-                        String(i + 1)
-                      )
-                        .filter((t) => t !== selectedTable)
+                      {tableList
+                        .filter((t) => !isSameTableName(t, selectedTable))
                         .map((t) => {
-                          const isOcc = occupiedTableNumbers.has(t);
+                          const isOcc = activeDineInOrders.some((o) =>
+                            isSameTableName(o.tableNumber, t)
+                          );
                           return (
                             <option key={t} value={t}>
-                              Masa {t}{" "}
+                              {formatTableLabel(t)}{" "}
                               {isOcc
                                 ? "(Dolu - Hesapları Birleştir)"
                                 : "(Boş - Masayı Taşı)"}
@@ -2184,7 +2201,7 @@ export default function WaiterTerminalPage() {
                 <div className="bg-stone-900 border-2 border-emerald-500/60 rounded-2xl p-4 space-y-3 shadow-xl">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-black text-emerald-400">
-                      💳 Masa {selectedTable} Tahsilat & Hesap Kapat
+                      💳 {formatTableLabel(selectedTable)} Tahsilat & Hesap Kapat
                     </h4>
                     <div className="text-right">
                       <div className="text-[10px] text-stone-400">
@@ -2337,7 +2354,7 @@ export default function WaiterTerminalPage() {
                   >
                     {processingBill
                       ? "Hesap Kapatılıyor..."
-                      : `✅ Masa ${selectedTable} Hesabını Kapat (${formatCurrency(
+                      : `✅ ${formatTableLabel(selectedTable)} Hesabını Kapat (${formatCurrency(
                           netPayableBillAmount
                         )})`}
                   </button>
@@ -2370,7 +2387,7 @@ export default function WaiterTerminalPage() {
                       <div className="text-sm font-black text-white">
                         {req.type === "kitchen_pickup"
                           ? `👨‍🍳 Mutfak Tezgahı (${req.tableNumber})`
-                          : `Masa ${req.tableNumber}`}
+                          : formatTableLabel(req.tableNumber)}
                       </div>
                       <div className="text-xs text-red-200 font-semibold">
                         {req.type === "kitchen_pickup"
@@ -2428,7 +2445,7 @@ export default function WaiterTerminalPage() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-black text-white">
-                        Masa {ord.tableNumber} (#{ord.orderNumber})
+                        {formatTableLabel(ord.tableNumber)} (#{ord.orderNumber})
                       </span>
                       <span className="text-xs font-black text-emerald-300">
                         {formatCurrency(ord.totalAmount)}
@@ -2542,11 +2559,9 @@ export default function WaiterTerminalPage() {
                             className="bg-stone-950 border border-purple-500/40 rounded-xl px-2.5 py-1.5 text-xs text-white font-bold"
                           >
                             <option value="">Masa Ata...</option>
-                            {Array.from({ length: totalTables }, (_, i) =>
-                              String(i + 1)
-                            ).map((t) => (
+                            {tableList.map((t) => (
                               <option key={t} value={t}>
-                                Masa {t}
+                                {formatTableLabel(t)}
                               </option>
                             ))}
                           </select>

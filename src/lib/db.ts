@@ -14,6 +14,8 @@ import {
   TableCall,
   TableReservation,
   WhatsAppLog,
+  formatTableLabel,
+  isSameTableName,
 } from "@/types";
 import {
   CAMPAIGN_CATEGORY,
@@ -1825,13 +1827,13 @@ export function transferTableOrders(
   const db = getDb();
   const cleanFrom = String(fromTable).trim();
   const cleanTo = String(toTable).trim();
-  if (!cleanFrom || !cleanTo || cleanFrom === cleanTo) return getOrders();
+  if (!cleanFrom || !cleanTo || isSameTableName(cleanFrom, cleanTo)) return getOrders();
 
   const allOrders = getOrders();
   const fromActive = allOrders.filter(
     (o) =>
       o.orderType === "dine_in" &&
-      String(o.tableNumber) === cleanFrom &&
+      isSameTableName(o.tableNumber, cleanFrom) &&
       (o.status === "pending" || o.status === "accepted" || o.status === "ready")
   );
   if (fromActive.length === 0) return allOrders;
@@ -1839,7 +1841,7 @@ export function transferTableOrders(
   const toActive = allOrders.filter(
     (o) =>
       o.orderType === "dine_in" &&
-      String(o.tableNumber) === cleanTo &&
+      isSameTableName(o.tableNumber, cleanTo) &&
       (o.status === "pending" || o.status === "accepted" || o.status === "ready")
   );
 
@@ -1860,7 +1862,7 @@ export function transferTableOrders(
     const nextTotal = Math.max(0, nextSubtotal - nextDiscount);
     const mergedNote = [
       primaryTarget.orderNote,
-      `Masa ${cleanFrom} birleştirildi`,
+      `${formatTableLabel(cleanFrom)} birleştirildi`,
     ]
       .filter(Boolean)
       .join(" • ");
@@ -1889,16 +1891,20 @@ export function transferTableOrders(
         UPDATE orders
         SET tableNumber = ?, customerName = ?, updatedAt = ?
         WHERE id = ?
-      `).run(cleanTo, `Masa ${cleanTo}`, now, ord.id);
+      `).run(cleanTo, formatTableLabel(cleanTo), now, ord.id);
     }
   }
 
   // Bekleyen masa çağrılarını da yeni masaya aktar
-  db.prepare(`
-    UPDATE table_calls
-    SET tableNumber = ?
-    WHERE tableNumber = ? AND status = 'pending'
-  `).run(cleanTo, cleanFrom);
+  const pendingCalls = getTableCalls();
+  for (const call of pendingCalls) {
+    if (isSameTableName(call.tableNumber, cleanFrom)) {
+      db.prepare("UPDATE table_calls SET tableNumber = ? WHERE id = ?").run(
+        cleanTo,
+        call.id
+      );
+    }
+  }
 
   return getOrders();
 }
@@ -2009,7 +2015,7 @@ export function closeTableOrdersWithPayment(
   const tableActive = allOrders.filter(
     (o) =>
       o.orderType === "dine_in" &&
-      String(o.tableNumber) === cleanTable &&
+      isSameTableName(o.tableNumber, cleanTable) &&
       (o.status === "pending" || o.status === "accepted" || o.status === "ready")
   );
   if (tableActive.length === 0) return allOrders;
@@ -2058,20 +2064,23 @@ export function closeTableOrdersWithPayment(
   if (paymentData.paymentMethod === "credit" && totalClosedAmount > 0) {
     recordCreditAccountTransaction({
       accountId: paymentData.creditAccountId,
-      customerName: paymentData.creditAccountName || `Masa ${cleanTable} Müşterisi`,
+      customerName: paymentData.creditAccountName || `${formatTableLabel(cleanTable)} Müşterisi`,
       type: "debt",
       amount: totalClosedAmount,
-      description: `Masa ${cleanTable} Adisyon Kapama (#${tableActive[0].orderNumber})`,
+      description: `${formatTableLabel(cleanTable)} Adisyon Kapama (#${tableActive[0].orderNumber})`,
       orderNumber: tableActive[0].orderNumber,
     });
   }
 
   // O masanın bekleyen garson/hesap çağrılarını kapat
-  db.prepare(`
-    UPDATE table_calls
-    SET status = 'resolved'
-    WHERE tableNumber = ? AND status = 'pending'
-  `).run(cleanTable);
+  const pendingCalls = getTableCalls();
+  for (const call of pendingCalls) {
+    if (isSameTableName(call.tableNumber, cleanTable)) {
+      db.prepare("UPDATE table_calls SET status = 'resolved' WHERE id = ?").run(
+        call.id
+      );
+    }
+  }
 
   return getOrders();
 }
@@ -2091,7 +2100,7 @@ export function payPartialTableItems(
   const tableActive = allOrders.filter(
     (o) =>
       o.orderType === "dine_in" &&
-      String(o.tableNumber) === cleanTable &&
+      isSameTableName(o.tableNumber, cleanTable) &&
       (o.status === "pending" || o.status === "accepted" || o.status === "ready")
   );
   if (tableActive.length === 0) return allOrders;
@@ -2151,7 +2160,7 @@ export function payPartialTableItems(
       paidOrderId,
       nextOrderNum,
       cleanTable,
-      `Masa ${cleanTable} (Kısmi Tahsilat)`,
+      `${formatTableLabel(cleanTable)} (Kısmi Tahsilat)`,
       "Masadan kısmi ürün ödemesi alındı",
       paymentMethod,
       paidSubtotal,

@@ -64,6 +64,9 @@ import {
   SavedAddress,
   SelectedModifier,
   TableReservation,
+  formatTableLabel,
+  getRestaurantTables,
+  isSameTableName,
 } from "@/types";
 import {
   STOREFRONT_THEMES,
@@ -116,9 +119,7 @@ const TIME_SLOTS = [
 function CustomerMenuContent() {
   const searchParams = useSearchParams();
   const rawTableParam = searchParams.get("masa") || searchParams.get("table");
-  const tableParam = rawTableParam
-    ? rawTableParam.replace(/^masa[-_\s]*/i, "").trim()
-    : null;
+  const tableParam = rawTableParam ? rawTableParam.trim() : null;
   const isEmbed = searchParams.get("embed") === "1";
 
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
@@ -306,10 +307,12 @@ function CustomerMenuContent() {
   useEffect(() => {
     if (tableParam) {
       setOrderType("dine_in");
-      setTableNumber(tableParam);
+      const list = getRestaurantTables(settings);
+      const matched = list.find((t) => isSameTableName(t, tableParam));
+      setTableNumber(matched || tableParam);
       setPaymentMethod("pos_at_table");
     }
-  }, [tableParam]);
+  }, [tableParam, settings]);
 
   const fetchUserProfileAndOrders = useCallback(async (phone: string) => {
     if (!phone) return;
@@ -1974,12 +1977,9 @@ function CustomerMenuContent() {
                   className="bg-slate-800 border border-slate-700 text-white text-xs font-bold px-2.5 py-1 rounded-lg"
                 >
                   <option value="">Masa Seçin...</option>
-                  {Array.from(
-                    { length: settings?.tableCount || 15 },
-                    (_, i) => i + 1
-                  ).map((n) => (
-                    <option key={n} value={String(n)}>
-                      Masa {n}
+                  {getRestaurantTables(settings).map((t) => (
+                    <option key={t} value={t}>
+                      {formatTableLabel(t)}
                     </option>
                   ))}
                 </select>
@@ -5367,7 +5367,7 @@ function CustomerMenuContent() {
         {orderType === "dine_in" && (
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
-              Masa Numaranız *
+              Masa Seçimi *
             </label>
             <select
               value={tableNumber}
@@ -5376,12 +5376,9 @@ function CustomerMenuContent() {
               required
             >
               <option value="">Masa Seçiniz...</option>
-              {Array.from(
-                { length: settings?.tableCount || 15 },
-                (_, idx) => idx + 1
-              ).map((num) => (
-                <option key={num} value={String(num)}>
-                  Masa {num}
+              {getRestaurantTables(settings).map((t) => (
+                <option key={t} value={t}>
+                  {formatTableLabel(t)}
                 </option>
               ))}
             </select>

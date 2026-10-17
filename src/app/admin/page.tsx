@@ -60,6 +60,9 @@ import {
   OrderType,
   RestaurantSettings,
   WhatsAppLog,
+  formatTableLabel,
+  getRestaurantTables,
+  isSameTableName,
 } from "@/types";
 import {
   STOREFRONT_THEMES,
@@ -240,6 +243,20 @@ export default function AdminDashboardPage() {
   const [bulkRounding, setBulkRounding] = useState<"none" | "nearest_5" | "nearest_10">("nearest_5");
   const [bulkUpdating, setBulkUpdating] = useState(false);
 
+  // 🪑 Masa Yönetimi (Ekleme / İsim Düzenleme / Silme / SambaPOS Eşitleme) State'leri
+  const [newTableName, setNewTableName] = useState("");
+  const [bulkTablePrefix, setBulkTablePrefix] = useState("B");
+  const [bulkTableStart, setBulkTableStart] = useState<number>(10);
+  const [bulkTableEnd, setBulkTableEnd] = useState<number>(30);
+  const [editingTableOldName, setEditingTableOldName] = useState<string | null>(null);
+  const [editingTableNewName, setEditingTableNewName] = useState("");
+  const [tableSearchQuery, setTableSearchQuery] = useState("");
+  const [tableSyncLoading, setTableSyncLoading] = useState(false);
+  const [tableSyncStatus, setTableSyncStatus] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
   const loadData = async () => {
     const [menuRes, profRes, ordRes, crmRes] = await Promise.all([
       fetch("/api/menu"),
@@ -305,6 +322,109 @@ export default function AdminDashboardPage() {
     e.preventDefault();
     if (!settings) return;
     await persistSettings(settings, "Ayarlar başarıyla kaydedildi!");
+  };
+
+  // Masaları hem site ayarlarına kaydeder hem de SambaPOS aktifse SambaPOS'a aktarır/eşitler
+  const handleSaveTablesAndSync = async (
+    nextTablesRaw: string[],
+    toastMsg: string,
+    renameMap?: Record<string, string>,
+    forceSyncToSamba = false
+  ) => {
+    if (!settings) return;
+    const seen = new Set<string>();
+    const cleaned: string[] = [];
+    for (const raw of nextTablesRaw) {
+      const t = String(raw || "").trim();
+      if (!t) continue;
+      const key = t.toLocaleLowerCase("tr-TR");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cleaned.push(t);
+    }
+    if (cleaned.length === 0) {
+      alert("En az 1 masa bulunmalıdır.");
+      return;
+    }
+
+    const nextSettings: RestaurantSettings = {
+      ...settings,
+      tables: cleaned,
+      tableCount: cleaned.length,
+    };
+    setSettings(nextSettings);
+    await persistSettings(nextSettings, toastMsg);
+
+    if (forceSyncToSamba || settings.posIntegrationConfig?.sambaPos?.enabled) {
+      setTableSyncLoading(true);
+      try {
+        const res = await fetch("/api/pos-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "sync_tables_to_samba",
+            tables: cleaned,
+            renameMap,
+          }),
+        });
+        const data = await res.json();
+        setTableSyncStatus({
+          ok: Boolean(data.ok),
+          message:
+            data.message ||
+            (data.ok
+              ? "Masalar SambaPOS ile eşitlendi."
+              : "SambaPOS masa eşitlemesi yapılamadı."),
+        });
+        if (data.ok) {
+          showToast(data.message || toastMsg);
+        }
+        await loadData();
+      } catch {
+        setTableSyncStatus({
+          ok: false,
+          message: "SambaPOS masa eşitleme sırasında bağlantı hatası oluştu.",
+        });
+      } finally {
+        setTableSyncLoading(false);
+      }
+    }
+  };
+
+  // SambaPOS'taki mevcut masaları (B10..B30, M10..M30 vb.) çekip siteye kaydeder
+  const handleImportTablesFromSamba = async () => {
+    setTableSyncLoading(true);
+    setTableSyncStatus(null);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "fetch_samba_tables",
+          importToSite: true,
+        }),
+      });
+      const data = await res.json();
+      setTableSyncStatus({
+        ok: Boolean(data.ok),
+        message:
+          data.message ||
+          (data.ok
+            ? "SambaPOS masaları siteye aktarıldı!"
+            : "SambaPOS masaları okunamadı."),
+      });
+      if (data.ok) {
+        showToast(data.message || "SambaPOS masaları siteye aktarıldı!");
+        await loadData();
+      }
+    } catch {
+      setTableSyncStatus({
+        ok: false,
+        message: "SambaPOS masaları çekilirken hata oluştu.",
+      });
+    } finally {
+      setTableSyncLoading(false);
+    }
   };
 
   const handleToggleItemAvailability = async (item: MenuItem) => {
@@ -1776,7 +1896,7 @@ export default function AdminDashboardPage() {
             }`}
           >
             <QrCode className="w-4 h-4" />
-            Masa QR Kodları ({settings?.tableCount || 15})
+            🪑 Masalar & QR Kodlar ({getRestaurantTables(settings).length})
           </button>
           <button
             onClick={() => setActiveTab("widget")}
@@ -2788,12 +2908,9 @@ export default function AdminDashboardPage() {
                               className="px-2 py-1 rounded-lg border border-slate-300 bg-white font-bold text-slate-800"
                             >
                               <option value="">Masa Ata...</option>
-                              {Array.from(
-                                { length: settings?.tableCount || 15 },
-                                (_, i) => String(i + 1)
-                              ).map((t) => (
+                              {getRestaurantTables(settings).map((t) => (
                                 <option key={t} value={t}>
-                                  Masa {t}
+                                  {formatTableLabel(t)}
                                 </option>
                               ))}
                             </select>
@@ -4825,78 +4942,504 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* 3. MASA QR KOD ÜRETİCİ */}
+        {/* 3. MASA YÖNETİMİ, İSİM DÜZENLEME, SAMBAPOS EŞİTLEME & QR KOD ÜRETİCİ */}
         {activeTab === "qr" && (
           <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+            {/* Üst Başlık ve SambaPOS / Yazdırma Hızlı İşlemler */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4 print:hidden">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  Masadan Sipariş & Garson Çağrı QR Kodları (?masa=1, ?masa=2...)
-                </h2>
-                <p className="text-sm text-slate-500">
-                  Müşteriler telefon kamerasıyla bu QR kodları okuttuğunda masa
-                  numarası otomatik seçili açılır; sipariş verebilir veya tek
-                  tıkla Garson / Hesap çağırabilirler.
+                <div className="flex items-center gap-2.5">
+                  <span className="bg-orange-600 text-white font-black text-xs px-3 py-1 rounded-xl">
+                    {getRestaurantTables(settings).length} MASA AKTİF
+                  </span>
+                  <h2 className="text-lg font-extrabold text-slate-900">
+                    🪑 Masa Yönetimi, İsim Düzenleme & QR Kodlar
+                  </h2>
+                </div>
+                <p className="text-sm text-slate-500 mt-1">
+                  Masaları tek tek veya seri halinde ekleyin, masa isimlerini (Örn:{" "}
+                  <strong className="text-slate-700">B10, M10, Bahçe 1, Teras 2, Masa 1</strong>
+                  ) düzenleyin veya silin. Değişiklikler Müşteri Ekranı, Garson El Terminali, Canlı Mutfak/Kasa ve{" "}
+                  <strong className="text-indigo-600">SambaPOS</strong> ile anında eşitlenir.
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setPrintingZReport(false);
-                  setSelectedOrderForPrint(null);
-                  setTimeout(() => window.print(), 100);
-                }}
-                className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold px-4 py-2.5 rounded-xl cursor-pointer"
-              >
-                <Printer className="w-4 h-4 text-orange-400" />
-                Tüm QR Kartlarını Yazdır
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={tableSyncLoading}
+                  onClick={handleImportTablesFromSamba}
+                  className="inline-flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-extrabold px-3.5 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  title="SambaPOS'taki mevcut masaları (B10..B30, M10..M30 vb.) çekip siteye kaydeder"
+                >
+                  <RefreshCw className={`w-4 h-4 text-indigo-600 ${tableSyncLoading ? "animate-spin" : ""}`} />
+                  📥 SambaPOS&apos;taki Masaları Siteye Çek
+                </button>
+                <button
+                  type="button"
+                  disabled={tableSyncLoading}
+                  onClick={() =>
+                    handleSaveTablesAndSync(
+                      getRestaurantTables(settings),
+                      "Sitedeki masalar SambaPOS'a aktarıldı ve eşitlendi!",
+                      undefined,
+                      true
+                    )
+                  }
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Sitedeki masa listesini SambaPOS'a gönderir; yeni masaları açar, silinenleri kaldırır"
+                >
+                  <Upload className="w-4 h-4" />
+                  📤 Sitedeki Masaları SambaPOS&apos;a Aktar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrintingZReport(false);
+                    setSelectedOrderForPrint(null);
+                    setTimeout(() => window.print(), 100);
+                  }}
+                  className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-orange-400" />
+                  Tüm QR Kartlarını Yazdır
+                </button>
+              </div>
             </div>
 
+            {tableSyncStatus && (
+              <div
+                className={`p-4 rounded-2xl border text-xs font-bold flex items-center justify-between gap-3 print:hidden ${
+                  tableSyncStatus.ok
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                    : "bg-red-50 border-red-200 text-red-900"
+                }`}
+              >
+                <span>
+                  {tableSyncStatus.ok ? "✅ " : "⚠️ "}
+                  {tableSyncStatus.message}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTableSyncStatus(null)}
+                  className="text-slate-500 hover:text-slate-800 px-2 py-0.5 rounded font-extrabold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Masa Ekleme, Toplu Seri Oluşturma ve Hazır Şablonlar Paneli */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 print:hidden">
+              {/* 1. Tek Masa Ekle */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    ➕ Tek Masa Ekle
+                  </h3>
+                  <span className="text-[10px] font-bold bg-orange-50 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">
+                    Özel İsim Desteği
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  İstediğiniz isimde masa ekleyebilirsiniz (Örn:{" "}
+                  <strong>Bahçe 1, B10, M15, Teras 3, VIP 1, Köşe Masa</strong>).
+                </p>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const clean = newTableName.trim();
+                    if (!clean) return;
+                    const current = getRestaurantTables(settings);
+                    if (current.some((t) => isSameTableName(t, clean))) {
+                      alert(`"${clean}" isimli masa zaten listede mevcut!`);
+                      return;
+                    }
+                    setNewTableName("");
+                    await handleSaveTablesAndSync(
+                      [...current, clean],
+                      `"${formatTableLabel(clean)}" masası eklendi!`
+                    );
+                  }}
+                  className="flex items-center gap-2 pt-1"
+                >
+                  <input
+                    type="text"
+                    placeholder="Örn: Bahçe 1, B10, Teras 2..."
+                    value={newTableName}
+                    onChange={(e) => setNewTableName(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-xl font-bold text-slate-900 focus:border-orange-500 outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Masa Ekle
+                  </button>
+                </form>
+              </div>
+
+              {/* 2. Toplu / Seri Masa Oluşturucu */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    ⚡ Toplu / Seri Masa Ekle
+                  </h3>
+                  <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">
+                    B10..B30 / Masa 1..20
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                      Ön Ek (B, M, Bahçe...)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Örn: B veya Masa "
+                      value={bulkTablePrefix}
+                      onChange={(e) => setBulkTablePrefix(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                      Başlangıç No
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={999}
+                      value={bulkTableStart}
+                      onChange={(e) => setBulkTableStart(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                      Bitiş No
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={999}
+                      value={bulkTableEnd}
+                      onChange={(e) => setBulkTableEnd(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const start = Math.min(bulkTableStart, bulkTableEnd);
+                      const end = Math.max(bulkTableStart, bulkTableEnd);
+                      if (end - start > 200) {
+                        alert("Tek seferde en fazla 200 masa oluşturabilirsiniz.");
+                        return;
+                      }
+                      const generated: string[] = [];
+                      for (let i = start; i <= end; i++) {
+                        generated.push(`${bulkTablePrefix}${i}`.trim());
+                      }
+                      const current = getRestaurantTables(settings);
+                      await handleSaveTablesAndSync(
+                        [...current, ...generated],
+                        `${generated.length} adet masa (${generated[0]}..${generated[generated.length - 1]}) listeye eklendi!`
+                      );
+                    }}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold py-2 px-3 rounded-xl transition cursor-pointer"
+                  >
+                    + Mevcut Masalara Ekle ({bulkTablePrefix}
+                    {bulkTableStart}..{bulkTablePrefix}
+                    {bulkTableEnd})
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Hızlı Şablonlar & Arama */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    🔍 Masa Ara & Hızlı Şablonlar
+                  </h3>
+                  <input
+                    type="text"
+                    placeholder="Masa ara... (Örn: B10, M20, Bahçe)"
+                    value={tableSearchQuery}
+                    onChange={(e) => setTableSearchQuery(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-bold text-slate-900 focus:border-orange-500 outline-none"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          "Mevcut masa listesi sıfırlanıp B10..B30 ve M10..M30 (42 Masa) şablonu yüklensin mi?"
+                        )
+                      )
+                        return;
+                      const bSeries = Array.from(
+                        { length: 21 },
+                        (_, i) => `B${10 + i}`
+                      );
+                      const mSeries = Array.from(
+                        { length: 21 },
+                        (_, i) => `M${10 + i}`
+                      );
+                      await handleSaveTablesAndSync(
+                        [...bSeries, ...mSeries],
+                        "B10..B30 ve M10..M30 masa düzeni kaydedildi!"
+                      );
+                    }}
+                    className="text-[11px] font-extrabold bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer"
+                  >
+                    ⚡ Şablon: B10..B30 + M10..M30
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          "Mevcut masa listesi sıfırlanıp standart Masa 1..15 düzenine dönülsün mü?"
+                        )
+                      )
+                        return;
+                      const std = Array.from({ length: 15 }, (_, i) =>
+                        String(i + 1)
+                      );
+                      await handleSaveTablesAndSync(
+                        std,
+                        "Masa 1..15 standart düzeni kaydedildi!"
+                      );
+                    }}
+                    className="text-[11px] font-extrabold bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer"
+                  >
+                    ⚡ Şablon: Masa 1..15
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Masa Listesi ve QR Kartları Grid */}
             <div
               id="printable-qr-grid"
               className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"
             >
-              {Array.from(
-                { length: settings?.tableCount || 15 },
-                (_, i) => i + 1
-              ).map((tableNum) => {
-                const tableUrl = `${originUrl}/?masa=${tableNum}`;
-                const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-                  tableUrl
-                )}`;
+              {getRestaurantTables(settings)
+                .filter((tableNum) => {
+                  if (!tableSearchQuery.trim()) return true;
+                  const q = tableSearchQuery.trim().toLocaleLowerCase("tr-TR");
+                  return (
+                    tableNum.toLocaleLowerCase("tr-TR").includes(q) ||
+                    formatTableLabel(tableNum)
+                      .toLocaleLowerCase("tr-TR")
+                      .includes(q)
+                  );
+                })
+                .map((tableNum) => {
+                  const allTables = getRestaurantTables(settings);
+                  const realIdx = allTables.indexOf(tableNum);
+                  const isEditingThis = editingTableOldName === tableNum;
+                  const tableUrl = `${originUrl}/?masa=${encodeURIComponent(
+                    tableNum
+                  )}`;
+                  const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
+                    tableUrl
+                  )}`;
 
-                return (
-                  <div
-                    key={tableNum}
-                    className="bg-white border border-slate-200 rounded-2xl p-4 text-center space-y-3 shadow-xs"
-                  >
-                    <div className="inline-block bg-orange-100 text-orange-800 font-extrabold text-xs px-3 py-1 rounded-full">
-                      MASA {tableNum}
-                    </div>
-                    <div className="w-36 h-36 mx-auto bg-slate-50 p-2 rounded-xl border border-slate-100">
-                      <img
-                        src={qrImgUrl}
-                        alt={`Masa ${tableNum} QR`}
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                    <p className="text-[10px] font-mono text-slate-400 truncate">
-                      ?masa={tableNum}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      Sipariş Ver • Garson Çağır • Hesap İste
-                    </p>
-                    <Link
-                      href={`/?masa=${tableNum}`}
-                      target="_blank"
-                      className="inline-flex items-center justify-center gap-1 text-xs font-bold text-orange-600 hover:underline print:hidden"
+                  return (
+                    <div
+                      key={tableNum}
+                      className="bg-white border border-slate-200 hover:border-orange-300 rounded-2xl p-4 text-center space-y-2.5 shadow-xs transition flex flex-col justify-between"
                     >
-                      <span>Simüle Et</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </Link>
-                  </div>
-                );
-              })}
+                      <div className="space-y-2">
+                        {/* Üst Sıra No & Sıralama / Düzenleme / Silme Butonları */}
+                        <div className="flex items-center justify-between gap-1 print:hidden">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={realIdx <= 0}
+                              onClick={async () => {
+                                if (realIdx <= 0) return;
+                                const next = [...allTables];
+                                const tmp = next[realIdx - 1];
+                                next[realIdx - 1] = next[realIdx];
+                                next[realIdx] = tmp;
+                                await handleSaveTablesAndSync(
+                                  next,
+                                  `"${formatTableLabel(tableNum)}" sırası taşındı.`
+                                );
+                              }}
+                              className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded disabled:opacity-30 cursor-pointer"
+                              title="Sola / Öne Taşı"
+                            >
+                              ◀
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                realIdx === -1 || realIdx >= allTables.length - 1
+                              }
+                              onClick={async () => {
+                                if (
+                                  realIdx === -1 ||
+                                  realIdx >= allTables.length - 1
+                                )
+                                  return;
+                                const next = [...allTables];
+                                const tmp = next[realIdx + 1];
+                                next[realIdx + 1] = next[realIdx];
+                                next[realIdx] = tmp;
+                                await handleSaveTablesAndSync(
+                                  next,
+                                  `"${formatTableLabel(tableNum)}" sırası taşındı.`
+                                );
+                              }}
+                              className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded disabled:opacity-30 cursor-pointer"
+                              title="Sağa / Arkaya Taşı"
+                            >
+                              ▶
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTableOldName(tableNum);
+                                setEditingTableNewName(tableNum);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-extrabold border border-blue-200 cursor-pointer"
+                              title="Masa Adını Düzenle"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              Düzenle
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (allTables.length <= 1) {
+                                  alert("En az 1 masa kalmalıdır.");
+                                  return;
+                                }
+                                if (
+                                  !confirm(
+                                    `"${formatTableLabel(
+                                      tableNum
+                                    )}" masasını silmek istediğinize emin misiniz?`
+                                  )
+                                )
+                                  return;
+                                const next = allTables.filter(
+                                  (t) => t !== tableNum
+                                );
+                                await handleSaveTablesAndSync(
+                                  next,
+                                  `"${formatTableLabel(tableNum)}" masası silindi.`
+                                );
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-extrabold border border-red-200 cursor-pointer"
+                              title="Masayı Sil"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Masa İsmi Gösterimi veya Düzenleme Kutusu */}
+                        {isEditingThis ? (
+                          <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-2 space-y-2 print:hidden">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={editingTableNewName}
+                              onChange={(e) =>
+                                setEditingTableNewName(e.target.value)
+                              }
+                              placeholder="Yeni masa adı..."
+                              className="w-full px-2.5 py-1.5 text-xs font-extrabold text-slate-900 bg-white border border-blue-300 rounded-lg text-center outline-none"
+                            />
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const cleanNew = editingTableNewName.trim();
+                                  if (!cleanNew) return;
+                                  if (cleanNew === tableNum) {
+                                    setEditingTableOldName(null);
+                                    return;
+                                  }
+                                  if (
+                                    allTables.some(
+                                      (t) =>
+                                        t !== tableNum &&
+                                        isSameTableName(t, cleanNew)
+                                    )
+                                  ) {
+                                    alert(
+                                      `"${cleanNew}" isimli bir masa zaten var!`
+                                    );
+                                    return;
+                                  }
+                                  const next = allTables.map((t) =>
+                                    t === tableNum ? cleanNew : t
+                                  );
+                                  setEditingTableOldName(null);
+                                  await handleSaveTablesAndSync(
+                                    next,
+                                    `Masa adı "${tableNum}" -> "${cleanNew}" olarak güncellendi!`,
+                                    { [tableNum]: cleanNew }
+                                  );
+                                }}
+                                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-extrabold py-1 px-2 rounded-lg cursor-pointer"
+                              >
+                                Kaydet
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingTableOldName(null)}
+                                className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-extrabold py-1 px-2 rounded-lg cursor-pointer"
+                              >
+                                İptal
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="inline-block bg-orange-100 text-orange-800 font-extrabold text-xs px-3 py-1 rounded-full">
+                            {formatTableLabel(tableNum).toLocaleUpperCase("tr-TR")}
+                          </div>
+                        )}
+
+                        <div className="w-36 h-36 mx-auto bg-slate-50 p-2 rounded-xl border border-slate-100">
+                          <img
+                            src={qrImgUrl}
+                            alt={`${formatTableLabel(tableNum)} QR`}
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <p className="text-[10px] font-mono text-slate-400 truncate">
+                          ?masa={tableNum}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Sipariş Ver • Garson Çağır • Hesap İste
+                        </p>
+                      </div>
+
+                      <Link
+                        href={`/?masa=${encodeURIComponent(tableNum)}`}
+                        target="_blank"
+                        className="inline-flex items-center justify-center gap-1 text-xs font-bold text-orange-600 hover:underline print:hidden pt-1"
+                      >
+                        <span>Simüle Et</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </Link>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}
@@ -5522,19 +6065,44 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Toplam Masa Sayısı
+                  Toplam Masa Sayısı & İsim Yönetimi
                 </label>
-                <input
-                  type="number"
-                  value={settings.tableCount}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      tableCount: Number(e.target.value),
-                    })
-                  }
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={300}
+                    value={getRestaurantTables(settings).length}
+                    onChange={(e) => {
+                      const nextCount = Math.max(
+                        1,
+                        Math.min(300, Number(e.target.value) || 1)
+                      );
+                      const cur = getRestaurantTables(settings);
+                      let nextTables = [...cur];
+                      if (nextCount > cur.length) {
+                        for (let i = cur.length + 1; i <= nextCount; i++) {
+                          nextTables.push(String(i));
+                        }
+                      } else if (nextCount < cur.length) {
+                        nextTables = cur.slice(0, nextCount);
+                      }
+                      setSettings({
+                        ...settings,
+                        tableCount: nextCount,
+                        tables: nextTables,
+                      });
+                    }}
+                    className="w-24 px-3 py-2 text-sm border border-slate-200 rounded-xl font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("qr")}
+                    className="flex-1 px-3 py-2 text-xs font-extrabold bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-xl transition cursor-pointer"
+                  >
+                    🪑 Masa İsimlerini Düzenle / Ekle / Sil →
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -4,9 +4,11 @@ import { syncActivityWithCloud } from "@/lib/cloud-sync";
 import {
   DEFAULT_SAMBAPOS_CONFIG,
   fetchSambaPosCatalog,
+  fetchSambaPosTables,
   getResolvedPosConfig,
   sendOrderToSambaPos,
   syncSiteMenuToSambaPos,
+  syncSiteTablesToSambaPos,
   testSambaPosConnection,
 } from "@/lib/sambapos";
 import {
@@ -500,6 +502,30 @@ export async function POST(req: NextRequest) {
       if (res.updated) {
         await syncActivityWithCloud().catch(() => {});
       }
+      return NextResponse.json(res);
+    }
+
+    // 10) SambaPOS'taki Kayıtlı Masaları Okuma / Siteye Çekme
+    if (body.action === "fetch_samba_tables") {
+      const res = await fetchSambaPosTables({
+        importToSite: Boolean(body.importToSite),
+        customConfig: body.sambaPos || body.sambaPosConfig,
+      });
+      return NextResponse.json(res);
+    }
+
+    // 11) Sitedeki Masa Listesini (Ekleme / İsim Düzenleme / Silme) Kaydetme ve SambaPOS ile Eşitleme
+    if (body.action === "sync_tables_to_samba") {
+      const res = await syncSiteTablesToSambaPos({
+        tables: Array.isArray(body.tables) ? body.tables : [],
+        renameMap:
+          body.renameMap && typeof body.renameMap === "object"
+            ? body.renameMap
+            : undefined,
+        deleteRemoved: body.deleteRemoved !== false,
+        syncToSamba: body.syncToSamba !== false,
+        customConfig: body.sambaPos || body.sambaPosConfig,
+      });
       return NextResponse.json(res);
     }
 

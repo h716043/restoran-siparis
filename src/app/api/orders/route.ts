@@ -19,6 +19,7 @@ import {
   pushCatalogToCloud,
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
+import { isSameTableName } from "@/types";
 import { autoSyncOrdersWithPosIfNeeded } from "@/lib/sambapos";
 
 export async function GET(req: NextRequest) {
@@ -83,7 +84,7 @@ export async function GET(req: NextRequest) {
         .filter(
           (o) =>
             o.orderType === "dine_in" &&
-            String(o.tableNumber) === cleanT &&
+            isSameTableName(o.tableNumber, cleanT) &&
             (o.status === "pending" ||
               o.status === "accepted" ||
               o.status === "ready")

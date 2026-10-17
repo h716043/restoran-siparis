@@ -391,6 +391,8 @@ export interface RestaurantSettings {
   deliveryFee: number;
   estimatedPrepMinutes: number;
   tableCount: number;
+  /** Özel masa isimleri listesi (Örn: ["Masa 1", "B10", "Bahçe 1", "Teras 2"]). Boşsa 1..tableCount kullanılır. */
+  tables?: string[];
   currency: string;
   openingHours: string;
   firstOrderDiscountPercent?: number;
@@ -420,6 +422,64 @@ export interface RestaurantSettings {
   cloudSyncConfig?: CloudSyncConfig;
   posIntegrationConfig?: PosIntegrationConfig;
 }
+
+/**
+ * Restoranın aktif masa listesini döndürür.
+ * `settings.tables` tanımlıysa onu kullanır; değilse `1..tableCount` (varsayılan 15) listesi üretir.
+ */
+export function getRestaurantTables(
+  settings?: Partial<RestaurantSettings> | null,
+  fallbackCount = 15
+): string[] {
+  if (
+    settings?.tables &&
+    Array.isArray(settings.tables) &&
+    settings.tables.length > 0
+  ) {
+    const cleaned = settings.tables
+      .map((t) => String(t ?? "").trim())
+      .filter(Boolean);
+    if (cleaned.length > 0) {
+      return cleaned;
+    }
+  }
+  const count = Math.max(1, Number(settings?.tableCount || fallbackCount));
+  return Array.from({ length: count }, (_, i) => String(i + 1));
+}
+
+/**
+ * Masa adını ekranda gösterilecek okunaklı formata çevirir.
+ * Sadece rakamsa (örn: "5") -> "Masa 5", özel isimliyse (örn: "B10", "Bahçe 1", "Masa 3") -> olduğu gibi döndürür.
+ */
+export function formatTableLabel(tableNameOrNum?: string | number | null): string {
+  const raw = String(tableNameOrNum ?? "").trim();
+  if (!raw) return "Masa";
+  if (/^\d+$/.test(raw)) {
+    return `Masa ${raw}`;
+  }
+  return raw;
+}
+
+/**
+ * İki masa referansının aynı masayı gösterip göstermediğini kontrol eder
+ * ("5" ile "Masa 5", "B10" ile "b10", "Bahçe 1" ile "Masa Bahçe 1" eşleşir).
+ */
+export function isSameTableName(
+  a?: string | number | null,
+  b?: string | number | null
+): boolean {
+  const norm = (v?: string | number | null) =>
+    String(v ?? "")
+      .trim()
+      .replace(/^masa[-_\s]*/i, "")
+      .trim()
+      .toLowerCase();
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  return na === nb || String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+}
+
 
 
 

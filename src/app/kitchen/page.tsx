@@ -44,6 +44,9 @@ import {
   SelectedModifier,
   TableCall,
   TableReservation,
+  formatTableLabel,
+  getRestaurantTables,
+  isSameTableName,
 } from "@/types";
 import { soundAlert } from "@/lib/sound";
 import {
@@ -544,8 +547,7 @@ export default function KitchenTabletPage() {
           ? orders.find(
               (o) =>
                 o.orderType === "dine_in" &&
-                String(o.tableNumber).replace(/^masa[-_\s]*/i, "") ===
-                  String(posTableNumber).replace(/^masa[-_\s]*/i, "") &&
+                isSameTableName(o.tableNumber, posTableNumber) &&
                 ["pending", "accepted", "ready"].includes(o.status)
             )
           : undefined;
@@ -588,7 +590,7 @@ export default function KitchenTabletPage() {
           customerName:
             posName.trim() ||
             (posOrderType === "dine_in"
-              ? `Masa ${posTableNumber}`
+              ? formatTableLabel(posTableNumber)
               : "Kasa / Telefon Müşterisi"),
           customerPhone: posPhone.trim() || "Kasa Siparişi",
           customerAddress:
@@ -623,7 +625,10 @@ export default function KitchenTabletPage() {
     const total = tableOrders.reduce((s, o) => s + o.totalAmount, 0);
     setSelectedTableModal(tableNum);
     setCheckedModalItemKeys([]);
-    const nextTarget = tableNum === "1" ? "2" : "1";
+    const allTables = getRestaurantTables(settings);
+    const nextTarget =
+      allTables.find((t) => !isSameTableName(t, tableNum)) ||
+      (tableNum === "1" ? "2" : "1");
     setTransferTargetTable(nextTarget);
     setTablePaymentMode("cash");
     setTableExtraDiscount("0");
@@ -744,7 +749,7 @@ export default function KitchenTabletPage() {
         ...tableCalls
           .filter(
             (c) =>
-              String(c.tableNumber).replace(/^masa[-_\s]*/i, "") === tableNum &&
+              isSameTableName(c.tableNumber, tableNum) &&
               c.status === "pending"
           )
           .map((c) =>
@@ -790,7 +795,7 @@ export default function KitchenTabletPage() {
       ...tableOrders[0],
       orderNumber: tableOrders[0].orderNumber,
       tableNumber: tableNum,
-      customerName: `Masa ${tableNum} Birleşik Adisyon (${tableOrders.length} Sipariş)`,
+      customerName: `${formatTableLabel(tableNum)} Birleşik Adisyon (${tableOrders.length} Sipariş)`,
       subtotal,
       discountAmount: discount,
       totalAmount: total,
@@ -2239,29 +2244,20 @@ export default function KitchenTabletPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {Array.from(
-                { length: settings?.tableCount || 15 },
-                (_, idx) => String(idx + 1)
-              ).map((tableNum) => {
+              {getRestaurantTables(settings).map((tableNum) => {
                 const tableActiveOrders = orders.filter(
                   (o) =>
                     o.orderType === "dine_in" &&
-                    String(o.tableNumber).replace(/^masa[-_\s]*/i, "") ===
-                      tableNum &&
+                    isSameTableName(o.tableNumber, tableNum) &&
                     ["pending", "accepted", "ready"].includes(o.status)
                 );
-                const activeCall = pendingTableCalls.find(
-                  (c) =>
-                    String(c.tableNumber).replace(/^masa[-_\s]*/i, "") ===
-                    tableNum
+                const activeCall = pendingTableCalls.find((c) =>
+                  isSameTableName(c.tableNumber, tableNum)
                 );
                 const activeResv = reservations.find(
                   (r) =>
                     r.status === "confirmed" &&
-                    String(r.assignedTable || "").replace(
-                      /^masa[-_\s]*/i,
-                      ""
-                    ) === tableNum
+                    isSameTableName(r.assignedTable, tableNum)
                 );
                 const totalTableBill = tableActiveOrders.reduce(
                   (s, o) => s + o.totalAmount,
@@ -2304,7 +2300,7 @@ export default function KitchenTabletPage() {
                               : "bg-emerald-600/20 text-emerald-300"
                           }`}
                         >
-                          MASA {tableNum}
+                          {formatTableLabel(tableNum).toLocaleUpperCase("tr-TR")}
                         </span>
                         {isOccupied ? (
                           <span className="text-lg font-black text-emerald-400">
@@ -2402,7 +2398,7 @@ export default function KitchenTabletPage() {
                           onClick={() => {
                             setPosOrderType("dine_in");
                             setPosTableNumber(tableNum);
-                            setPosName(`Masa ${tableNum}`);
+                            setPosName(formatTableLabel(tableNum));
                             setPosModalOpen(true);
                           }}
                           className="flex-1 bg-slate-800 hover:bg-orange-600 text-slate-200 hover:text-white text-xs font-extrabold py-2 px-2.5 rounded-xl transition cursor-pointer"
@@ -2469,8 +2465,7 @@ export default function KitchenTabletPage() {
                 const modalTableOrders = orders.filter(
                   (o) =>
                     o.orderType === "dine_in" &&
-                    String(o.tableNumber).replace(/^masa[-_\s]*/i, "") ===
-                      selectedTableModal &&
+                    isSameTableName(o.tableNumber, selectedTableModal) &&
                     ["pending", "accepted", "ready"].includes(o.status)
                 );
                 const rawTableTotal = modalTableOrders.reduce(
@@ -2490,7 +2485,7 @@ export default function KitchenTabletPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="bg-orange-600 text-white font-black text-sm px-3 py-1 rounded-xl">
-                              MASA {selectedTableModal}
+                              {formatTableLabel(selectedTableModal).toLocaleUpperCase("tr-TR")}
                             </span>
                             <h3 className="font-extrabold text-base text-white">
                               Açık Adisyon, Masa Taşıma & Tahsilat
@@ -2523,7 +2518,7 @@ export default function KitchenTabletPage() {
                                 setSelectedTableModal(null);
                                 setPosOrderType("dine_in");
                                 setPosTableNumber(t);
-                                setPosName(`Masa ${t}`);
+                                setPosName(formatTableLabel(t));
                                 setPosModalOpen(true);
                               }}
                               className="text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white px-3 py-1 rounded-lg cursor-pointer"
@@ -2700,26 +2695,20 @@ export default function KitchenTabletPage() {
                               }
                               className="flex-1 bg-slate-900 border border-indigo-500/40 rounded-xl px-3 py-2.5 text-xs font-bold text-white"
                             >
-                              {Array.from(
-                                { length: settings?.tableCount || 15 },
-                                (_, i) => String(i + 1)
-                              )
-                                .filter((n) => n !== selectedTableModal)
+                              {getRestaurantTables(settings)
+                                .filter((n) => !isSameTableName(n, selectedTableModal))
                                 .map((n) => {
                                   const targetHasOrder = orders.some(
                                     (o) =>
                                       o.orderType === "dine_in" &&
-                                      String(o.tableNumber).replace(
-                                        /^masa[-_\s]*/i,
-                                        ""
-                                      ) === n &&
+                                      isSameTableName(o.tableNumber, n) &&
                                       ["pending", "accepted", "ready"].includes(
                                         o.status
                                       )
                                   );
                                   return (
                                     <option key={n} value={n}>
-                                      Masa {n}{" "}
+                                      {formatTableLabel(n)}{" "}
                                       {targetHasOrder
                                         ? "(Dolu — Adisyonları Birleştir)"
                                         : "(Boş — Masayı Taşı)"}
@@ -3269,14 +3258,14 @@ export default function KitchenTabletPage() {
                               }
                               className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
                             >
-                              {Array.from(
-                                { length: settings?.tableCount || 15 },
-                                (_, i) => `Masa ${i + 1}`
-                              ).map((t) => (
-                                <option key={t} value={t}>
-                                  {t}
-                                </option>
-                              ))}
+                              {getRestaurantTables(settings).map((t) => {
+                                const lbl = formatTableLabel(t);
+                                return (
+                                  <option key={t} value={lbl}>
+                                    {lbl}
+                                  </option>
+                                );
+                              })}
                               <option value="VIP / Bahçe Masası">
                                 VIP / Bahçe Masası
                               </option>
@@ -3707,12 +3696,9 @@ export default function KitchenTabletPage() {
                           onChange={(e) => setPosTableNumber(e.target.value)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
                         >
-                          {Array.from(
-                            { length: settings?.tableCount || 15 },
-                            (_, i) => String(i + 1)
-                          ).map((n) => (
+                          {getRestaurantTables(settings).map((n) => (
                             <option key={n} value={n}>
-                              Masa {n}
+                              {formatTableLabel(n)}
                             </option>
                           ))}
                         </select>

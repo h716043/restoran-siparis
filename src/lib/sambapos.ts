@@ -445,11 +445,12 @@ async function prepareSambaTicketContext(
           existingTables.find((t) => t.toLowerCase() === found.toLowerCase()) ||
           found;
       } else {
-        // Masalar içinde yoksa yeni masa varlığı olarak ekle
-        const newTableName =
-          prefix && !rawNum.startsWith(prefix)
+        // Masalar içinde yoksa yeni masa varlığı olarak ekle (özel masa ismini koru, sadece rakamsa önek ekle)
+        const newTableName = /^\d+$/.test(rawNum)
+          ? prefix && !rawNum.startsWith(prefix)
             ? `${prefix}${rawNum}`
-            : `Masa ${rawNum}`;
+            : `Masa ${rawNum}`
+          : rawNum;
         await executeSambaGraphQL(
           cfg,
           accessToken,
@@ -468,7 +469,9 @@ async function prepareSambaTicketContext(
         resolvedTableName = newTableName;
       }
     } catch {
-      resolvedTableName = `${prefix || "Masa "}${rawNum}`;
+      resolvedTableName = /^\d+$/.test(rawNum)
+        ? `${prefix || "Masa "}${rawNum}`
+        : rawNum;
     }
   }
 
@@ -2878,5 +2881,308 @@ export async function syncSiteMenuToSambaPos(options?: {
     };
   }
 }
+
+/**
+ * SambaPOS V5 içerisindeki kayıtlı tüm masaları (`Masalar` / `EntityTypeId = 2`) okur.
+ * `importToSite: true` verilirse okunan masaları doğrudan sitenin masa listesine (`settings.tables`) kaydeder.
+ */
+export async function fetchSambaPosTables(options?: {
+  importToSite?: boolean;
+  customConfig?: Partial<SambaPosConfig>;
+}): Promise<{
+  ok: boolean;
+  tables: string[];
+  message: string;
+  settings?: ReturnType<typeof getSettings>;
+}> {
+  const cfg: SambaPosConfig = {
+    ...getResolvedPosConfig().sambaPos,
+    ...(options?.customConfig || {}),
+  };
+
+  try {
+    let tables: string[] = [];
+
+    // 1) Önce yerel SQL Server üzerinden EntityScreenItems sıralamasına göre oku
+    try {
+      const out = runLocalSambaSqlQuery(`
+        SET NOCOUNT ON;
+        SELECT
+          N'TBL',
+          REPLACE(ISNULL(e.Name, N''), N'|', N'/')
+        FROM Entities e
+        LEFT JOIN EntityScreenItems esi ON esi.EntityId = e.Id AND esi.EntityScreenId = 1
+        WHERE e.EntityTypeId = (
+          SELECT TOP 1 Id FROM EntityTypes WHERE Name = N'${(cfg.tableEntityType || "Masalar").replace(/'/g, "''")}' OR Id = 2 ORDER BY CASE WHEN Name = N'${(cfg.tableEntityType || "Masalar").replace(/'/g, "''")}' THEN 0 ELSE 1 END
+        )
+        ORDER BY CASE WHEN esi.Id IS NULL THEN 1 ELSE 0 END ASC, ISNULL(esi.SortOrder, 0) ASC, ISNULL(esi.Id, e.Id) ASC;
+      `);
+
+      const seen = new Set<string>();
+      for (const rawLine of out.split(/\r?\n/)) {
+        const line = rawLine.replace(/^\uFEFF/, "").trim();
+        if (!line.startsWith("TBL|")) continue;
+        const tName = (line.split("|")[1] || "").trim();
+        if (tName && !seen.has(tName.toLowerCase())) {
+          seen.add(tName.toLowerCase());
+          tables.push(tName);
+        }
+      }
+    } catch {
+      // ignore SQL fallback error, try GraphQL
+    }
+
+    // 2) Yerel SQL'den gelmediyse GraphQL üzerinden dene
+    if (tables.length === 0) {
+      const accessToken = await authenticateSambaPos(cfg);
+      const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+      const gqlRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query {
+          getEntities(type: ${gStr(cfg.tableEntityType || "Masalar")}, take: 500) {
+            name
+          }
+        }`
+      );
+      const list = (gqlRes.data?.getEntities || []) as Array<{ name?: string }>;
+      const seen = new Set<string>();
+      for (const item of list) {
+        const tName = (item?.name || "").trim();
+        if (tName && !seen.has(tName.toLowerCase())) {
+          seen.add(tName.toLowerCase());
+          tables.push(tName);
+        }
+      }
+    }
+
+    if (tables.length === 0) {
+      return {
+        ok: false,
+        tables: [],
+        message: "SambaPOS üzerinde kayıtlı masa bulunamadı.",
+      };
+    }
+
+    let updatedSettings = getSettings();
+    if (options?.importToSite) {
+      updatedSettings = updateSettings({
+        ...updatedSettings,
+        tables,
+        tableCount: tables.length,
+      });
+      await syncActivityWithCloud().catch(() => {});
+    }
+
+    return {
+      ok: true,
+      tables,
+      settings: updatedSettings,
+      message: options?.importToSite
+        ? `✅ SambaPOS'taki ${tables.length} masa (${tables.slice(0, 5).join(", ")}${tables.length > 5 ? "..." : ""}) siteye başarıyla aktarıldı!`
+        : `✅ SambaPOS'ta ${tables.length} masa bulundu.`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      tables: [],
+      message:
+        err instanceof Error
+          ? `⚠️ SambaPOS masaları okunamadı: ${err.message}`
+          : "SambaPOS masaları okunamadı.",
+    };
+  }
+}
+
+/**
+ * Sitede düzenlenen / eklenen / silinen masa listesini (`settings.tables`) hem siteye kaydeder
+ * hem de SambaPOS V5 (`Entities`, `EntityStateValues` ve `EntityScreenItems` -> `Tüm Masalar`) ile birebir eşitler.
+ */
+export async function syncSiteTablesToSambaPos(options: {
+  tables: string[];
+  renameMap?: Record<string, string>;
+  deleteRemoved?: boolean;
+  syncToSamba?: boolean;
+  customConfig?: Partial<SambaPosConfig>;
+}): Promise<{
+  ok: boolean;
+  message: string;
+  tables: string[];
+  settings: ReturnType<typeof getSettings>;
+}> {
+  const seen = new Set<string>();
+  const cleanedTables: string[] = [];
+  for (const raw of options.tables || []) {
+    const t = String(raw ?? "").trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      cleanedTables.push(t);
+    }
+  }
+
+  if (cleanedTables.length === 0) {
+    cleanedTables.push("Masa 1");
+  }
+
+  const currentSettings = getSettings();
+  const renameMap = options.renameMap || {};
+
+  // Rezervasyonlarda yeniden adlandırılan masa varsa güncelle
+  const updatedReservations = (currentSettings.reservations || []).map((r) => {
+    const curTbl = (r.assignedTable || r.tableNumber || "").trim();
+    if (curTbl && renameMap[curTbl]) {
+      return {
+        ...r,
+        assignedTable: renameMap[curTbl],
+        tableNumber: renameMap[curTbl],
+      };
+    }
+    return r;
+  });
+
+  const updatedSettings = updateSettings({
+    ...currentSettings,
+    tables: cleanedTables,
+    tableCount: cleanedTables.length,
+    reservations: updatedReservations,
+  });
+
+  await syncActivityWithCloud().catch(() => {});
+
+  const cfg: SambaPosConfig = {
+    ...getResolvedPosConfig().sambaPos,
+    ...(options.customConfig || {}),
+  };
+
+  if (options.syncToSamba === false) {
+    return {
+      ok: true,
+      tables: cleanedTables,
+      settings: updatedSettings,
+      message: `✅ Masa listesi (${cleanedTables.length} masa) sitede güncellendi!`,
+    };
+  }
+
+  try {
+    const escSql = (s: string) => String(s ?? "").replace(/'/g, "''");
+    const nowMs = Date.now();
+    const sambaDateJson = `\\/Date(${nowMs}+0300)\\/`;
+    const tableTypeName = escSql(cfg.tableEntityType || "Masalar");
+
+    const sqlLines: string[] = [
+      "SET NOCOUNT ON;",
+      "DECLARE @now DATETIME = GETDATE();",
+      `DECLARE @entityTypeId INT = ISNULL((SELECT TOP 1 Id FROM EntityTypes WHERE Name = N'${tableTypeName}'), 2);`,
+      "DECLARE @screenId INT = ISNULL((SELECT TOP 1 Id FROM EntityScreens WHERE EntityTypeId = @entityTypeId ORDER BY Id ASC), 1);",
+      "DECLARE @entId INT;",
+    ];
+
+    // 1) Yeniden adlandırılan masaları (renameMap) SambaPOS'ta güncelle
+    for (const [oldName, newName] of Object.entries(renameMap)) {
+      const oTrim = oldName.trim();
+      const nTrim = newName.trim();
+      if (!oTrim || !nTrim || oTrim.toLowerCase() === nTrim.toLowerCase()) {
+        continue;
+      }
+      sqlLines.push(`
+        SET @entId = (SELECT TOP 1 Id FROM Entities WHERE EntityTypeId = @entityTypeId AND Name = N'${escSql(oTrim)}');
+        IF @entId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM Entities WHERE EntityTypeId = @entityTypeId AND Name = N'${escSql(nTrim)}') BEGIN
+          UPDATE Entities SET Name = N'${escSql(nTrim)}', SearchString = N'${escSql(nTrim)}', LastUpdateTime = @now WHERE Id = @entId;
+          UPDATE EntityScreenItems SET Name = N'${escSql(nTrim)}', LastUpdateTime = @now WHERE EntityId = @entId;
+          UPDATE TicketEntities SET EntityName = N'${escSql(nTrim)}' WHERE EntityId = @entId AND EntityTypeId = @entityTypeId;
+        END
+      `);
+    }
+
+    // 2) Sitedeki tüm masaların SambaPOS'ta (Entities + EntityStateValues + EntityScreenItems) var olduğundan emin ol
+    cleanedTables.forEach((tblName, idx) => {
+      const escName = escSql(tblName);
+      const sortOrder = (idx + 1) * 10;
+      sqlLines.push(`
+        SET @entId = (SELECT TOP 1 Id FROM Entities WHERE EntityTypeId = @entityTypeId AND Name = N'${escName}');
+        IF @entId IS NULL BEGIN
+          INSERT INTO Entities (EntityTypeId, LastUpdateTime, SearchString, CustomData, Notes, AccountId, WarehouseId, Name)
+          VALUES (@entityTypeId, @now, N'${escName}', N'[]', NULL, 0, 0, N'${escName}');
+          SET @entId = SCOPE_IDENTITY();
+
+          INSERT INTO EntityStateValues (EntityId, EntityStates)
+          VALUES (@entId, N'[{"D":"${sambaDateJson}","S":"Boş","SN":"Status"}]');
+        END
+
+        IF @screenId IS NOT NULL AND @entId IS NOT NULL BEGIN
+          IF NOT EXISTS (SELECT 1 FROM EntityScreenItems WHERE EntityScreenId = @screenId AND EntityId = @entId) BEGIN
+            INSERT INTO EntityScreenItems (EntityScreenId, Name, EntityId, EntityState, SortOrder, LastUpdateTime)
+            VALUES (@screenId, N'${escName}', @entId, NULL, ${sortOrder}, @now);
+          END ELSE BEGIN
+            UPDATE EntityScreenItems
+            SET Name = N'${escName}', SortOrder = ${sortOrder}, LastUpdateTime = @now
+            WHERE EntityScreenId = @screenId AND EntityId = @entId;
+          END
+        END
+      `);
+    });
+
+    // 3) Siteden silinen masaları SambaPOS ekranından ve Entities tablosundan kaldır (deleteRemoved !== false ise)
+    if (options.deleteRemoved !== false && cleanedTables.length > 0) {
+      const inListSql = cleanedTables
+        .map((t) => `N'${escSql(t)}'`)
+        .join(", ");
+      sqlLines.push(`
+        DELETE FROM EntityScreenItems
+        WHERE EntityScreenId IN (SELECT Id FROM EntityScreens WHERE EntityTypeId = @entityTypeId)
+          AND EntityId IN (
+            SELECT Id FROM Entities
+            WHERE EntityTypeId = @entityTypeId AND Name NOT IN (${inListSql})
+          );
+
+        DELETE FROM EntityStateLogs
+        WHERE EntityId IN (
+          SELECT Id FROM Entities
+          WHERE EntityTypeId = @entityTypeId AND Name NOT IN (${inListSql})
+        );
+
+        DELETE FROM EntityStateValues
+        WHERE EntityId IN (
+          SELECT Id FROM Entities
+          WHERE EntityTypeId = @entityTypeId AND Name NOT IN (${inListSql})
+        );
+
+        DELETE FROM Entities
+        WHERE EntityTypeId = @entityTypeId AND Name NOT IN (${inListSql});
+      `);
+    }
+
+    runLocalSambaSqlQuery(sqlLines.join("\r\n"));
+
+    // GraphQL Message Server açıksa önbelleği sıfırla
+    try {
+      const accessToken = await authenticateSambaPos(cfg);
+      await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `mutation { postResetEntityCacheMessage { id } }`
+      );
+    } catch {
+      // ignore if Message Server port 9000 is down
+    }
+
+    return {
+      ok: true,
+      tables: cleanedTables,
+      settings: updatedSettings,
+      message: `✅ ${cleanedTables.length} masa hem sitede hem de SambaPOS V5 "Tüm Masalar" ekranında birebir eşitlendi!`,
+    };
+  } catch {
+    return {
+      ok: true,
+      tables: cleanedTables,
+      settings: updatedSettings,
+      message: `✅ ${cleanedTables.length} masa sitede güncellendi (SambaPOS yerel SQL erişilemediği için sadece siteye kaydedildi).`,
+    };
+  }
+}
+
 
 
