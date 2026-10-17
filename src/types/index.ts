@@ -329,9 +329,29 @@ export interface SambaPosConfig {
   lastMenuSyncedAt?: string; // Son menü aktarım/eşitleme zamanı
 }
 
+export interface AdisyoPosConfig {
+  enabled: boolean; // İsteğe bağlı: Müşteri Adisyo / Kurye POS isterse aktif eder
+  mode: "adisyo_cloud" | "kurye_webhook" | "simulation"; // Adisyo Bulut API, Kurye POS Webhook Köprüsü veya Simülasyon/Test
+  apiBaseUrl: string; // Örn: "https://ext-api.adisyo.com"
+  apiKey: string; // Adisyo x-api-key
+  apiSecret: string; // Adisyo x-api-secret
+  consumerCode: string; // Adisyo x-consumer (Örn: "restoran_online")
+  restaurantId?: string; // Şube / Restoran ID veya Kodu
+  syncTrigger: "on_accepted" | "on_created" | "manual"; // Ne zaman aktarılsın?
+  cashPaymentTypeId: string; // Örn: "Nakit" veya "1"
+  cardPaymentTypeId: string; // Örn: "Kredi Kartı" veya "2"
+  onlinePaymentTypeId: string; // Örn: "Online / Açık Hesap" veya "3"
+  autoAssignCourierFromAdisyo: boolean; // Adisyo / Kurye POS'tan kurye ataması ve teslimat durumunu siteye eşitle
+  webhookSecret?: string; // Gelen webhook bildirimleri için güvenlik anahtarı
+  fallbackExternalProductId?: string; // Eşleşmeyen ürünler için yedek Adisyo ürün kodu
+  productMappings?: Record<string, string>; // Site Ürün ID veya Adı -> Adisyo Ürün Kodu / Adı eşleştirmesi
+  lastMenuSyncedAt?: string; // Son menü eşitleme zamanı
+}
+
 export interface PosIntegrationConfig {
-  activeProvider: "none" | "sambapos"; // İleride "adisyo" | "narpos" | "simpra" vb. eklenebilir
+  activeProvider: "none" | "sambapos" | "adisyo";
   sambaPos: SambaPosConfig;
+  adisyoPos?: AdisyoPosConfig;
 }
 
 export interface RestaurantSettings {

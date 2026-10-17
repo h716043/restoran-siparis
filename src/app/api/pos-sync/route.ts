@@ -9,6 +9,16 @@ import {
   syncSiteMenuToSambaPos,
   testSambaPosConnection,
 } from "@/lib/sambapos";
+import {
+  applyAdisyoOrderStatusUpdate,
+  fetchAdisyoCatalog,
+  getDefaultAdisyoPosConfig,
+  getResolvedAdisyoConfig,
+  syncOrderStatusesFromAdisyoPos,
+  syncOrderToAdisyoPos,
+  syncSiteMenuToAdisyo,
+  testAdisyoPosConnection,
+} from "@/lib/adisyo";
 
 export async function GET() {
   try {
@@ -35,7 +45,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
-    // 1) SambaPOS Ayarlarını Kaydetme
+    // 1) SambaPOS ve Adisyo / Kurye POS Ayarlarını Kaydetme
     if (body.action === "save_config") {
       if (role !== "admin") {
         return NextResponse.json(
@@ -48,11 +58,23 @@ export async function POST(req: NextRequest) {
         ...(settings.posIntegrationConfig?.sambaPos || {}),
         ...(body.sambaPos || {}),
       };
-      const nextPosConfig = {
-        activeProvider: nextSamba.enabled
+      const nextAdisyo = {
+        ...getDefaultAdisyoPosConfig(),
+        ...(settings.posIntegrationConfig?.adisyoPos || {}),
+        ...(body.adisyoPos || {}),
+      };
+      const nextActiveProvider =
+        body.activeProvider ||
+        (nextAdisyo.enabled
+          ? ("adisyo" as const)
+          : nextSamba.enabled
           ? ("sambapos" as const)
-          : ("none" as const),
+          : ("none" as const));
+
+      const nextPosConfig = {
+        activeProvider: nextActiveProvider,
         sambaPos: nextSamba,
+        adisyoPos: nextAdisyo,
       };
       const updatedSettings = updateSettings({
         ...settings,
@@ -60,9 +82,7 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json({
         ok: true,
-        message: nextSamba.enabled
-          ? "✅ SambaPOS entegrasyon ayarları kaydedildi ve aktif edildi!"
-          : "ℹ️ SambaPOS entegrasyonu pasif olarak kaydedildi.",
+        message: "✅ POS entegrasyon ayarları başarıyla kaydedildi!",
         posIntegrationConfig: updatedSettings.posIntegrationConfig,
       });
     }
@@ -75,10 +95,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result);
     }
 
+    // 2B) Adisyo / Kurye POS Bağlantısını Test Etme
+    if (body.action === "test_adisyo_connection") {
+      const result = await testAdisyoPosConnection(
+        body.adisyoPos || body.adisyoConfig
+      );
+      return NextResponse.json(result);
+    }
+
     // 3) SambaPOS Mevcut Ürün Kataloğunu & Site Ürün Eşleşme Durumunu Çekme
     if (body.action === "fetch_samba_catalog") {
       const catalog = await fetchSambaPosCatalog(
         body.sambaPos || body.sambaPosConfig
+      );
+      return NextResponse.json(catalog);
+    }
+
+    // 3B) Adisyo / Kurye POS Ürün Kataloğunu Çekme
+    if (body.action === "fetch_adisyo_catalog") {
+      const catalog = await fetchAdisyoCatalog(
+        body.adisyoPos || body.adisyoConfig
       );
       return NextResponse.json(catalog);
     }
@@ -96,6 +132,21 @@ export async function POST(req: NextRequest) {
         updatePrices: body.updatePrices !== false,
         syncScreenMenu: body.syncScreenMenu !== false,
         customConfig: body.sambaPos || body.sambaPosConfig,
+      });
+      return NextResponse.json(result);
+    }
+
+    // 4B) Sitedeki Ürünleri Adisyo / Kurye POS ile Eşitleme
+    if (body.action === "sync_menu_to_adisyo") {
+      if (role !== "admin") {
+        return NextResponse.json(
+          { error: "Sadece yönetici menü aktarımı yapabilir" },
+          { status: 403 }
+        );
+      }
+      const result = await syncSiteMenuToAdisyo({
+        itemIds: Array.isArray(body.itemIds) ? body.itemIds : undefined,
+        updatePrices: body.updatePrices !== false,
       });
       return NextResponse.json(result);
     }
@@ -131,21 +182,74 @@ export async function POST(req: NextRequest) {
       const updatedSettings = updateSettings({
         ...settings,
         posIntegrationConfig: {
-          activeProvider: nextSamba.enabled ? "sambapos" : "none",
+          activeProvider:
+            settings.posIntegrationConfig?.activeProvider ||
+            (nextSamba.enabled ? "sambapos" : "none"),
           sambaPos: nextSamba,
+          adisyoPos: getResolvedAdisyoConfig(
+            settings.posIntegrationConfig?.adisyoPos
+          ),
         },
       });
       const catalog = await fetchSambaPosCatalog(nextSamba);
       return NextResponse.json({
         ok: true,
-        message: "✅ Ürün eşleştirmesi kaydedildi.",
+        message: "✅ SambaPOS ürün eşleştirmesi kaydedildi.",
         posIntegrationConfig: updatedSettings.posIntegrationConfig,
         catalog,
       });
     }
 
-    // 6) Tek Bir Siparişi Manuel Olarak SambaPOS'a Aktarma (veya Tekrar Gönderme)
-    if (body.action === "sync_order") {
+    // 5B) Tekil Ürün Eşleştirmesini (Site Ürünü -> Adisyo Ürün Kodu / Adı) Kaydetme
+    if (body.action === "save_adisyo_product_mapping") {
+      if (role !== "admin") {
+        return NextResponse.json(
+          { error: "Sadece yönetici ürün eşleştirmesi değiştirebilir" },
+          { status: 403 }
+        );
+      }
+      const currentAdisyo = getResolvedAdisyoConfig(
+        settings.posIntegrationConfig?.adisyoPos
+      );
+      const nextMappings: Record<string, string> = {
+        ...(currentAdisyo.productMappings || {}),
+        ...(body.productMappings || {}),
+      };
+      if (body.siteItemId !== undefined) {
+        const val = String(body.adisyoProductName || "").trim();
+        if (val) {
+          nextMappings[String(body.siteItemId)] = val;
+        } else {
+          delete nextMappings[String(body.siteItemId)];
+        }
+      }
+      const nextAdisyo = {
+        ...currentAdisyo,
+        productMappings: nextMappings,
+      };
+      const updatedSettings = updateSettings({
+        ...settings,
+        posIntegrationConfig: {
+          activeProvider:
+            settings.posIntegrationConfig?.activeProvider || "adisyo",
+          sambaPos: {
+            ...DEFAULT_SAMBAPOS_CONFIG,
+            ...(settings.posIntegrationConfig?.sambaPos || {}),
+          },
+          adisyoPos: nextAdisyo,
+        },
+      });
+      const catalog = await fetchAdisyoCatalog(nextAdisyo);
+      return NextResponse.json({
+        ok: true,
+        message: "✅ Adisyo / Kurye POS ürün eşleştirmesi kaydedildi.",
+        posIntegrationConfig: updatedSettings.posIntegrationConfig,
+        catalog,
+      });
+    }
+
+    // 6) Tek Bir Siparişi Manuel Olarak POS'a Aktarma (SambaPOS veya Adisyo)
+    if (body.action === "sync_order" || body.action === "sync_order_to_adisyo") {
       const orderId = String(body.orderId || "").trim();
       if (!orderId) {
         return NextResponse.json(
@@ -153,15 +257,37 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      const res = await sendOrderToSambaPos(orderId, { force: true });
+      const targetProvider =
+        body.action === "sync_order_to_adisyo" || body.provider === "adisyo"
+          ? "adisyo"
+          : body.provider === "sambapos"
+          ? "sambapos"
+          : settings.posIntegrationConfig?.activeProvider === "adisyo"
+          ? "adisyo"
+          : "sambapos";
+
+      const res =
+        targetProvider === "adisyo"
+          ? await syncOrderToAdisyoPos(orderId, { force: true })
+          : await sendOrderToSambaPos(orderId, { force: true });
+
       if (res.ok) {
         await syncActivityWithCloud().catch(() => {});
       }
       return NextResponse.json(res);
     }
 
-    // 7) Aktarılmamış Tüm Siparişleri Toplu Olarak SambaPOS'a Aktarma
+    // 7) Aktarılmamış Tüm Siparişleri Toplu Olarak POS'a Aktarma
     if (body.action === "sync_all_pending") {
+      const targetProvider =
+        body.provider === "adisyo"
+          ? "adisyo"
+          : body.provider === "sambapos"
+          ? "sambapos"
+          : settings.posIntegrationConfig?.activeProvider === "adisyo"
+          ? "adisyo"
+          : "sambapos";
+
       const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
       const activeOrders = getOrders().filter(
         (o) =>
@@ -172,7 +298,10 @@ export async function POST(req: NextRequest) {
       let syncedCount = 0;
       let lastError = "";
       for (const ord of activeOrders) {
-        const r = await sendOrderToSambaPos(ord, { force: true });
+        const r =
+          targetProvider === "adisyo"
+            ? await syncOrderToAdisyoPos(ord, { force: true })
+            : await sendOrderToSambaPos(ord, { force: true });
         if (r.ok) {
           syncedCount++;
         } else {
@@ -182,13 +311,15 @@ export async function POST(req: NextRequest) {
       if (syncedCount > 0) {
         await syncActivityWithCloud().catch(() => {});
       }
+      const providerLabel =
+        targetProvider === "adisyo" ? "Adisyo / Kurye POS" : "SambaPOS";
       return NextResponse.json({
         ok: syncedCount > 0 || activeOrders.length === 0,
         message:
           activeOrders.length === 0
             ? "Aktarılacak bekleyen sipariş bulunmuyor (tümü zaten aktarılmış)."
             : syncedCount > 0
-            ? `✅ ${syncedCount} / ${activeOrders.length} sipariş SambaPOS'a başarıyla aktarıldı!`
+            ? `✅ ${syncedCount} / ${activeOrders.length} sipariş ${providerLabel}'a başarıyla aktarıldı!`
             : lastError || "Siparişler aktarılamadı.",
         syncedCount,
       });
@@ -201,6 +332,32 @@ export async function POST(req: NextRequest) {
         customConfig: body.sambaPos || body.sambaPosConfig,
         force: true,
       });
+      return NextResponse.json(res);
+    }
+
+    // 8B) Adisyo / Kurye POS'tan Kurye Atanan veya Teslim Edilen Siparişleri Siteye Çekme
+    if (body.action === "sync_from_adisyo") {
+      const res = await syncOrderStatusesFromAdisyoPos({ force: true });
+      if (res.updatedCount > 0) {
+        await syncActivityWithCloud().catch(() => {});
+      }
+      return NextResponse.json(res);
+    }
+
+    // 9) Adisyo / Kurye POS üzerinden Kurye Atama veya Teslim Edildi Simülasyonu / Anlık Tetikleme
+    if (body.action === "simulate_adisyo_event") {
+      const res = applyAdisyoOrderStatusUpdate({
+        orderId: body.orderId ? String(body.orderId) : undefined,
+        orderNumber: body.orderNumber ? Number(body.orderNumber) : undefined,
+        externalTicketId: body.externalTicketId
+          ? String(body.externalTicketId)
+          : undefined,
+        courierName: body.courierName ? String(body.courierName) : undefined,
+        status: body.status ? String(body.status) : undefined,
+      });
+      if (res.updated) {
+        await syncActivityWithCloud().catch(() => {});
+      }
       return NextResponse.json(res);
     }
 

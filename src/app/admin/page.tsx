@@ -117,6 +117,9 @@ export default function AdminDashboardPage() {
     ok?: boolean;
     message?: string;
   } | null>(null);
+  const [selectedPosSubTab, setSelectedPosSubTab] = useState<
+    "sambapos" | "adisyo"
+  >("sambapos");
   const [posTesting, setPosTesting] = useState(false);
   const [posTestStatus, setPosTestStatus] = useState<{
     ok?: boolean;
@@ -446,14 +449,54 @@ export default function AdminDashboardPage() {
     autoCreateCustomerEntity: true,
   };
 
+  const adisyoConfig = settings?.posIntegrationConfig?.adisyoPos || {
+    enabled: false,
+    mode: "simulation" as "adisyo_cloud" | "kurye_webhook" | "simulation",
+    apiBaseUrl: "https://ext-api.adisyo.com",
+    apiKey: "",
+    apiSecret: "",
+    consumerCode: "restoran_online",
+    restaurantId: "",
+    syncTrigger: "on_accepted" as const,
+    cashPaymentTypeId: "Nakit",
+    cardPaymentTypeId: "Kredi Kartı",
+    onlinePaymentTypeId: "Online / Açık Hesap",
+    autoAssignCourierFromAdisyo: true,
+    webhookSecret: "adisyo_kurye_2026",
+    fallbackExternalProductId: "ONLINE-URUN",
+    productMappings: {} as Record<string, string>,
+  };
+
   const updateSambaConfigField = (patch: Partial<typeof sambaConfig>) => {
     if (!settings) return;
     const nextSamba = { ...sambaConfig, ...patch };
     setSettings({
       ...settings,
       posIntegrationConfig: {
-        activeProvider: nextSamba.enabled ? "sambapos" : "none",
+        activeProvider: nextSamba.enabled
+          ? "sambapos"
+          : adisyoConfig.enabled
+          ? "adisyo"
+          : "none",
         sambaPos: nextSamba,
+        adisyoPos: adisyoConfig,
+      },
+    });
+  };
+
+  const updateAdisyoConfigField = (patch: Partial<typeof adisyoConfig>) => {
+    if (!settings) return;
+    const nextAdisyo = { ...adisyoConfig, ...patch };
+    setSettings({
+      ...settings,
+      posIntegrationConfig: {
+        activeProvider: nextAdisyo.enabled
+          ? "adisyo"
+          : sambaConfig.enabled
+          ? "sambapos"
+          : "none",
+        sambaPos: sambaConfig,
+        adisyoPos: nextAdisyo,
       },
     });
   };
@@ -461,11 +504,19 @@ export default function AdminDashboardPage() {
   const handleSavePosConfig = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!settings) return;
-    const nextConfig = {
-      activeProvider: sambaConfig.enabled
+    const nextActiveProvider =
+      selectedPosSubTab === "adisyo" && adisyoConfig.enabled
+        ? ("adisyo" as const)
+        : sambaConfig.enabled
         ? ("sambapos" as const)
-        : ("none" as const),
+        : adisyoConfig.enabled
+        ? ("adisyo" as const)
+        : ("none" as const);
+
+    const nextConfig = {
+      activeProvider: nextActiveProvider,
       sambaPos: sambaConfig,
+      adisyoPos: adisyoConfig,
     };
     const nextSettings: RestaurantSettings = {
       ...settings,
@@ -473,7 +524,11 @@ export default function AdminDashboardPage() {
     };
     await persistSettings(
       nextSettings,
-      sambaConfig.enabled
+      selectedPosSubTab === "adisyo"
+        ? adisyoConfig.enabled
+          ? "Adisyo / Kurye POS entegrasyon ayarları kaydedildi ve aktif edildi!"
+          : "Adisyo / Kurye POS ayarları kaydedildi (Şu an pasif)."
+        : sambaConfig.enabled
         ? "SambaPOS entegrasyon ayarları kaydedildi ve aktif edildi!"
         : "SambaPOS entegrasyon ayarları kaydedildi (Şu an pasif)."
     );
@@ -486,10 +541,17 @@ export default function AdminDashboardPage() {
       const res = await fetch("/api/pos-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "test_connection",
-          sambaPos: sambaConfig,
-        }),
+        body: JSON.stringify(
+          selectedPosSubTab === "adisyo"
+            ? {
+                action: "test_adisyo_connection",
+                adisyoPos: adisyoConfig,
+              }
+            : {
+                action: "test_connection",
+                sambaPos: sambaConfig,
+              }
+        ),
       });
       const data = await res.json();
       setPosTestStatus({
@@ -502,22 +564,85 @@ export default function AdminDashboardPage() {
         message:
           err instanceof Error
             ? err.message
-            : "SambaPOS bağlantı testi sırasında hata oluştu.",
+            : "POS bağlantı testi sırasında hata oluştu.",
       });
     } finally {
       setPosTesting(false);
     }
   };
 
-  const handleManualSyncOrderToPos = async (orderId: string) => {
+  const handleSyncMenuToAdisyo = async () => {
+    setPosMenuSyncing(true);
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_menu_to_adisyo",
+          updatePrices: true,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      if (data.ok) {
+        showToast(data.message || "Ürünler Adisyo / Kurye POS ile eşitlendi!");
+        await loadData();
+      }
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "Adisyo ürün eşitleme sırasında hata oluştu.",
+      });
+    } finally {
+      setPosMenuSyncing(false);
+    }
+  };
+
+  const handleSaveAdisyoProductMapping = async (
+    siteItemId: string,
+    adisyoProductName: string
+  ) => {
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_adisyo_product_mapping",
+          siteItemId,
+          adisyoProductName,
+        }),
+      });
+      const data = await res.json();
+      if (data.posIntegrationConfig && settings) {
+        setSettings({
+          ...settings,
+          posIntegrationConfig: data.posIntegrationConfig,
+        });
+      }
+      showToast("✅ Adisyo / Kurye POS ürün eşleştirmesi kaydedildi!");
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSimulateAdisyoEvent = async (
+    orderId: string,
+    status: string,
+    courierName?: string
+  ) => {
     setPosSyncingOrderId(orderId);
     try {
       const res = await fetch("/api/pos-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "sync_order",
+          action: "simulate_adisyo_event",
           orderId,
+          status,
+          courierName,
         }),
       });
       const data = await res.json();
@@ -529,7 +654,39 @@ export default function AdminDashboardPage() {
     } catch {
       setPosTestStatus({
         ok: false,
-        message: "Sipariş SambaPOS'a aktarılırken hata oluştu.",
+        message: "Adisyo / Kurye POS durum güncellemesi sırasında hata oluştu.",
+      });
+    } finally {
+      setPosSyncingOrderId(null);
+    }
+  };
+
+  const handleManualSyncOrderToPos = async (
+    orderId: string,
+    providerOverride?: "sambapos" | "adisyo"
+  ) => {
+    setPosSyncingOrderId(orderId);
+    const targetProvider = providerOverride || selectedPosSubTab;
+    try {
+      const res = await fetch("/api/pos-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync_order",
+          orderId,
+          provider: targetProvider,
+        }),
+      });
+      const data = await res.json();
+      setPosTestStatus({
+        ok: Boolean(data.ok),
+        message: data.message,
+      });
+      await loadData();
+    } catch {
+      setPosTestStatus({
+        ok: false,
+        message: "Sipariş POS sistemine aktarılırken hata oluştu.",
       });
     } finally {
       setPosSyncingOrderId(null);
@@ -544,6 +701,7 @@ export default function AdminDashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "sync_all_pending",
+          provider: selectedPosSubTab,
         }),
       });
       const data = await res.json();
@@ -555,7 +713,7 @@ export default function AdminDashboardPage() {
     } catch {
       setPosTestStatus({
         ok: false,
-        message: "Toplu SambaPOS aktarımı sırasında hata oluştu.",
+        message: "Toplu POS aktarımı sırasında hata oluştu.",
       });
     } finally {
       setPosBulkSyncing(false);
@@ -6256,67 +6414,136 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="inline-flex items-center gap-2 bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-xs font-extrabold px-3 py-1 rounded-full">
-                    🔌 İsteğe Bağlı & Tamamen Bağımsız POS Köprüsü
+                    🔌 İsteğe Bağlı &amp; Tamamen Bağımsız Çoklu POS Köprüsü
                   </div>
                   <h2 className="text-xl font-black text-white">
-                    SambaPOS V5 Sipariş Aktarım Entegrasyonu
+                    {selectedPosSubTab === "adisyo"
+                      ? "🏪 Adisyo Bulut POS & Kurye POS Entegrasyonu"
+                      : "🍽️ SambaPOS V5 Sipariş Aktarım Entegrasyonu"}
                   </h2>
                   <p className="text-xs text-indigo-200/90 max-w-2xl leading-relaxed">
-                    Müşterilerinizin web sitesinden (Netlify), QR masadan veya kasadan verdiği siparişleri mevcut sistemi hiç bozmadan otomatik veya tek tıkla <strong>SambaPOS V5</strong> adisyonuna aktarabilirsiniz. Kullanmak istemeyen işletmelerde kapalı kalır ve sistemi hiçbir şekilde etkilemez.
+                    {selectedPosSubTab === "adisyo" ? (
+                      <>
+                        Müşterilerinizin web sitesinden (Netlify), QR masadan veya kasadan verdiği siparişleri otomatik veya tek tıkla <strong>Adisyo Bulut POS (External API v2)</strong> veya <strong>Kurye POS</strong> sistemine aktarabilir, Adisyo&apos;dan yapılan kurye ataması ve teslimat durumlarını sitede otomatik güncelleyebilirsiniz.
+                      </>
+                    ) : (
+                      <>
+                        Müşterilerinizin web sitesinden (Netlify), QR masadan veya kasadan verdiği siparişleri mevcut sistemi hiç bozmadan otomatik veya tek tıkla <strong>SambaPOS V5</strong> adisyonuna aktarabilirsiniz. Kullanmak istemeyen işletmelerde kapalı kalır ve sistemi hiçbir şekilde etkilemez.
+                      </>
+                    )}
                   </p>
                 </div>
 
-                <label className="inline-flex items-center gap-3 bg-white/10 hover:bg-white/15 border border-white/20 px-4 py-3 rounded-2xl cursor-pointer shrink-0 transition">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(sambaConfig.enabled)}
-                    onChange={(e) =>
-                      updateSambaConfigField({ enabled: e.target.checked })
-                    }
-                    className="w-5 h-5 accent-emerald-500 rounded cursor-pointer"
-                  />
-                  <div>
-                    <div className="text-sm font-black text-white">
-                      {sambaConfig.enabled
-                        ? "✅ SambaPOS Aktarımı AÇIK"
-                        : "⏸️ SambaPOS Aktarımı KAPALI"}
+                {selectedPosSubTab === "adisyo" ? (
+                  <label className="inline-flex items-center gap-3 bg-white/10 hover:bg-white/15 border border-white/20 px-4 py-3 rounded-2xl cursor-pointer shrink-0 transition">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(adisyoConfig.enabled)}
+                      onChange={(e) =>
+                        updateAdisyoConfigField({ enabled: e.target.checked })
+                      }
+                      className="w-5 h-5 accent-emerald-500 rounded cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-sm font-black text-white">
+                        {adisyoConfig.enabled
+                          ? "✅ Adisyo / Kurye POS AÇIK"
+                          : "⏸️ Adisyo / Kurye POS KAPALI"}
+                      </div>
+                      <div className="text-[11px] text-indigo-200">
+                        İsteğe bağlı açıp kapatabilirsiniz
+                      </div>
                     </div>
-                    <div className="text-[11px] text-indigo-200">
-                      İsteğe bağlı açıp kapatabilirsiniz
+                  </label>
+                ) : (
+                  <label className="inline-flex items-center gap-3 bg-white/10 hover:bg-white/15 border border-white/20 px-4 py-3 rounded-2xl cursor-pointer shrink-0 transition">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(sambaConfig.enabled)}
+                      onChange={(e) =>
+                        updateSambaConfigField({ enabled: e.target.checked })
+                      }
+                      className="w-5 h-5 accent-emerald-500 rounded cursor-pointer"
+                    />
+                    <div>
+                      <div className="text-sm font-black text-white">
+                        {sambaConfig.enabled
+                          ? "✅ SambaPOS Aktarımı AÇIK"
+                          : "⏸️ SambaPOS Aktarımı KAPALI"}
+                      </div>
+                      <div className="text-[11px] text-indigo-200">
+                        İsteğe bağlı açıp kapatabilirsiniz
+                      </div>
                     </div>
-                  </div>
-                </label>
+                  </label>
+                )}
               </div>
 
-              {/* POS Sağlayıcı Seçimi (İleride Eklenecek POS Sistemleri İçin Modüler Yapı) */}
+              {/* POS Sağlayıcı Seçimi (SambaPOS V5 & Adisyo / Kurye POS Aktif Modüller) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10">
-                <div className="bg-indigo-600/30 border-2 border-indigo-400 rounded-xl p-3 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPosSubTab("sambapos");
+                    setPosTestStatus(null);
+                  }}
+                  className={`text-left rounded-xl p-3 flex items-center justify-between transition cursor-pointer ${
+                    selectedPosSubTab === "sambapos"
+                      ? "bg-indigo-600/40 border-2 border-indigo-400 shadow-md"
+                      : "bg-white/10 hover:bg-white/15 border border-white/20"
+                  }`}
+                >
                   <div>
                     <div className="text-xs font-black text-white">
                       🍽️ SambaPOS V5 (GraphQL / Webhook)
                     </div>
                     <div className="text-[11px] text-indigo-200">
-                      Masa, Paket ve Gel-Al Adisyon Aktarımı
+                      Masa, Paket, Menü &amp; Kurye Senkronizasyonu
                     </div>
                   </div>
-                  <span className="bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
-                    AKTİF MODÜL
+                  <span
+                    className={`${
+                      sambaConfig.enabled
+                        ? "bg-emerald-500 text-white"
+                        : "bg-indigo-500/40 text-indigo-100"
+                    } text-[10px] font-black px-2 py-0.5 rounded-full shrink-0`}
+                  >
+                    {sambaConfig.enabled ? "AÇIK" : "AKTİF MODÜL"}
                   </span>
-                </div>
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3 opacity-60 flex items-center justify-between">
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPosSubTab("adisyo");
+                    setPosTestStatus(null);
+                  }}
+                  className={`text-left rounded-xl p-3 flex items-center justify-between transition cursor-pointer ${
+                    selectedPosSubTab === "adisyo"
+                      ? "bg-emerald-600/40 border-2 border-emerald-400 shadow-md"
+                      : "bg-white/10 hover:bg-white/15 border border-white/20"
+                  }`}
+                >
                   <div>
-                    <div className="text-xs font-bold text-slate-300">
+                    <div className="text-xs font-black text-white">
                       🏪 Adisyo / Kurye POS
                     </div>
-                    <div className="text-[11px] text-slate-400">
-                      Çoklu POS Altyapısı Hazır
+                    <div className="text-[11px] text-emerald-200">
+                      Bulut API v2, Menü &amp; Çift Yönlü Kurye POS
                     </div>
                   </div>
-                  <span className="bg-slate-700 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    Yakında
+                  <span
+                    className={`${
+                      adisyoConfig.enabled
+                        ? "bg-emerald-500 text-white"
+                        : "bg-emerald-500/30 text-emerald-100"
+                    } text-[10px] font-black px-2 py-0.5 rounded-full shrink-0`}
+                  >
+                    {adisyoConfig.enabled ? "AÇIK" : "AKTİF MODÜL"}
                   </span>
-                </div>
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3 opacity-60 flex items-center justify-between">
+                </button>
+
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 opacity-75 flex items-center justify-between">
                   <div>
                     <div className="text-xs font-bold text-slate-300">
                       🖥️ NarPOS / Kerzz / Özel API
@@ -6326,7 +6553,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     </div>
                   </div>
                   <span className="bg-slate-700 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    Yakında
+                    Webhook Hazır
                   </span>
                 </div>
               </div>
@@ -6354,6 +6581,538 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             )}
 
+            {selectedPosSubTab === "adisyo" ? (
+              <div className="space-y-6">
+                {/* 1. Adisyo / Kurye POS Aktarım Zamanı & Bağlantı Modu */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900">
+                        1. Adisyo / Kurye POS Aktarım Zamanı &amp; Bağlantı Modu
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Siparişlerin Adisyo Bulut POS veya Kurye POS&apos;a ne zaman ve hangi yöntemle gönderileceğini seçin.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleTestPosConnection}
+                        disabled={posTesting}
+                        className="inline-flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-extrabold px-3.5 py-2 rounded-xl transition cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw
+                          className={`w-3.5 h-3.5 ${posTesting ? "animate-spin" : ""}`}
+                        />
+                        {posTesting
+                          ? "Test Ediliyor..."
+                          : "🔌 Adisyo / Kurye POS Bağlantısını Test Et"}
+                      </button>
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold px-4 py-2 rounded-xl transition cursor-pointer"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Ayarları Kaydet
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Sipariş Ne Zaman Adisyo / Kurye POS&apos;a Aktarılsın?
+                      </label>
+                      <select
+                        value={adisyoConfig.syncTrigger}
+                        onChange={(e) =>
+                          updateAdisyoConfigField({
+                            syncTrigger: e.target.value as
+                              | "on_accepted"
+                              | "on_created"
+                              | "manual",
+                          })
+                        }
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                      >
+                        <option value="on_accepted">
+                          ✅ Mutfak / Kasa Siparişi &quot;Kabul Et&quot; Dediğinde Otomatik Aktar (Önerilen)
+                        </option>
+                        <option value="on_created">
+                          ⚡ Sipariş Geldiği Anda (Onay Beklemeden) Anında Otomatik Aktar
+                        </option>
+                        <option value="manual">
+                          🖐️ Sadece Manuel (Mutfak/Yönetim Ekranında Butona Basınca Aktar)
+                        </option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Adisyo / Kurye POS Çalışma Modu
+                      </label>
+                      <select
+                        value={adisyoConfig.mode}
+                        onChange={(e) =>
+                          updateAdisyoConfigField({
+                            mode: e.target.value as
+                              | "adisyo_cloud"
+                              | "kurye_webhook"
+                              | "simulation",
+                          })
+                        }
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-semibold"
+                      >
+                        <option value="adisyo_cloud">
+                          ☁️ Adisyo Bulut POS (Resmi External API v2 - ext-api.adisyo.com)
+                        </option>
+                        <option value="kurye_webhook">
+                          🛵 Kurye POS / Özel HTTP Webhook Köprüsü
+                        </option>
+                        <option value="simulation">
+                          🧪 Simülasyon &amp; Canlı Test Modu (API Anahtarı Olmadan Test Et)
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 2. Adisyo API & Kimlik Bilgileri */}
+                  <div className="space-y-4 pt-3 border-t border-slate-100">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-emerald-700">
+                      2. Adisyo API Anahtarları, Şube &amp; Ödeme Tipi Eşleştirmesi
+                    </h4>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          API / Webhook Sunucu Adresi
+                        </label>
+                        <input
+                          type="text"
+                          value={adisyoConfig.apiBaseUrl}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({
+                              apiBaseUrl: e.target.value,
+                            })
+                          }
+                          placeholder="https://ext-api.adisyo.com"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Adisyo API Key (x-api-key)
+                        </label>
+                        <input
+                          type="text"
+                          value={adisyoConfig.apiKey}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({ apiKey: e.target.value })
+                          }
+                          placeholder="Adisyo panelinden alınan x-api-key"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Adisyo API Secret (x-api-secret)
+                        </label>
+                        <input
+                          type="password"
+                          value={adisyoConfig.apiSecret}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({
+                              apiSecret: e.target.value,
+                            })
+                          }
+                          placeholder="x-api-secret"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Consumer Kodu (x-consumer) &amp; Şube ID
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={adisyoConfig.consumerCode}
+                            onChange={(e) =>
+                              updateAdisyoConfigField({
+                                consumerCode: e.target.value,
+                              })
+                            }
+                            placeholder="restoran_online"
+                            className="w-1/2 px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+                          />
+                          <input
+                            type="text"
+                            value={adisyoConfig.restaurantId || ""}
+                            onChange={(e) =>
+                              updateAdisyoConfigField({
+                                restaurantId: e.target.value,
+                              })
+                            }
+                            placeholder="Şube Kodu"
+                            className="w-1/2 px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Nakit Ödeme Tipi Kodu / Adı
+                        </label>
+                        <input
+                          type="text"
+                          value={adisyoConfig.cashPaymentTypeId}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({
+                              cashPaymentTypeId: e.target.value,
+                            })
+                          }
+                          placeholder="Nakit"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Kredi Kartı Ödeme Tipi Kodu / Adı
+                        </label>
+                        <input
+                          type="text"
+                          value={adisyoConfig.cardPaymentTypeId}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({
+                              cardPaymentTypeId: e.target.value,
+                            })
+                          }
+                          placeholder="Kredi Kartı"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Online / Açık Hesap Ödeme Tipi
+                        </label>
+                        <input
+                          type="text"
+                          value={adisyoConfig.onlinePaymentTypeId}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({
+                              onlinePaymentTypeId: e.target.value,
+                            })
+                          }
+                          placeholder="Online / Açık Hesap"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="text-xs font-extrabold text-emerald-950">
+                          📡 Adisyo / Kurye POS &rarr; Site Canlı Kurye &amp; Teslimat Webhook Adresi
+                        </div>
+                        <div className="text-[11px] text-emerald-800">
+                          Adisyo veya Kurye POS üzerinde kurye atandığında (<code>ON_WAY</code>) veya sipariş teslim edildiğinde (<code>DELIVERED</code>) bu adrese bildirim geldiği anda sitede otomatik güncellenir:
+                        </div>
+                        <code className="inline-block bg-white border border-emerald-200 text-emerald-900 font-mono text-xs px-2.5 py-1 rounded-lg">
+                          POST {originUrl}/api/pos-sync/adisyo-webhook
+                        </code>
+                      </div>
+                      <label className="inline-flex items-center gap-2 text-xs font-bold text-emerald-950 shrink-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={adisyoConfig.autoAssignCourierFromAdisyo !== false}
+                          onChange={(e) =>
+                            updateAdisyoConfigField({
+                              autoAssignCourierFromAdisyo: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-emerald-600 rounded"
+                        />
+                        Kurye &amp; Teslimat Durumunu Otomatik Eşitle
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Adisyo / Kurye POS Ürün & Katalog Eşleştirme Tablosu */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900">
+                        3. 🔄 Adisyo / Kurye POS Menü &amp; Ürün Eşleştirme
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Sitedeki ürünlerinizin Adisyo / Kurye POS karşılıklarını eşitleyin veya özel Adisyo ürün kodu tanımlayın.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSyncMenuToAdisyo}
+                      disabled={posMenuSyncing}
+                      className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`w-4 h-4 ${posMenuSyncing ? "animate-spin" : ""}`}
+                      />
+                      {posMenuSyncing
+                        ? "Eşitleniyor..."
+                        : `🚀 Tüm Site Ürünlerini Adisyo / Kurye POS ile Eşitle (${items.length} Ürün)`}
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-96">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-600 font-extrabold">
+                        <tr>
+                          <th className="py-2.5 px-3">Site Ürünü</th>
+                          <th className="py-2.5 px-3">Kategori</th>
+                          <th className="py-2.5 px-3">Fiyat</th>
+                          <th className="py-2.5 px-3">Adisyo Ürün Kodu / Adı Eşleştirmesi</th>
+                          <th className="py-2.5 px-3 text-right">Durum</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {items.map((item, idx) => {
+                          const catName =
+                            categories.find((c) => c.id === item.categoryId)
+                              ?.name || "Genel";
+                          const mappedVal =
+                            adisyoConfig.productMappings?.[item.id] || "";
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/80">
+                              <td className="py-2 px-3 font-bold text-slate-900">
+                                {item.name}
+                              </td>
+                              <td className="py-2 px-3 text-slate-600">
+                                {catName}
+                              </td>
+                              <td className="py-2 px-3 font-extrabold text-emerald-700">
+                                {item.price.toFixed(2)} {settings.currency}
+                              </td>
+                              <td className="py-2 px-3">
+                                <input
+                                  type="text"
+                                  defaultValue={mappedVal || item.name}
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (val !== (mappedVal || item.name)) {
+                                      handleSaveAdisyoProductMapping(
+                                        item.id,
+                                        val
+                                      );
+                                    }
+                                  }}
+                                  placeholder={`ADS-${101 + idx} veya ${item.name}`}
+                                  className="w-full max-w-xs px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-medium"
+                                />
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full text-[11px]">
+                                  ✅ Eşleşti (ADS-{101 + idx})
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 4. Son Siparişlerin Adisyo / Kurye POS Aktarım & Canlı Kurye/Teslimat Tablosu */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900">
+                        4. 📋 Son Siparişlerin Adisyo / Kurye POS Aktarım &amp; Kurye Durumu
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Siparişleri Adisyo / Kurye POS&apos;a gönderebilir veya Adisyo üzerinden kurye ataması ve teslimat durumunu tek tıkla test edebilirsiniz.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleBulkSyncPendingToPos}
+                      disabled={posBulkSyncing}
+                      className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`w-4 h-4 ${posBulkSyncing ? "animate-spin" : ""}`}
+                      />
+                      {posBulkSyncing
+                        ? "Aktarılıyor..."
+                        : "🔄 Aktarılmamış Siparişleri Adisyo'ya Gönder"}
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-extrabold">
+                          <th className="py-2.5 px-3">Sipariş</th>
+                          <th className="py-2.5 px-3">Müşteri / Masa</th>
+                          <th className="py-2.5 px-3">Tutar</th>
+                          <th className="py-2.5 px-3">Durum &amp; Kurye</th>
+                          <th className="py-2.5 px-3">POS Aktarım Durumu</th>
+                          <th className="py-2.5 px-3 text-right">Adisyo / Kurye POS İşlemleri</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {orders.slice(0, 15).map((ord) => {
+                          const sync = ord.posSyncInfo;
+                          return (
+                            <tr key={ord.id} className="hover:bg-slate-50/80">
+                              <td className="py-2.5 px-3 font-black text-slate-900">
+                                #{ord.orderNumber}
+                                <div className="text-[10px] font-normal text-slate-400">
+                                  {new Date(ord.createdAt).toLocaleTimeString(
+                                    "tr-TR",
+                                    { hour: "2-digit", minute: "2-digit" }
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-slate-800">
+                                  {ord.orderType === "dine_in"
+                                    ? `🪑 Masa ${ord.tableNumber || "?"}`
+                                    : ord.customerName}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {ord.orderType === "delivery"
+                                    ? "🛵 Paket Servis"
+                                    : ord.orderType === "pickup"
+                                    ? "🛍️ Gel-Al"
+                                    : "🍽️ Masada"}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 font-extrabold text-emerald-700">
+                                {ord.totalAmount.toFixed(2)} {settings.currency}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="flex flex-col gap-1 items-start">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                      ord.status === "completed"
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : ord.status === "ready"
+                                        ? "bg-indigo-100 text-indigo-800"
+                                        : ord.status === "accepted"
+                                        ? "bg-amber-100 text-amber-800"
+                                        : ord.status === "rejected"
+                                        ? "bg-rose-100 text-rose-800"
+                                        : "bg-slate-100 text-slate-700"
+                                    }`}
+                                  >
+                                    {ord.status === "completed"
+                                      ? "🎉 Teslim Edildi"
+                                      : ord.status === "ready"
+                                      ? "🛵 Kuryede / Hazır"
+                                      : ord.status === "accepted"
+                                      ? "🔥 Hazırlanıyor"
+                                      : ord.status === "rejected"
+                                      ? "❌ İptal"
+                                      : "⏳ Bekliyor"}
+                                  </span>
+                                  {ord.courierName && (
+                                    <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-800 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
+                                      🛵 {ord.courierName}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {sync?.status === "synced" ? (
+                                  <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    ✅ Aktarıldı
+                                    {sync.externalTicketId
+                                      ? ` (#${sync.externalTicketId})`
+                                      : ""}
+                                  </span>
+                                ) : sync?.errorMessage ? (
+                                  <div className="space-y-0.5">
+                                    <span className="inline-flex items-center gap-1 bg-rose-100 text-rose-800 font-extrabold px-2.5 py-0.5 rounded-full text-[11px]">
+                                      ⚠️ Hata
+                                    </span>
+                                    <div
+                                      className="text-[10px] text-rose-600 max-w-xs truncate"
+                                      title={sync.errorMessage}
+                                    >
+                                      {sync.errorMessage}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 font-semibold px-2.5 py-0.5 rounded-full text-[11px]">
+                                    ⏳ Bekliyor
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <div className="inline-flex flex-wrap justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleManualSyncOrderToPos(
+                                        ord.id,
+                                        "adisyo"
+                                      )
+                                    }
+                                    disabled={posSyncingOrderId === ord.id}
+                                    className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                                  >
+                                    📤 Adisyo&apos;ya Aktar
+                                  </button>
+                                  {ord.orderType === "delivery" &&
+                                    ord.status !== "completed" && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleSimulateAdisyoEvent(
+                                            ord.id,
+                                            "ON_WAY",
+                                            "Adisyo Kurye-1"
+                                          )
+                                        }
+                                        disabled={posSyncingOrderId === ord.id}
+                                        className="inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                                        title="Adisyo / Kurye POS'tan Kurye Atamasını Siteye Yansıt"
+                                      >
+                                        🛵 Kurye Ata
+                                      </button>
+                                    )}
+                                  {ord.status !== "completed" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSimulateAdisyoEvent(
+                                          ord.id,
+                                          "DELIVERED"
+                                        )
+                                      }
+                                      disabled={posSyncingOrderId === ord.id}
+                                      className="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-900 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer disabled:opacity-50"
+                                      title="Adisyo / Kurye POS'tan Teslim Edildi Durumunu Siteye Yansıt"
+                                    >
+                                      🎉 Teslim Edildi
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
             {/* Bağlantı Modu ve Tetikleme Zamanı */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
@@ -7316,6 +8075,8 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                 </li>
               </ol>
             </div>
+              </>
+            )}
           </form>
         )}
       </main>

@@ -34,6 +34,12 @@ import {
 } from "@/lib/db";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
 import { syncActivityWithCloud } from "@/lib/cloud-sync";
+import {
+  getResolvedAdisyoConfig,
+  syncOrderStatusesFromAdisyoPos,
+  syncOrderToAdisyoPos,
+  syncSiteOrderUpdateToAdisyoPos,
+} from "@/lib/adisyo";
 
 export const DEFAULT_SAMBAPOS_CONFIG: SambaPosConfig = {
   enabled: false,
@@ -75,10 +81,15 @@ export function resolveMappedSambaProductName(
 export function getResolvedPosConfig(): PosIntegrationConfig {
   const settings = getSettings();
   const saved = settings.posIntegrationConfig;
+  const resolvedAdisyo = getResolvedAdisyoConfig(saved?.adisyoPos);
   return {
     activeProvider:
       saved?.activeProvider ||
-      (saved?.sambaPos?.enabled ? "sambapos" : "none"),
+      (saved?.sambaPos?.enabled
+        ? "sambapos"
+        : resolvedAdisyo.enabled
+        ? "adisyo"
+        : "none"),
     sambaPos: {
       ...DEFAULT_SAMBAPOS_CONFIG,
       ...(saved?.sambaPos || {}),
@@ -87,6 +98,7 @@ export function getResolvedPosConfig(): PosIntegrationConfig {
         ...(saved?.sambaPos?.productMappings || {}),
       },
     },
+    adisyoPos: resolvedAdisyo,
   };
 }
 
@@ -1320,7 +1332,12 @@ export async function syncSiteOrderUpdateToSambaPos(
     return;
   }
 
-  const cfg = getResolvedPosConfig().sambaPos;
+  const posCfg = getResolvedPosConfig();
+  if (posCfg.adisyoPos?.enabled) {
+    await syncSiteOrderUpdateToAdisyoPos(order).catch(() => {});
+  }
+
+  const cfg = posCfg.sambaPos;
   if (!cfg.enabled || cfg.mode !== "graphql") return;
   if (order.posSyncInfo?.status !== "synced") return;
 
@@ -1415,8 +1432,8 @@ export async function syncSiteOrderUpdateToSambaPos(
 
 /**
  * Kasa PC üzerinde (yerelde) çalışırken:
- * 1) Hem yerel hem de Netlify/Turso buluttan yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS'a aktarır.
- * 2) SambaPOS'ta kurye ataması veya "Teslim Edildi / Ödendi" yapılan siparişleri otomatik olarak sitede de günceller.
+ * 1) Hem yerel hem de Netlify/Turso buluttan yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS veya Adisyo / Kurye POS'a aktarır.
+ * 2) SambaPOS veya Adisyo / Kurye POS'ta kurye ataması veya "Teslim Edildi / Ödendi" yapılan siparişleri otomatik olarak sitede de günceller.
  */
 export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
   if (
@@ -1430,16 +1447,18 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
 
   const posCfg = getResolvedPosConfig();
   const sambaCfg = posCfg.sambaPos;
-  if (!sambaCfg.enabled) {
+  const adisyoCfg = posCfg.adisyoPos;
+  if (!sambaCfg.enabled && !adisyoCfg?.enabled) {
     return;
   }
 
   isAutoSyncRunning = true;
   try {
-    // A) Site -> SambaPOS (Yeni siparişleri SambaPOS'a gönder)
-    if (sambaCfg.syncTrigger !== "manual") {
-      const allOrders = getOrders();
-      const cutoffMs = Date.now() - 12 * 60 * 60 * 1000;
+    const allOrders = getOrders();
+    const cutoffMs = Date.now() - 12 * 60 * 60 * 1000;
+
+    // A1) Site -> SambaPOS (Yeni siparişleri SambaPOS'a gönder)
+    if (sambaCfg.enabled && sambaCfg.syncTrigger !== "manual") {
       const candidates = allOrders.filter((o) => {
         if (o.posSyncInfo?.status === "synced") return false;
         if (o.posSyncInfo?.status === "failed") return false;
@@ -1464,11 +1483,42 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
       }
     }
 
-    // B) SambaPOS -> Site (SambaPOS'ta kurye atanan veya teslim edilen siparişleri sitede güncelle)
+    // A2) Site -> Adisyo / Kurye POS (Yeni siparişleri Adisyo / Kurye POS'a gönder)
+    if (adisyoCfg?.enabled && adisyoCfg.syncTrigger !== "manual") {
+      const adisyoCandidates = allOrders.filter((o) => {
+        if (o.posSyncInfo?.status === "synced") return false;
+        if (o.posSyncInfo?.status === "failed") return false;
+        const createdMs = new Date(o.createdAt).getTime();
+        if (createdMs < cutoffMs) return false;
+
+        if (adisyoCfg.syncTrigger === "on_created") {
+          return o.status !== "rejected";
+        }
+        if (adisyoCfg.syncTrigger === "on_accepted") {
+          return (
+            o.status === "accepted" ||
+            o.status === "ready" ||
+            o.status === "completed"
+          );
+        }
+        return false;
+      });
+
+      for (const ord of adisyoCandidates) {
+        await syncOrderToAdisyoPos(ord);
+      }
+    }
+
+    // B) POS -> Site (SambaPOS veya Adisyo / Kurye POS'ta kurye atanan veya teslim edilen siparişleri sitede güncelle)
     const now = Date.now();
     if (now - lastReverseSyncMs >= 2500) {
       lastReverseSyncMs = now;
-      await syncOrderStatusesFromSambaPos();
+      if (sambaCfg.enabled) {
+        await syncOrderStatusesFromSambaPos();
+      }
+      if (adisyoCfg?.enabled && adisyoCfg.autoAssignCourierFromAdisyo !== false) {
+        await syncOrderStatusesFromAdisyoPos();
+      }
     }
   } catch (e) {
     console.warn("autoSyncOrdersWithPosIfNeeded warning:", e);
