@@ -730,6 +730,511 @@ export function buildSambaPosAddTicketMutation(
 }
 
 /**
+ * Kasa PC üzerindeki SambaPOS V5 yerel SQL Server bağlantı bilgilerini (`SambaSettings.txt`) okur.
+ */
+function getLocalSambaSqlConnectionInfo(): {
+  server: string;
+  database: string;
+  userId?: string;
+  password?: string;
+} {
+  const settingsPath =
+    "C:\\ProgramData\\SambaPOS\\SambaPOS5\\SambaSettings.txt";
+  let server = "localhost";
+  let database = "YILDIZHANPOS5";
+  let userId: string | undefined;
+  let password: string | undefined;
+
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const xml = fs.readFileSync(settingsPath, "utf-8");
+      const dsMatch = xml.match(/Data Source=([^;<]+)/i);
+      const dbMatch = xml.match(/Database=([^;<]+)/i);
+      const uidMatch = xml.match(/User Id=([^;<]+)/i);
+      const pwdMatch = xml.match(/Password=([^;<]+)/i);
+      if (dsMatch?.[1]?.trim()) server = dsMatch[1].trim();
+      if (dbMatch?.[1]?.trim()) database = dbMatch[1].trim();
+      if (uidMatch?.[1]?.trim()) userId = uidMatch[1].trim();
+      if (pwdMatch?.[1]?.trim()) password = pwdMatch[1].trim();
+    }
+  } catch {
+    // ignore
+  }
+
+  return { server, database, userId, password };
+}
+
+/**
+ * Yerel SQL Server (`YILDIZHANPOS5`) üzerinde UTF-16LE kodlamasıyla `sqlcmd` çalıştırır ve çıktısını döndürür.
+ * Bu sayede `SambaPOS-MessagingServer` (Port 9000) Windows servisi durmuş olsa bile tüm katalog, menü ve sipariş
+ * işlemleri doğrudan SQL Server üzerinden %100 Türkçe karakter uyumuyla kesintisiz çalışır.
+ */
+function runLocalSambaSqlQuery(sqlScript: string): string {
+  const { server, database, userId, password } =
+    getLocalSambaSqlConnectionInfo();
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const tmpIn = path.join(os.tmpdir(), `samba_q_in_${stamp}.sql`);
+  const tmpOut = path.join(os.tmpdir(), `samba_q_out_${stamp}.txt`);
+
+  fs.writeFileSync(
+    tmpIn,
+    "\uFEFF" + sqlScript + "\r\nGO\r\nEXIT\r\n",
+    { encoding: "utf16le" }
+  );
+
+  try {
+    try {
+      execFileSync(
+        "sqlcmd",
+        [
+          "-S",
+          server,
+          "-C",
+          "-E",
+          "-d",
+          database,
+          "-h",
+          "-1",
+          "-W",
+          "-s",
+          "|",
+          "-u",
+          "-i",
+          tmpIn,
+          "-o",
+          tmpOut,
+        ],
+        { timeout: 10000, input: "" }
+      );
+    } catch (firstErr) {
+      if (userId && password) {
+        execFileSync(
+          "sqlcmd",
+          [
+            "-S",
+            server,
+            "-C",
+            "-U",
+            userId,
+            "-P",
+            password,
+            "-d",
+            database,
+            "-h",
+            "-1",
+            "-W",
+            "-s",
+            "|",
+            "-u",
+            "-i",
+            tmpIn,
+            "-o",
+            tmpOut,
+          ],
+          { timeout: 10000, input: "" }
+        );
+      } else {
+        throw firstErr;
+      }
+    }
+
+    if (!fs.existsSync(tmpOut)) return "";
+    return fs.readFileSync(tmpOut, "utf16le");
+  } finally {
+    try {
+      if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
+    } catch {
+      // ignore
+    }
+    try {
+      if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Yerel SQL Server (`YILDIZHANPOS5`) üzerindeki `MenuItems`, `MenuItemPortions` ve `MenuItemPrices`
+ * tablolarından tüm SambaPOS ürünlerini doğrudan okur.
+ */
+function fetchLocalSqlSambaProducts(): Array<{
+  id: number;
+  name: string;
+  groupCode: string;
+  portions: Array<{ id: number; name: string; price: number }>;
+}> {
+  const out = runLocalSambaSqlQuery(`
+    SET NOCOUNT ON;
+    SELECT
+      m.Id,
+      REPLACE(ISNULL(m.Name, N''), N'|', N'/'),
+      REPLACE(ISNULL(m.GroupCode, N''), N'|', N'/'),
+      ISNULL(p.Id, 0),
+      REPLACE(ISNULL(p.Name, N'Normal'), N'|', N'/'),
+      ISNULL(pr.Price, 0)
+    FROM MenuItems m
+    LEFT JOIN MenuItemPortions p ON p.MenuItemId = m.Id
+    LEFT JOIN MenuItemPrices pr ON pr.MenuItemPortionId = p.Id AND (pr.PriceTag IS NULL OR pr.PriceTag = '')
+    ORDER BY m.Id ASC, p.Id ASC;
+  `);
+
+  const map = new Map<
+    number,
+    {
+      id: number;
+      name: string;
+      groupCode: string;
+      portions: Array<{ id: number; name: string; price: number }>;
+    }
+  >();
+
+  for (const rawLine of out.split(/\r?\n/)) {
+    const line = rawLine.replace(/^\uFEFF/, "").trim();
+    if (!line || !line.includes("|")) continue;
+    const parts = line.split("|");
+    if (parts.length < 6) continue;
+    const id = Number(parts[0]);
+    const name = (parts[1] || "").trim();
+    const groupCode = (parts[2] || "").trim();
+    const portionId = Number(parts[3] || 0);
+    const portionName = (parts[4] || "Normal").trim() || "Normal";
+    const price = Number(parts[5] || 0);
+
+    if (!Number.isFinite(id) || id <= 0 || !name) continue;
+
+    let entry = map.get(id);
+    if (!entry) {
+      entry = {
+        id,
+        name,
+        groupCode,
+        portions: [],
+      };
+      map.set(id, entry);
+    }
+    if (
+      portionId > 0 &&
+      !entry.portions.some((pt) => pt.id === portionId)
+    ) {
+      entry.portions.push({
+        id: portionId,
+        name: portionName,
+        price: Number.isFinite(price) ? price : 0,
+      });
+    } else if (entry.portions.length === 0) {
+      entry.portions.push({
+        id: 1,
+        name: portionName,
+        price: Number.isFinite(price) ? price : 0,
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+/**
+ * GraphQL Message Server (Port 9000) kapalı olduğunda siparişi doğrudan SambaPOS SQL Server
+ * veritabanına (`YILDIZHANPOS5` -> `AccountTransactionDocuments`, `Tickets`, `Orders`, `TicketEntities`, `EntityStateValues`) yazar.
+ */
+function insertOrderDirectToLocalSqlSambaPos(
+  order: Order,
+  cfg: SambaPosConfig
+): { ticketId: string; numericId: number } {
+  const escSql = (s: string) => String(s ?? "").replace(/'/g, "''");
+
+  const payLabel =
+    order.paymentMethod === "cash"
+      ? "Nakit"
+      : order.paymentMethod === "card_at_door"
+      ? "Kapıda Kredi Kartı (POS)"
+      : order.paymentMethod === "credit"
+      ? "Açık Hesap (Veresiye)"
+      : "Masada Ödeme";
+
+  const typeLabel =
+    order.orderType === "delivery"
+      ? "Paket Servis"
+      : order.orderType === "pickup"
+      ? "Gel-Al"
+      : `Masa ${order.tableNumber || ""}`;
+
+  const noteParts = [
+    `Online Sipariş #${order.orderNumber} (${typeLabel})`,
+    `Müşteri: ${order.customerName} | Tel: ${order.customerPhone}`,
+    order.customerAddress ? `Adres: ${order.customerAddress}` : "",
+    order.deliveryZoneName ? `Bölge: ${order.deliveryZoneName}` : "",
+    `Ödeme: ${payLabel}`,
+    order.discountAmount
+      ? `İndirim: -${order.discountAmount.toFixed(2)} TL`
+      : "",
+    order.orderNote ? `Not: ${order.orderNote}` : "",
+  ].filter(Boolean);
+
+  const ticketNote = noteParts.join(" | ");
+  const nowMs = Date.now();
+  const sambaDateJson = `\\/Date(${nowMs}+0300)\\/`;
+
+  const ticketStatesArr: Array<{ D: string; S: string; SN: string; SV?: string }> = [
+    { D: sambaDateJson, S: "Ödenmedi", SN: "Durum", SV: "" },
+    { D: sambaDateJson, S: "Yeni Siparişler", SN: "Status" },
+  ];
+  if (order.orderType === "delivery") {
+    ticketStatesArr.push({ D: sambaDateJson, S: "Bekliyor", SN: "Paket", SV: "" });
+  } else if (order.orderType === "pickup") {
+    ticketStatesArr.push({ D: sambaDateJson, S: "GelAl", SN: "Paket", SV: "" });
+  }
+  const ticketStatesJson = JSON.stringify(ticketStatesArr).replace(
+    /\\\\\/Date/g,
+    "\\/Date"
+  );
+
+  const isDineIn = order.orderType === "dine_in";
+  const isPickup = order.orderType === "pickup";
+  const deptName = isDineIn
+    ? "Restoran"
+    : cfg.departmentName || "Paket Servis";
+  const ticketTypeName = isDineIn
+    ? "Adisyon"
+    : isPickup
+    ? "Gel Al"
+    : cfg.ticketTypeName || "Paket Servis";
+
+  const userName = cfg.userName || cfg.username || "pda";
+  const totalAmount = Number(Number(order.totalAmount || 0).toFixed(2));
+  const defaultTagGroup = cfg.defaultOrderTagName || "Default";
+
+  const orderItemsSql: string[] = [];
+
+  for (const item of order.items) {
+    const targetItemName = resolveMappedSambaProductName(item, cfg);
+    const effectiveUnitPrice = item.isComplimentary
+      ? 0
+      : Number(Number(item.unitPrice || item.basePrice || 0).toFixed(2));
+    const qty = Number(Number(item.quantity || 1).toFixed(3));
+    const calcBit = item.isComplimentary ? 0 : 1;
+
+    const orderTagsList: Array<{
+      OI: number;
+      OK: string;
+      Q: number;
+      TN: string;
+      TV: string;
+      UI: number;
+    }> = [];
+
+    if (targetItemName.toLowerCase() !== item.name.trim().toLowerCase()) {
+      orderTagsList.push({
+        OI: 2,
+        OK: "000000",
+        Q: 1,
+        TN: defaultTagGroup,
+        TV: `Ürün: ${item.name}`,
+        UI: 2,
+      });
+    }
+    for (const mod of item.selectedModifiers || []) {
+      const modLabel = mod.productTag
+        ? `${mod.productTag}: ${mod.optionName}`
+        : `${mod.groupName}: ${mod.optionName}`;
+      orderTagsList.push({
+        OI: 2,
+        OK: "000000",
+        Q: 1,
+        TN: defaultTagGroup,
+        TV: modLabel,
+        UI: 2,
+      });
+    }
+    if (item.itemNote) {
+      orderTagsList.push({
+        OI: 2,
+        OK: "000000",
+        Q: 1,
+        TN: defaultTagGroup,
+        TV: `Not: ${item.itemNote}`,
+        UI: 2,
+      });
+    }
+
+    const orderTagsJson =
+      orderTagsList.length > 0 ? JSON.stringify(orderTagsList) : "";
+    const orderStatesJson = `[{"D":"${sambaDateJson}","OK":"000000","S":"Gönderildi","SN":"Status","SV":null,"U":2}]`;
+
+    orderItemsSql.push(`
+      SET @prodId = (SELECT TOP 1 Id FROM MenuItems WHERE Name = N'${escSql(targetItemName)}');
+      IF @prodId IS NULL BEGIN
+        INSERT INTO MenuItems (GroupCode, Barcode, Tag, CustomTags, ItemType, Name)
+        VALUES (N'Online Sipariş', NULL, NULL, NULL, 0, N'${escSql(targetItemName)}');
+        SET @prodId = SCOPE_IDENTITY();
+        INSERT INTO MenuItemPortions (Name, MenuItemId, Multiplier) VALUES (N'Normal', @prodId, 1);
+        SET @portId = SCOPE_IDENTITY();
+        INSERT INTO MenuItemPrices (MenuItemPortionId, PriceTag, Price) VALUES (@portId, NULL, ${effectiveUnitPrice});
+      END
+
+      INSERT INTO Orders (
+        TicketId, WarehouseId, DepartmentId, TerminalId, MenuItemId, MenuItemName, PortionName,
+        Price, Quantity, PortionCount, Locked, CalculatePrice, DecreaseInventory, IncreaseInventory,
+        OrderNumber, CreatingUserName, CreatedDateTime, LastUpdateDateTime, AccountTransactionTypeId,
+        ProductTimerValueId, GroupTagName, GroupTagFormat, Separator, PriceTag, Tag,
+        DisablePortionSelection, OrderUid, Taxes, OrderTags, OrderStates
+      ) VALUES (
+        @ticketId, 1, @deptId, @termId, @prodId, N'${escSql(targetItemName)}', N'Normal',
+        ${effectiveUnitPrice}, ${qty}, 1, 1, ${calcBit}, 1, 0,
+        @ordNum, N'${escSql(userName)}', @now, @now, 3,
+        NULL, NULL, NULL, NULL, NULL, NULL,
+        0, REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''),
+        N'[{"AC":false,"AT":14,"RN":0,"TN":"%10 KDV","TR":10.00,"TT":1}]',
+        ${orderTagsJson ? `N'${escSql(orderTagsJson)}'` : "NULL"},
+        N'${escSql(orderStatesJson)}'
+      );
+    `);
+  }
+
+  if (order.deliveryFee && order.deliveryFee > 0) {
+    const delFee = Number(Number(order.deliveryFee).toFixed(2));
+    const orderStatesJson = `[{"D":"${sambaDateJson}","OK":"000000","S":"Gönderildi","SN":"Status","SV":null,"U":2}]`;
+    orderItemsSql.push(`
+      SET @prodId = (SELECT TOP 1 Id FROM MenuItems WHERE Name = N'Paket Servis Ücreti');
+      IF @prodId IS NULL BEGIN
+        INSERT INTO MenuItems (GroupCode, Barcode, Tag, CustomTags, ItemType, Name)
+        VALUES (N'Online Sipariş', NULL, NULL, NULL, 0, N'Paket Servis Ücreti');
+        SET @prodId = SCOPE_IDENTITY();
+        INSERT INTO MenuItemPortions (Name, MenuItemId, Multiplier) VALUES (N'Normal', @prodId, 1);
+        SET @portId = SCOPE_IDENTITY();
+        INSERT INTO MenuItemPrices (MenuItemPortionId, PriceTag, Price) VALUES (@portId, NULL, ${delFee});
+      END
+
+      INSERT INTO Orders (
+        TicketId, WarehouseId, DepartmentId, TerminalId, MenuItemId, MenuItemName, PortionName,
+        Price, Quantity, PortionCount, Locked, CalculatePrice, DecreaseInventory, IncreaseInventory,
+        OrderNumber, CreatingUserName, CreatedDateTime, LastUpdateDateTime, AccountTransactionTypeId,
+        ProductTimerValueId, GroupTagName, GroupTagFormat, Separator, PriceTag, Tag,
+        DisablePortionSelection, OrderUid, Taxes, OrderTags, OrderStates
+      ) VALUES (
+        @ticketId, 1, @deptId, @termId, @prodId, N'Paket Servis Ücreti', N'Normal',
+        ${delFee}, 1.000, 1, 1, 1, 1, 0,
+        @ordNum, N'${escSql(userName)}', @now, @now, 3,
+        NULL, NULL, NULL, NULL, NULL, NULL,
+        0, REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''),
+        N'[{"AC":false,"AT":14,"RN":0,"TN":"%10 KDV","TR":10.00,"TT":1}]',
+        NULL,
+        N'${escSql(orderStatesJson)}'
+      );
+    `);
+  }
+
+  const custName = (order.customerName || "Online Müşteri").trim();
+  const custPhone = (order.customerPhone || "").replace(/\D/g, "");
+  const custAddr = [
+    order.deliveryZoneName ? `[${order.deliveryZoneName}]` : "",
+    order.customerAddress || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const custDataJson = JSON.stringify([
+    { Name: "Telefon", Value: custPhone },
+    { Name: "Adres", Value: custAddr },
+  ]);
+
+  const rawTbl = String(order.tableNumber || "1").trim();
+  const paddedTbl = /^\d+$/.test(rawTbl) ? rawTbl.padStart(2, "0") : rawTbl;
+
+  const entitySql = isDineIn
+    ? `
+      DECLARE @tblEntId INT = (
+        SELECT TOP 1 Id FROM Entities
+        WHERE EntityTypeId = 2 AND (
+          Name = N'Masa ${escSql(rawTbl)}' OR
+          Name = N'Masa ${escSql(paddedTbl)}' OR
+          Name = N'M${escSql(paddedTbl)}' OR
+          Name = N'${escSql(rawTbl)}'
+        )
+      );
+      DECLARE @tblEntName NVARCHAR(200) = (SELECT TOP 1 Name FROM Entities WHERE Id = @tblEntId);
+      IF @tblEntId IS NOT NULL BEGIN
+        INSERT INTO TicketEntities (EntityTypeId, EntityId, AccountId, AccountTypeId, EntityName, EntityCustomData, Notes, LatestEntityStates, Ticket_Id)
+        VALUES (2, @tblEntId, 0, 0, @tblEntName, N'[]', NULL, N'[{"D":"${escSql(sambaDateJson)}","S":"Yeni Siparişler","SN":"Status"}]', @ticketId);
+
+        UPDATE EntityStateValues
+        SET EntityStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Yeni Siparişler","SN":"Status"}]'
+        WHERE EntityId = @tblEntId;
+      END
+    `
+    : `
+      DECLARE @custEntId INT = (SELECT TOP 1 Id FROM Entities WHERE EntityTypeId = 1 AND Name = N'${escSql(custName)}');
+      IF @custEntId IS NULL BEGIN
+        INSERT INTO Entities (EntityTypeId, LastUpdateTime, SearchString, CustomData, Notes, AccountId, WarehouseId, Name)
+        VALUES (1, @now, N'${escSql(custName)}', N'${escSql(custDataJson)}', NULL, 0, 0, N'${escSql(custName)}');
+        SET @custEntId = SCOPE_IDENTITY();
+        INSERT INTO EntityStateValues (EntityId, EntityStates)
+        VALUES (@custEntId, N'[{"D":"${escSql(sambaDateJson)}","S":"Yeni Müşteri","SN":"Status"}]');
+      END ELSE BEGIN
+        UPDATE Entities SET CustomData = N'${escSql(custDataJson)}', LastUpdateTime = @now WHERE Id = @custEntId;
+      END
+
+      INSERT INTO TicketEntities (EntityTypeId, EntityId, AccountId, AccountTypeId, EntityName, EntityCustomData, Notes, LatestEntityStates, Ticket_Id)
+      VALUES (1, @custEntId, 0, 5, N'${escSql(custName)}', N'${escSql(custDataJson)}', NULL, N'[{"D":"${escSql(sambaDateJson)}","S":"Yeni Siparişler","SN":"Status"}]', @ticketId);
+    `;
+
+  const fullSql = `
+    SET NOCOUNT ON;
+    DECLARE @now DATETIME = GETDATE();
+    DECLARE @deptId INT = ISNULL((SELECT TOP 1 Id FROM Departments WHERE Name = N'${escSql(deptName)}'), 1);
+    DECLARE @ttId INT = ISNULL((SELECT TOP 1 Id FROM TicketTypes WHERE Name = N'${escSql(ticketTypeName)}'), 2);
+    DECLARE @termId INT = ISNULL((SELECT TOP 1 Id FROM Terminals ORDER BY Id), 1);
+    DECLARE @tNum INT = 1;
+    DECLARE @ordNum INT = 1;
+
+    UPDATE Numerators SET Number = Number + 1 WHERE Id = 1;
+    SET @tNum = ISNULL((SELECT TOP 1 Number FROM Numerators WHERE Id = 1), ${order.orderNumber});
+
+    UPDATE Numerators SET Number = Number + 1 WHERE Id = 2;
+    SET @ordNum = ISNULL((SELECT TOP 1 Number FROM Numerators WHERE Id = 2), ${order.orderNumber});
+
+    INSERT INTO AccountTransactionDocuments (Date, UserId, UserName, DocumentTypeId, Name)
+    VALUES (@now, 1, N'${escSql(userName)}', 0, N'Ticket Transaction [' + CAST(@tNum AS NVARCHAR(20)) + N']');
+    DECLARE @docId INT = SCOPE_IDENTITY();
+
+    INSERT INTO Tickets (
+      LastUpdateTime, TicketVersion, TicketUid, TicketNumber, Date, LastOrderDate, LastPaymentDate,
+      PreOrder, IsClosed, IsLocked, IsOpened, EDocumentDetail, EDocumentSent, TicketData,
+      RemainingAmount, TotalAmount, TotalAmountPreTax, DepartmentId, TerminalId, TicketTypeId,
+      Note, LastModifiedUserName, CreatedUserName, TicketTags, TicketStates, TicketLogs,
+      LineSeparators, ExchangeRate, TaxIncluded, Name, TransactionDocument_Id
+    ) VALUES (
+      @now, @now, REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''), CAST(@tNum AS NVARCHAR(50)), @now, @now, @now,
+      0, 0, 0, 0, NULL, 0, NULL,
+      ${totalAmount}, ${totalAmount}, ${totalAmount}, @deptId, @termId, @ttId,
+      N'${escSql(ticketNote)}', N'${escSql(userName)}', N'${escSql(userName)}', NULL, N'${escSql(ticketStatesJson)}', NULL,
+      N'[]', 1.0000000000, 1, NULL, @docId
+    );
+    DECLARE @ticketId INT = SCOPE_IDENTITY();
+    DECLARE @prodId INT;
+    DECLARE @portId INT;
+
+    ${orderItemsSql.join("\n")}
+    ${entitySql}
+
+    SELECT N'TICKET_OK', @ticketId, @tNum;
+  `;
+
+  const out = runLocalSambaSqlQuery(fullSql);
+  for (const rawLine of out.split(/\r?\n/)) {
+    const line = rawLine.replace(/^\uFEFF/, "").trim();
+    if (line.startsWith("TICKET_OK|")) {
+      const parts = line.split("|");
+      const numericId = Number(parts[1] || 0);
+      const ticketNumber = (parts[2] || "").trim() || String(numericId);
+      return { ticketId: ticketNumber, numericId };
+    }
+  }
+
+  throw new Error("Yerel SQL üzerinden SambaPOS adisyonu oluşturulamadı.");
+}
+
+/**
  * Ayarlar ekranındaki "SambaPOS Bağlantısını Test Et" butonu için bağlantı testi yapar.
  */
 export async function testSambaPosConnection(
@@ -799,6 +1304,20 @@ export async function testSambaPosConnection(
       message: `✅ SambaPOS V5 Message Server (${baseUrl}) bağlantısı başarılı! Bulunan Departmanlar: ${depts || "Restoran"}`,
     };
   } catch (err) {
+    // Port 9000 (Message Server) kapalıysa yerel SQL Server veritabanı (YILDIZHANPOS5) üzerinden kontrol et
+    try {
+      const localProds = fetchLocalSqlSambaProducts();
+      if (localProds.length > 0) {
+        const { database } = getLocalSambaSqlConnectionInfo();
+        return {
+          ok: true,
+          message: `✅ SambaPOS V5 Yerel SQL Veritabanı (${database}) bağlantısı aktif! (${localProds.length} kayıtlı ürün bulundu — Doğrudan SQL Köprüsü devrede)`,
+        };
+      }
+    } catch {
+      // ignore fallback error
+    }
+
     return {
       ok: false,
       message:
@@ -889,79 +1408,90 @@ export async function sendOrderToSambaPos(
       };
     }
 
-    // GraphQL (SambaPOS V5 Message Server) Modu
-    const accessToken = await authenticateSambaPos(cfg);
+    // GraphQL (SambaPOS V5 Message Server) Modu - Port 9000 kapalıysa otomatik yerel SQL Server'a düşer
+    let ticketId = "SAMBA-OK";
+    try {
+      const accessToken = await authenticateSambaPos(cfg);
 
-    // 1) Ürünlerin SambaPOS'ta var olduğundan emin ol (yoksa otomatik ekle)
-    await ensureSambaProductsExist(cfg, accessToken, order);
+      // 1) Ürünlerin SambaPOS'ta var olduğundan emin ol (yoksa otomatik ekle)
+      await ensureSambaProductsExist(cfg, accessToken, order);
 
-    // 2) Departman, Belge Tipi, Masa ve Müşteri varlıklarını hazırla
-    const ticketContext = await prepareSambaTicketContext(
-      cfg,
-      accessToken,
-      order
-    );
+      // 2) Departman, Belge Tipi, Masa ve Müşteri varlıklarını hazırla
+      const ticketContext = await prepareSambaTicketContext(
+        cfg,
+        accessToken,
+        order
+      );
 
-    // 3) Adisyonu oluştur
-    const mutation = buildSambaPosAddTicketMutation(
-      order,
-      cfg,
-      false,
-      ticketContext
-    );
-    let gqlResult = await executeSambaGraphQL(cfg, accessToken, mutation);
-
-    if (
-      gqlResult.errors &&
-      gqlResult.errors.length > 0 &&
-      cfg.fallbackMenuItemName?.trim()
-    ) {
-      const fallbackMutation = buildSambaPosAddTicketMutation(
+      // 3) Adisyonu oluştur
+      const mutation = buildSambaPosAddTicketMutation(
         order,
         cfg,
-        true,
+        false,
         ticketContext
       );
-      gqlResult = await executeSambaGraphQL(cfg, accessToken, fallbackMutation);
-    }
+      let gqlResult = await executeSambaGraphQL(cfg, accessToken, mutation);
 
-    if (gqlResult.errors && gqlResult.errors.length > 0) {
-      throw new Error(gqlResult.errors.map((e) => e.message).join(" | "));
-    }
+      if (
+        gqlResult.errors &&
+        gqlResult.errors.length > 0 &&
+        cfg.fallbackMenuItemName?.trim()
+      ) {
+        const fallbackMutation = buildSambaPosAddTicketMutation(
+          order,
+          cfg,
+          true,
+          ticketContext
+        );
+        gqlResult = await executeSambaGraphQL(cfg, accessToken, fallbackMutation);
+      }
 
-    const addedTicket = gqlResult.data?.addTicket as
-      | { id?: string | number; number?: string }
-      | undefined;
-    const numericId = Number(addedTicket?.id || 0);
-    const ticketId = String(
-      addedTicket?.number || addedTicket?.id || "SAMBA-OK"
-    );
+      if (gqlResult.errors && gqlResult.errors.length > 0) {
+        throw new Error(gqlResult.errors.map((e) => e.message).join(" | "));
+      }
 
-    // 4) Masa siparişi ise masanın rengini "Yeni Siparişler" yap ve SambaPOS ekranını yenile
-    if (order.orderType === "dine_in" && ticketContext.resolvedTableName) {
-      const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+      const addedTicket = gqlResult.data?.addTicket as
+        | { id?: string | number; number?: string }
+        | undefined;
+      const numericId = Number(addedTicket?.id || 0);
+      ticketId = String(
+        addedTicket?.number || addedTicket?.id || "SAMBA-OK"
+      );
+
+      // 4) Masa siparişi ise masanın rengini "Yeni Siparişler" yap ve SambaPOS ekranını yenile
+      if (order.orderType === "dine_in" && ticketContext.resolvedTableName) {
+        const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+        await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation {
+            updateEntityState(
+              entityTypeName: ${gStr(cfg.tableEntityType || "Masalar")},
+              entityName: ${gStr(ticketContext.resolvedTableName)},
+              stateName: "Status",
+              state: "Yeni Siparişler"
+            )
+          }`
+        ).catch(() => {});
+      }
+
       await executeSambaGraphQL(
         cfg,
         accessToken,
         `mutation {
-          updateEntityState(
-            entityTypeName: ${gStr(cfg.tableEntityType || "Masalar")},
-            entityName: ${gStr(ticketContext.resolvedTableName)},
-            stateName: "Status",
-            state: "Yeni Siparişler"
-          )
+          postTicketRefreshMessage(id: ${numericId}) { id }
+          postResetEntityCacheMessage { id }
         }`
       ).catch(() => {});
+    } catch (gqlErr) {
+      // Port 9000 kapalıysa doğrudan yerel SQL Server (YILDIZHANPOS5) üzerinden adisyonu ekle
+      try {
+        const sqlTicket = insertOrderDirectToLocalSqlSambaPos(order, cfg);
+        ticketId = sqlTicket.ticketId;
+      } catch {
+        throw gqlErr;
+      }
     }
-
-    await executeSambaGraphQL(
-      cfg,
-      accessToken,
-      `mutation {
-        postTicketRefreshMessage(id: ${numericId}) { id }
-        postResetEntityCacheMessage { id }
-      }`
-    ).catch(() => {});
 
     const syncInfo: PosOrderSyncInfo = {
       provider: "sambapos",
@@ -1066,49 +1596,149 @@ export async function syncOrderStatusesFromSambaPos(options?: {
   }
 
   try {
-    const accessToken = await authenticateSambaPos(cfg);
+    let sambaCouriers: string[] = [];
+    let tickets: Array<{
+      id: number;
+      number: string;
+      isClosed: boolean;
+      remainingAmount: number;
+      totalAmount: number;
+      note?: string;
+      entities?: Array<{ name: string; type: string; typeId?: number }>;
+      states?: Array<{ stateName: string; state: string }>;
+    }> = [];
 
-    const startDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
-    const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    try {
+      const accessToken = await authenticateSambaPos(cfg);
 
-    const gqlRes = await executeSambaGraphQL(
-      cfg,
-      accessToken,
-      `query {
-        getTickets(start: "${startDate}", end: "${endDate}") {
-          id
-          number
-          isClosed
-          remainingAmount
-          totalAmount
-          note
-          entities {
+      const startDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+
+      const gqlRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query {
+          getTickets(start: "${startDate}", end: "${endDate}") {
+            id
+            number
+            isClosed
+            remainingAmount
+            totalAmount
+            note
+            entities {
+              name
+              type
+              typeId
+            }
+            states {
+              stateName
+              state
+            }
+          }
+          getEntities(type: "Paketçiler", take: 100) {
             name
-            type
-            typeId
           }
-          states {
-            stateName
-            state
+        }`
+      );
+
+      sambaCouriers = (
+        (gqlRes.data?.getEntities as Array<{ name?: string }>) || []
+      )
+        .map((e) => (e?.name || "").trim())
+        .filter(Boolean);
+
+      tickets = (gqlRes.data?.getTickets || []) as typeof tickets;
+    } catch {
+      // Port 9000 kapalıysa yerel SQL Server (YILDIZHANPOS5) üzerinden Paketçiler, Tickets ve TicketEntities tablolarını oku
+      const sqlOut = runLocalSambaSqlQuery(`
+        SET NOCOUNT ON;
+        SELECT N'COURIER', ISNULL(Name, N'') FROM Entities WHERE EntityTypeId = 3;
+        SELECT
+          N'TICKET',
+          t.Id,
+          ISNULL(t.TicketNumber, N''),
+          CAST(ISNULL(t.IsClosed, 0) AS INT),
+          ISNULL(t.RemainingAmount, 0),
+          ISNULL(t.TotalAmount, 0),
+          REPLACE(REPLACE(REPLACE(ISNULL(t.Note, N''), N'|', N'§'), CHAR(13), N' '), CHAR(10), N' '),
+          REPLACE(ISNULL(t.TicketStates, N'[]'), N'|', N'§')
+        FROM Tickets t
+        WHERE t.Date >= DATEADD(DAY, -2, GETDATE())
+        ORDER BY t.Id DESC;
+        SELECT
+          N'TENTITY',
+          te.Ticket_Id,
+          ISNULL(te.EntityTypeId, 0),
+          REPLACE(ISNULL(te.EntityName, N''), N'|', N' ')
+        FROM TicketEntities te
+        INNER JOIN Tickets t ON t.Id = te.Ticket_Id
+        WHERE t.Date >= DATEADD(DAY, -2, GETDATE());
+      `);
+
+      const ticketMap = new Map<number, (typeof tickets)[number]>();
+      for (const rawLine of sqlOut.split(/\r?\n/)) {
+        const line = rawLine.replace(/^\uFEFF/, "").trim();
+        if (!line) continue;
+        const parts = line.split("|");
+        if (parts[0] === "COURIER" && parts[1]?.trim()) {
+          sambaCouriers.push(parts[1].trim());
+        } else if (parts[0] === "TICKET" && parts.length >= 8) {
+          const id = Number(parts[1]);
+          const number = (parts[2] || "").trim();
+          const isClosed = Number(parts[3]) === 1;
+          const remainingAmount = Number(parts[4] || 0);
+          const totalAmount = Number(parts[5] || 0);
+          const note = (parts[6] || "").replace(/§/g, "|").trim();
+          const rawStatesJson = (parts[7] || "[]").replace(/§/g, "|").trim();
+          const parsedStates: Array<{ stateName: string; state: string }> = [];
+          try {
+            const arr = JSON.parse(rawStatesJson) as Array<{
+              SN?: string;
+              S?: string;
+            }>;
+            if (Array.isArray(arr)) {
+              for (const st of arr) {
+                if (st?.SN && st?.S) {
+                  parsedStates.push({ stateName: st.SN, state: st.S });
+                }
+              }
+            }
+          } catch {
+            // ignore
+          }
+          const tObj = {
+            id,
+            number,
+            isClosed,
+            remainingAmount,
+            totalAmount,
+            note,
+            entities: [] as Array<{ name: string; type: string; typeId?: number }>,
+            states: parsedStates,
+          };
+          ticketMap.set(id, tObj);
+          tickets.push(tObj);
+        } else if (parts[0] === "TENTITY" && parts.length >= 4) {
+          const tId = Number(parts[1]);
+          const eTypeId = Number(parts[2]);
+          const eName = (parts[3] || "").trim();
+          const parent = ticketMap.get(tId);
+          if (parent && eName) {
+            parent.entities?.push({
+              name: eName,
+              type: eTypeId === 3 ? "Paketçiler" : eTypeId === 2 ? "Masalar" : "Müşteriler",
+              typeId: eTypeId,
+            });
           }
         }
-        getEntities(type: "Paketçiler", take: 100) {
-          name
-        }
-      }`
-    );
+      }
+    }
 
     // 1) SambaPOS'taki "Paketçiler" listesini sitedeki kurye listesiyle (settings.couriers) eşitle
-    const sambaCouriers = (
-      (gqlRes.data?.getEntities as Array<{ name?: string }>) || []
-    )
-      .map((e) => (e?.name || "").trim())
-      .filter(Boolean);
-
     let settingsChanged = false;
     const currentCouriers = [...(settings.couriers || [])];
     const currentCourierPins = { ...(settings.courierPins || {}) };
@@ -1137,16 +1767,6 @@ export async function syncOrderStatusesFromSambaPos(options?: {
     }
 
     // 2) SambaPOS Fişlerini (Tickets) Sitedeki Siparişlerle Eşleştir ve Durum / Kurye Güncelle
-    const tickets = (gqlRes.data?.getTickets || []) as Array<{
-      id: number;
-      number: string;
-      isClosed: boolean;
-      remainingAmount: number;
-      totalAmount: number;
-      note?: string;
-      entities?: Array<{ name: string; type: string; typeId?: number }>;
-      states?: Array<{ stateName: string; state: string }>;
-    }>;
 
     // Sipariş eşleştirme haritaları
     const ticketByOrderNumber = new Map<number, (typeof tickets)[number]>();
@@ -1439,7 +2059,58 @@ export async function syncSiteOrderUpdateToSambaPos(
       ).catch(() => {});
     }
   } catch {
-    // ignore background sync error
+    // Port 9000 kapalıysa yerel SQL Server üzerinden de durum güncellemesini uygula
+    try {
+      const escSql = (s: string) => String(s ?? "").replace(/'/g, "''");
+      const nowMs = Date.now();
+      const sambaDateJson = `\\/Date(${nowMs}+0300)\\/`;
+      const newPaketState =
+        order.status === "completed"
+          ? "Teslim Edildi"
+          : order.status === "ready"
+          ? "Yolda"
+          : "Bekliyor";
+      const statesArr: Array<{ D: string; S: string; SN: string; SV?: string }> = [
+        {
+          D: sambaDateJson,
+          S: order.status === "completed" ? "Ödendi" : "Ödenmedi",
+          SN: "Durum",
+          SV: "",
+        },
+        { D: sambaDateJson, S: newPaketState, SN: "Paket", SV: "" },
+        { D: sambaDateJson, S: "Yeni Siparişler", SN: "Status" },
+      ];
+      if (order.courierName) {
+        statesArr.push({
+          D: sambaDateJson,
+          S: order.courierName,
+          SN: "Paketçi Adı",
+          SV: "",
+        });
+      }
+      const statesJson = JSON.stringify(statesArr).replace(
+        /\\\\\/Date/g,
+        "\\/Date"
+      );
+      const extId = escSql((order.posSyncInfo?.externalTicketId || "").trim());
+
+      runLocalSambaSqlQuery(`
+        SET NOCOUNT ON;
+        DECLARE @tId INT = (
+          SELECT TOP 1 Id FROM Tickets
+          WHERE Note LIKE N'%Online Sipariş #${order.orderNumber}%'
+             OR (${extId ? `TicketNumber = N'${extId}'` : "1=0"})
+          ORDER BY Id DESC
+        );
+        IF @tId IS NOT NULL BEGIN
+          UPDATE Tickets
+          SET TicketStates = N'${escSql(statesJson)}', LastUpdateTime = GETDATE()
+          WHERE Id = @tId;
+        END
+      `);
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -1608,8 +2279,8 @@ export interface SambaPosCatalogResponse {
 }
 
 /**
- * SambaPOS'taki mevcut tüm ürünleri (`getProducts`) çeker ve sitedeki menü ürünleriyle
- * birebir karşılaştırarak eşleşme / fiyat farkı / eksiklik durumunu döndürür.
+ * SambaPOS'taki mevcut tüm ürünleri (`getProducts` veya yerel SQL Server `MenuItems`) çeker ve sitedeki
+ * menü ürünleriyle birebir karşılaştırarak eşleşme / fiyat farkı / eksiklik durumunu döndürür.
  */
 export async function fetchSambaPosCatalog(
   customCfg?: Partial<SambaPosConfig>
@@ -1624,30 +2295,41 @@ export async function fetchSambaPosCatalog(
   const catMap = new Map(categories.map((c) => [c.id, c.name]));
 
   try {
-    const accessToken = await authenticateSambaPos(cfg);
-    const gqlRes = await executeSambaGraphQL(
-      cfg,
-      accessToken,
-      `query {
-        getProducts {
-          id
-          name
-          groupCode
-          portions {
-            id
-            name
-            price
-          }
-        }
-      }`
-    );
-
-    const rawProducts = (gqlRes.data?.getProducts || []) as Array<{
+    let rawProducts: Array<{
       id: number;
       name: string;
       groupCode?: string;
       portions?: Array<{ id: number; name: string; price: number }>;
-    }>;
+    }> = [];
+
+    try {
+      const accessToken = await authenticateSambaPos(cfg);
+      const gqlRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query {
+          getProducts {
+            id
+            name
+            groupCode
+            portions {
+              id
+              name
+              price
+            }
+          }
+        }`
+      );
+      rawProducts = (gqlRes.data?.getProducts || []) as typeof rawProducts;
+    } catch (gqlErr) {
+      // Port 9000 (Message Server) kapalıysa yerel SQL Server'dan (YILDIZHANPOS5) ürünleri doğrudan çek
+      const sqlProds = fetchLocalSqlSambaProducts();
+      if (sqlProds.length > 0) {
+        rawProducts = sqlProds;
+      } else {
+        throw gqlErr;
+      }
+    }
 
     const sambaProducts: SambaProductSummary[] = rawProducts
       .filter((p) => p && p.name)
@@ -1796,19 +2478,6 @@ function syncLocalSambaScreenMenu(
 ): number {
   if (entries.length === 0) return 0;
   try {
-    const settingsPath =
-      "C:\\ProgramData\\SambaPOS\\SambaPOS5\\SambaSettings.txt";
-    let server = "localhost";
-    let database = "YILDIZHANPOS5";
-
-    if (fs.existsSync(settingsPath)) {
-      const xml = fs.readFileSync(settingsPath, "utf-8");
-      const dsMatch = xml.match(/Data Source=([^;<]+)/i);
-      const dbMatch = xml.match(/Database=([^;<]+)/i);
-      if (dsMatch?.[1]?.trim()) server = dsMatch[1].trim();
-      if (dbMatch?.[1]?.trim()) database = dbMatch[1].trim();
-    }
-
     const escSql = (s: string) => String(s || "").replace(/'/g, "''");
     const sqlLines: string[] = [
       "SET NOCOUNT ON;",
@@ -1859,29 +2528,8 @@ function syncLocalSambaScreenMenu(
     }
 
     sqlLines.push("END");
-
-    const tmpSqlFile = path.join(
-      os.tmpdir(),
-      `sambapos_menu_sync_${Date.now()}.sql`
-    );
-    // Write with UTF-16LE BOM so sqlcmd preserves all Turkish Unicode characters natively
-    const utf16Content = "\uFEFF" + sqlLines.join("\r\n");
-    fs.writeFileSync(tmpSqlFile, utf16Content, { encoding: "utf16le" });
-
-    try {
-      execFileSync(
-        "sqlcmd",
-        ["-S", server, "-C", "-E", "-d", database, "-i", tmpSqlFile],
-        { timeout: 10000, stdio: "ignore" }
-      );
-      return entries.length;
-    } finally {
-      try {
-        fs.unlinkSync(tmpSqlFile);
-      } catch {
-        // ignore
-      }
-    }
+    runLocalSambaSqlQuery(sqlLines.join("\r\n"));
+    return entries.length;
   } catch {
     return 0;
   }
@@ -1890,8 +2538,8 @@ function syncLocalSambaScreenMenu(
 /**
  * Sitedeki ürünleri (tümünü veya seçilenleri) kategorileri ve fiyatlarıyla birlikte
  * SambaPOS V5'e aktarır / eşitler:
- * 1) SambaPOS'ta olmayan ürünleri GraphQL `addProduct` ile kendi kategorisi altında oluşturur.
- * 2) SambaPOS'ta zaten kayıtlı olan ürünlerin fiyatlarını `updateProductPrice` ile sitedeki fiyata günceller.
+ * 1) SambaPOS'ta olmayan ürünleri GraphQL `addProduct` (veya doğrudan yerel SQL `MenuItems`) ile kendi kategorisi altında oluşturur.
+ * 2) SambaPOS'ta zaten kayıtlı olan ürünlerin fiyatlarını `updateProductPrice` (veya yerel SQL `MenuItemPrices`) ile sitedeki fiyata günceller.
  * 3) İsteğe bağlı olarak SambaPOS dokunmatik POS menü ekranına (`ScreenMenuCategories` / `ScreenMenuItems`) da ekler.
  * 4) `postResetProductCacheMessage` ile SambaPOS ekran önbelleğini anında yeniler.
  */
@@ -1914,172 +2562,272 @@ export async function syncSiteMenuToSambaPos(options?: {
     ...(options?.customConfig || {}),
   };
 
-  try {
-    const accessToken = await authenticateSambaPos(cfg);
-    const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+  const categories = getCategories();
+  const allSiteItems = getMenuItems();
+  const catMap = new Map(categories.map((c) => [c.id, c.name]));
 
-    // Mevcut SambaPOS ürünlerini çek
-    const prodRes = await executeSambaGraphQL(
-      cfg,
-      accessToken,
-      `query {
-        getProducts {
-          id
-          name
-          groupCode
-          portions {
+  const filterIds =
+    Array.isArray(options?.itemIds) && options.itemIds.length > 0
+      ? new Set(options.itemIds)
+      : null;
+
+  const targetItems = filterIds
+    ? allSiteItems.filter((m) => filterIds.has(m.id))
+    : allSiteItems;
+
+  let createdCount = 0;
+  let updatedCount = 0;
+  const screenMenuEntries: Array<{
+    categoryName: string;
+    productName: string;
+  }> = [];
+
+  try {
+    let usedSqlFallback = false;
+
+    try {
+      const accessToken = await authenticateSambaPos(cfg);
+      const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+
+      // Mevcut SambaPOS ürünlerini çek
+      const prodRes = await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `query {
+          getProducts {
             id
             name
-            price
+            groupCode
+            portions {
+              id
+              name
+              price
+            }
           }
-        }
-      }`
-    );
+        }`
+      );
 
-    const existingList = (prodRes.data?.getProducts || []) as Array<{
-      id: number;
-      name: string;
-      groupCode?: string;
-      portions?: Array<{ id: number; name: string; price: number }>;
-    }>;
-
-    const existingMap = new Map<
-      string,
-      {
+      const existingList = (prodRes.data?.getProducts || []) as Array<{
         id: number;
         name: string;
-        groupCode: string;
-        portions: Array<{ id: number; name: string; price: number }>;
+        groupCode?: string;
+        portions?: Array<{ id: number; name: string; price: number }>;
+      }>;
+
+      const existingMap = new Map<
+        string,
+        {
+          id: number;
+          name: string;
+          groupCode: string;
+          portions: Array<{ id: number; name: string; price: number }>;
+        }
+      >();
+      for (const p of existingList) {
+        if (p?.name) {
+          existingMap.set(p.name.trim().toLowerCase(), {
+            id: Number(p.id || 0),
+            name: p.name.trim(),
+            groupCode: String(p.groupCode || "").trim(),
+            portions: Array.isArray(p.portions) ? p.portions : [],
+          });
+        }
       }
-    >();
-    for (const p of existingList) {
-      if (p?.name) {
-        existingMap.set(p.name.trim().toLowerCase(), {
-          id: Number(p.id || 0),
-          name: p.name.trim(),
-          groupCode: String(p.groupCode || "").trim(),
-          portions: Array.isArray(p.portions) ? p.portions : [],
-        });
+
+      for (const item of targetItems) {
+        const categoryName = catMap.get(item.categoryId) || "Online Sipariş";
+        const customMapped = (
+          cfg.productMappings?.[item.id] ||
+          cfg.productMappings?.[item.name.trim()] ||
+          ""
+        ).trim();
+        const targetSambaName = customMapped || item.name.trim();
+        const price = Number(Number(item.price || 0).toFixed(2));
+
+        if (!targetSambaName) continue;
+
+        const existing = existingMap.get(targetSambaName.toLowerCase());
+
+        if (!existing || !existing.id) {
+          const addRes = await executeSambaGraphQL(
+            cfg,
+            accessToken,
+            `mutation {
+              addProduct(
+                name: ${gStr(targetSambaName)},
+                groupCode: ${gStr(categoryName)},
+                portions: [
+                  { name: "Normal", price: ${price}, multiplier: 1 }
+                ]
+              ) {
+                id
+                name
+              }
+            }`
+          );
+          if (!addRes.errors || addRes.errors.length === 0) {
+            createdCount++;
+            existingMap.set(targetSambaName.toLowerCase(), {
+              id: Number(
+                (addRes.data?.addProduct as { id?: number })?.id || 99999
+              ),
+              name: targetSambaName,
+              groupCode: categoryName,
+              portions: [{ id: 1, name: "Normal", price }],
+            });
+            screenMenuEntries.push({
+              categoryName,
+              productName: targetSambaName,
+            });
+          }
+        } else {
+          const portionName =
+            existing.portions.find((pt) => pt.name?.toLowerCase() === "normal")
+              ?.name ||
+            existing.portions[0]?.name ||
+            "Normal";
+
+          if (options?.updatePrices !== false) {
+            await executeSambaGraphQL(
+              cfg,
+              accessToken,
+              `mutation {
+                updateProductPrice(
+                  name: ${gStr(existing.name)},
+                  portion: ${gStr(portionName)},
+                  price: ${price},
+                  priceTag: "",
+                  notifyClients: false
+                )
+              }`
+            );
+            updatedCount++;
+          }
+          screenMenuEntries.push({
+            categoryName,
+            productName: existing.name,
+          });
+        }
       }
-    }
 
-    const categories = getCategories();
-    const allSiteItems = getMenuItems();
-    const catMap = new Map(categories.map((c) => [c.id, c.name]));
-
-    const filterIds =
-      Array.isArray(options?.itemIds) && options.itemIds.length > 0
-        ? new Set(options.itemIds)
-        : null;
-
-    const targetItems = filterIds
-      ? allSiteItems.filter((m) => filterIds.has(m.id))
-      : allSiteItems;
-
-    let createdCount = 0;
-    let updatedCount = 0;
-    const screenMenuEntries: Array<{
-      categoryName: string;
-      productName: string;
-    }> = [];
-
-    for (const item of targetItems) {
-      const categoryName = catMap.get(item.categoryId) || "Online Sipariş";
-      const customMapped = (
-        cfg.productMappings?.[item.id] ||
-        cfg.productMappings?.[item.name.trim()] ||
-        ""
-      ).trim();
-      const targetSambaName = customMapped || item.name.trim();
-      const price = Number(Number(item.price || 0).toFixed(2));
-
-      if (!targetSambaName) continue;
-
-      const existing = existingMap.get(targetSambaName.toLowerCase());
-
-      if (!existing || !existing.id) {
-        // Ürün SambaPOS'ta yok -> Yeni ürün olarak ekle
-        const addRes = await executeSambaGraphQL(
+      if (!filterIds && !existingMap.has("paket servis ücreti")) {
+        const delFee = Number(Number(settings.deliveryFee || 0).toFixed(2));
+        await executeSambaGraphQL(
           cfg,
           accessToken,
           `mutation {
             addProduct(
-              name: ${gStr(targetSambaName)},
-              groupCode: ${gStr(categoryName)},
+              name: "Paket Servis Ücreti",
+              groupCode: "Online Sipariş",
               portions: [
-                { name: "Normal", price: ${price}, multiplier: 1 }
+                { name: "Normal", price: ${delFee}, multiplier: 1 }
               ]
             ) {
               id
               name
             }
           }`
-        );
-        if (!addRes.errors || addRes.errors.length === 0) {
+        ).catch(() => {});
+      }
+
+      await executeSambaGraphQL(
+        cfg,
+        accessToken,
+        `mutation { postResetProductCacheMessage { id } }`
+      ).catch(() => {});
+    } catch {
+      // Port 9000 kapalıysa ürünleri ve fiyatları doğrudan yerel SQL Server'a (YILDIZHANPOS5) yaz
+      usedSqlFallback = true;
+      const existingSqlList = fetchLocalSqlSambaProducts();
+      const existingMap = new Map<
+        string,
+        {
+          id: number;
+          name: string;
+          groupCode: string;
+          portions: Array<{ id: number; name: string; price: number }>;
+        }
+      >();
+      for (const p of existingSqlList) {
+        existingMap.set(p.name.trim().toLowerCase(), p);
+      }
+
+      const escSql = (s: string) => String(s || "").replace(/'/g, "''");
+      const sqlStatements: string[] = [
+        "SET NOCOUNT ON;",
+        "DECLARE @newProdId INT;",
+        "DECLARE @newPortId INT;",
+      ];
+
+      for (const item of targetItems) {
+        const categoryName = catMap.get(item.categoryId) || "Online Sipariş";
+        const customMapped = (
+          cfg.productMappings?.[item.id] ||
+          cfg.productMappings?.[item.name.trim()] ||
+          ""
+        ).trim();
+        const targetSambaName = customMapped || item.name.trim();
+        const price = Number(Number(item.price || 0).toFixed(2));
+        if (!targetSambaName) continue;
+
+        const existing = existingMap.get(targetSambaName.toLowerCase());
+        if (!existing || !existing.id) {
+          sqlStatements.push(`
+            INSERT INTO MenuItems (GroupCode, Barcode, Tag, CustomTags, ItemType, Name)
+            VALUES (N'${escSql(categoryName)}', NULL, NULL, NULL, 0, N'${escSql(targetSambaName)}');
+            SET @newProdId = SCOPE_IDENTITY();
+            INSERT INTO MenuItemPortions (Name, MenuItemId, Multiplier)
+            VALUES (N'Normal', @newProdId, 1);
+            SET @newPortId = SCOPE_IDENTITY();
+            INSERT INTO MenuItemPrices (MenuItemPortionId, PriceTag, Price)
+            VALUES (@newPortId, NULL, ${price});
+          `);
           createdCount++;
-          existingMap.set(targetSambaName.toLowerCase(), {
-            id: Number(
-              (addRes.data?.addProduct as { id?: number })?.id || 99999
-            ),
-            name: targetSambaName,
-            groupCode: categoryName,
-            portions: [{ id: 1, name: "Normal", price }],
-          });
           screenMenuEntries.push({
             categoryName,
             productName: targetSambaName,
           });
-        }
-      } else {
-        // Ürün SambaPOS'ta zaten var -> Fiyatını güncelle
-        const portionName =
-          existing.portions.find((pt) => pt.name?.toLowerCase() === "normal")
-            ?.name ||
-          existing.portions[0]?.name ||
-          "Normal";
-
-        if (options?.updatePrices !== false) {
-          await executeSambaGraphQL(
-            cfg,
-            accessToken,
-            `mutation {
-              updateProductPrice(
-                name: ${gStr(existing.name)},
-                portion: ${gStr(portionName)},
-                price: ${price},
-                priceTag: "",
-                notifyClients: false
-              )
-            }`
-          );
-          updatedCount++;
-        }
-        screenMenuEntries.push({
-          categoryName,
-          productName: existing.name,
-        });
-      }
-    }
-
-    // Paket Servis Ücreti kalemini de kontrol et ve yoksa ekle
-    if (!filterIds && !existingMap.has("paket servis ücreti")) {
-      const delFee = Number(Number(settings.deliveryFee || 0).toFixed(2));
-      await executeSambaGraphQL(
-        cfg,
-        accessToken,
-        `mutation {
-          addProduct(
-            name: "Paket Servis Ücreti",
-            groupCode: "Online Sipariş",
-            portions: [
-              { name: "Normal", price: ${delFee}, multiplier: 1 }
-            ]
-          ) {
-            id
-            name
+        } else {
+          if (options?.updatePrices !== false) {
+            const portId = existing.portions[0]?.id || 0;
+            if (portId > 0) {
+              sqlStatements.push(`
+                UPDATE MenuItemPrices
+                SET Price = ${price}
+                WHERE MenuItemPortionId = ${portId} AND (PriceTag IS NULL OR PriceTag = '');
+                UPDATE MenuItems
+                SET GroupCode = N'${escSql(categoryName)}'
+                WHERE Id = ${existing.id} AND (GroupCode IS NULL OR GroupCode = '');
+              `);
+            }
+            updatedCount++;
           }
-        }`
-      ).catch(() => {});
+          screenMenuEntries.push({
+            categoryName,
+            productName: existing.name,
+          });
+        }
+      }
+
+      if (!filterIds && !existingMap.has("paket servis ücreti")) {
+        const delFee = Number(Number(settings.deliveryFee || 0).toFixed(2));
+        sqlStatements.push(`
+          IF NOT EXISTS (SELECT 1 FROM MenuItems WHERE Name = N'Paket Servis Ücreti') BEGIN
+            INSERT INTO MenuItems (GroupCode, Barcode, Tag, CustomTags, ItemType, Name)
+            VALUES (N'Online Sipariş', NULL, NULL, NULL, 0, N'Paket Servis Ücreti');
+            SET @newProdId = SCOPE_IDENTITY();
+            INSERT INTO MenuItemPortions (Name, MenuItemId, Multiplier)
+            VALUES (N'Normal', @newProdId, 1);
+            SET @newPortId = SCOPE_IDENTITY();
+            INSERT INTO MenuItemPrices (MenuItemPortionId, PriceTag, Price)
+            VALUES (@newPortId, NULL, ${delFee});
+          END
+        `);
+      }
+
+      if (sqlStatements.length > 3) {
+        runLocalSambaSqlQuery(sqlStatements.join("\r\n"));
+      }
     }
 
     // POS Dokunmatik Menü ekranına da (ScreenMenuCategories & ScreenMenuItems) ekle
@@ -2089,23 +2837,20 @@ export async function syncSiteMenuToSambaPos(options?: {
       syncLocalSambaScreenMenu(screenMenuEntries);
     }
 
-    // SambaPOS Ürün Önbelleğini (Product Cache) yenile
-    await executeSambaGraphQL(
-      cfg,
-      accessToken,
-      `mutation { postResetProductCacheMessage { id } }`
-    ).catch(() => {});
-
-    // Son menü senkronizasyon tarihini kaydet
+    // Son menü senkronizasyon tarihini kaydet (diğer POS ayarlarını koruyarak)
     const nowIso = new Date().toISOString();
     const nextSamba: SambaPosConfig = {
       ...cfg,
       lastMenuSyncedAt: nowIso,
     };
+    const prevPos = settings.posIntegrationConfig;
     updateSettings({
       ...settings,
       posIntegrationConfig: {
-        activeProvider: nextSamba.enabled ? "sambapos" : "none",
+        ...prevPos,
+        activeProvider: nextSamba.enabled
+          ? "sambapos"
+          : prevPos?.activeProvider || "none",
         sambaPos: nextSamba,
       },
     });
@@ -2114,7 +2859,7 @@ export async function syncSiteMenuToSambaPos(options?: {
 
     return {
       ok: true,
-      message: `✅ Sitedeki ${targetItems.length} ürün SambaPOS'a başarıyla aktarıldı! (${createdCount} yeni ürün eklendi, ${updatedCount} ürünün fiyatı eşitlendi)`,
+      message: `✅ Sitedeki ${targetItems.length} ürün SambaPOS'a başarıyla aktarıldı! (${createdCount} yeni ürün eklendi, ${updatedCount} ürünün fiyatı eşitlendi${usedSqlFallback ? " — Yerel SQL Köprüsü" : ""})`,
       createdCount,
       updatedCount,
       totalProcessed: targetItems.length,
@@ -2133,4 +2878,5 @@ export async function syncSiteMenuToSambaPos(options?: {
     };
   }
 }
+
 

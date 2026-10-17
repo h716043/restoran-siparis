@@ -8248,20 +8248,20 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
 
             {/* 3. MENÜ EŞLEŞTİRME & SİTEDEKİ ÜRÜNLERİ SAMBAPOS'A AKTARMA */}
             <div className="bg-white p-6 rounded-2xl border-2 border-indigo-200 shadow-xs space-y-5">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                <div className="space-y-1">
+              <div className="flex flex-col gap-3 border-b border-slate-100 pb-4">
+                <div className="space-y-1.5">
                   <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
-                    🔄 Otomatik Ürün & Kategori Eşitleme
+                    🔄 Otomatik Ürün &amp; Kategori Eşitleme
                   </div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    3. Menü Eşleştirme & Sitedeki Ürünleri SambaPOS&apos;a Aktarma
+                    3. Menü Eşleştirme &amp; Sitedeki Ürünleri SambaPOS&apos;a Aktarma
                   </h3>
                   <p className="text-xs text-slate-500">
                     Sitedeki tüm ürünleri kategorileri ve fiyatlarıyla birlikte tek tıkla <strong>SambaPOS Ürün Listesine</strong> ve <strong>POS Dokunmatik Menü Ekranına</strong> aktarabilir veya mevcut SambaPOS ürünleriyle birebir eşleştirebilirsiniz.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleFetchSambaCatalog(true)}
@@ -8669,7 +8669,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
 
             {/* Canlı Sipariş Aktarım Tablosu & Tek Tıkla Manuel Aktarım */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-col gap-3">
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
                     4. 📋 Son Siparişlerin SambaPOS Aktarım &amp; Kurye/Teslimat Durumu
