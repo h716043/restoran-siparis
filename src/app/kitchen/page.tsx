@@ -1099,6 +1099,10 @@ export default function KitchenTabletPage() {
       (s, o) => s + (o.discountAmount || 0),
       0
     );
+    const loyaltyUsed = tableOrders.reduce(
+      (s, o) => s + (o.loyaltyPointsUsed || 0),
+      0
+    );
     const combinedOrder: Order = {
       ...tableOrders[0],
       orderNumber: tableOrders[0].orderNumber,
@@ -1106,6 +1110,7 @@ export default function KitchenTabletPage() {
       customerName: `${formatTableLabel(tableNum)} Birleşik Adisyon (${tableOrders.length} Sipariş)`,
       subtotal,
       discountAmount: discount,
+      loyaltyPointsUsed: loyaltyUsed,
       totalAmount: total,
       items: combinedItems,
     };
@@ -2105,7 +2110,23 @@ export default function KitchenTabletPage() {
                               {settings?.currency}{" "}
                               {order.couponCode ? `(${order.couponCode})` : ""}
                             </div>
+                          ) : order.discountAmount && order.discountAmount < 0 ? (
+                            <div className="text-[11px] text-rose-400 font-bold flex items-center justify-end gap-1">
+                              <Tag className="w-3 h-3" />+
+                              {Math.abs(order.discountAmount).toFixed(2)}{" "}
+                              {settings?.currency}{" "}
+                              {order.couponCode
+                                ? `(${order.couponCode})`
+                                : "(Fiyat Farkı)"}
+                            </div>
                           ) : null}
+                          {(order.loyaltyPointsUsed || 0) > 0 && (
+                            <div className="text-[11px] text-amber-400 font-bold flex items-center justify-end gap-1">
+                              🎁 Para Puan: -
+                              {Number(order.loyaltyPointsUsed).toFixed(2)}{" "}
+                              {settings?.currency}
+                            </div>
+                          )}
                           <span className="text-[11px] bg-slate-800 px-2 py-0.5 rounded text-slate-300">
                             {order.paymentMethod === "cash"
                               ? "Nakit"
@@ -4929,7 +4950,7 @@ export default function KitchenTabletPage() {
                 </div>
                 {selectedOrderForPrint.discountAmount &&
                 selectedOrderForPrint.discountAmount > 0 ? (
-                  <div className="flex justify-between">
+                  <div className="flex justify-between font-bold">
                     <span>
                       İNDİRİM ({selectedOrderForPrint.couponCode || "Kampanya"}
                       ):
@@ -4939,7 +4960,34 @@ export default function KitchenTabletPage() {
                       {settings?.currency}
                     </span>
                   </div>
+                ) : selectedOrderForPrint.discountAmount &&
+                  selectedOrderForPrint.discountAmount < 0 ? (
+                  <div className="flex justify-between font-bold">
+                    <span>
+                      FİYAT FARKI (
+                      {selectedOrderForPrint.couponCode || "Happy Hour"}):
+                    </span>
+                    <span>
+                      +
+                      {Math.abs(selectedOrderForPrint.discountAmount).toFixed(
+                        2
+                      )}{" "}
+                      {settings?.currency}
+                    </span>
+                  </div>
                 ) : null}
+                {(selectedOrderForPrint.loyaltyPointsUsed || 0) > 0 && (
+                  <div className="flex justify-between font-bold">
+                    <span>🎁 PARA PUAN İNDİRİMİ:</span>
+                    <span>
+                      -
+                      {Number(
+                        selectedOrderForPrint.loyaltyPointsUsed
+                      ).toFixed(2)}{" "}
+                      {settings?.currency}
+                    </span>
+                  </div>
+                )}
                 {selectedOrderForPrint.deliveryFee > 0 && (
                   <div className="flex justify-between">
                     <span>GETİRME ÜCRETİ:</span>

@@ -493,15 +493,19 @@ export default function WaiterTerminalPage() {
     [selectedTableOrders]
   );
 
+  const selectedTableLoyaltyUsed = useMemo(
+    () => selectedTableOrders.reduce((s, o) => s + (o.loyaltyPointsUsed || 0), 0),
+    [selectedTableOrders]
+  );
+
   const selectedTableTotal = useMemo(
     () => selectedTableOrders.reduce((s, o) => s + o.totalAmount, 0),
     [selectedTableOrders]
   );
 
   const extraDiscountAmount = Math.max(0, Number(billDiscountInput || 0));
-  const netPayableBillAmount = Math.max(
-    0,
-    selectedTableTotal - extraDiscountAmount
+  const netPayableBillAmount = Number(
+    Math.max(0, selectedTableTotal - extraDiscountAmount).toFixed(2)
   );
 
   // Flat list of items across all open orders of the selected table
@@ -988,6 +992,17 @@ export default function WaiterTerminalPage() {
               selectedTableExistingDiscount + extraDiscountAmount > 0
                 ? `<tr><td>İndirim / İkram:</td><td style="text-align:right;">-${formatCurrency(
                     selectedTableExistingDiscount + extraDiscountAmount
+                  )}</td></tr>`
+                : selectedTableExistingDiscount + extraDiscountAmount < 0
+                ? `<tr><td>Fiyat Farkı:</td><td style="text-align:right;">+${formatCurrency(
+                    Math.abs(selectedTableExistingDiscount + extraDiscountAmount)
+                  )}</td></tr>`
+                : ""
+            }
+            ${
+              selectedTableLoyaltyUsed > 0
+                ? `<tr><td>🎁 Para Puan İndirimi:</td><td style="text-align:right;">-${formatCurrency(
+                    selectedTableLoyaltyUsed
                   )}</td></tr>`
                 : ""
             }
@@ -2298,6 +2313,39 @@ export default function WaiterTerminalPage() {
                       </div>
                     </div>
                   </div>
+
+                  {(selectedTableExistingDiscount !== 0 ||
+                    extraDiscountAmount > 0 ||
+                    selectedTableLoyaltyUsed > 0) && (
+                    <div className="bg-stone-950/80 border border-stone-800 rounded-xl px-3 py-2 text-xs space-y-1">
+                      <div className="flex justify-between text-stone-400">
+                        <span>Ara Toplam:</span>
+                        <span>{formatCurrency(selectedTableSubtotal)}</span>
+                      </div>
+                      {selectedTableExistingDiscount + extraDiscountAmount > 0 && (
+                        <div className="flex justify-between text-emerald-400 font-bold">
+                          <span>İndirim / Kampanya:</span>
+                          <span>
+                            -{formatCurrency(selectedTableExistingDiscount + extraDiscountAmount)}
+                          </span>
+                        </div>
+                      )}
+                      {selectedTableExistingDiscount + extraDiscountAmount < 0 && (
+                        <div className="flex justify-between text-rose-400 font-bold">
+                          <span>Fiyat Farkı (Happy Hour):</span>
+                          <span>
+                            +{formatCurrency(Math.abs(selectedTableExistingDiscount + extraDiscountAmount))}
+                          </span>
+                        </div>
+                      )}
+                      {selectedTableLoyaltyUsed > 0 && (
+                        <div className="flex justify-between text-amber-400 font-bold">
+                          <span>🎁 Cüzdan Para Puan İndirimi:</span>
+                          <span>-{formatCurrency(selectedTableLoyaltyUsed)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Discount Input & Quick % */}
                   <div className="flex flex-wrap items-center gap-2">

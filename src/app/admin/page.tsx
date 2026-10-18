@@ -106,9 +106,15 @@ export default function AdminDashboardPage() {
   const [users, setUsers] = useState<CustomerUser[]>([]);
   const [waLogs, setWaLogs] = useState<WhatsAppLog[]>([]);
   const [crmCustomers, setCrmCustomers] = useState<CrmCustomerItem[]>([]);
-  const [crmSegment, setCrmSegment] = useState<"all" | "vip" | "inactive">(
-    "all"
+  const [crmSegment, setCrmSegment] = useState<
+    "all" | "vip" | "inactive" | "with_points"
+  >("all");
+  const [crmSearchQuery, setCrmSearchQuery] = useState("");
+  const [editingPointsPhone, setEditingPointsPhone] = useState<string | null>(
+    null
   );
+  const [customPointsInput, setCustomPointsInput] = useState("50");
+  const [notifyPointsWhatsApp, setNotifyPointsWhatsApp] = useState(true);
   const [selectedCrmPhones, setSelectedCrmPhones] = useState<string[]>([]);
   const [campaignMessage, setCampaignMessage] = useState(
     "Merhaba {isim} 👋 Bugün size özel sıcacık ızgara ve kebaplarımızda %15 indirim fırsatımız var! Hemen sipariş vermek için menümüze göz atabilirsiniz 🍽️🔥"
@@ -1638,8 +1644,18 @@ export default function AdminDashboardPage() {
 
   // CRM Segment Filtreleme
   const filteredCrmCustomers = crmCustomers.filter((c) => {
-    if (crmSegment === "vip") return c.isVip;
-    if (crmSegment === "inactive") return c.isInactive15Days;
+    if (crmSegment === "vip" && !c.isVip) return false;
+    if (crmSegment === "inactive" && !c.isInactive15Days) return false;
+    if (crmSegment === "with_points" && !(c.loyaltyPoints > 0)) return false;
+    if (crmSearchQuery.trim()) {
+      const q = crmSearchQuery.trim().toLocaleLowerCase("tr-TR");
+      const matchName = (c.name || "").toLocaleLowerCase("tr-TR").includes(q);
+      const matchPhone = (c.phone || "").toLowerCase().includes(q);
+      const matchAddr = (c.address || "")
+        .toLocaleLowerCase("tr-TR")
+        .includes(q);
+      if (!matchName && !matchPhone && !matchAddr) return false;
+    }
     return true;
   });
 
@@ -1686,22 +1702,44 @@ export default function AdminDashboardPage() {
   };
 
   const handleAdjustCustomerPoints = async (
-    phone: string,
-    deltaPoints: number
+    cust: CrmCustomerItem,
+    deltaPoints: number,
+    options?: { exactPoints?: number; notifyWhatsApp?: boolean }
   ) => {
     const res = await fetch("/api/customers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "adjust_points",
-        phone,
+        phone: cust.phone,
+        name: cust.name,
+        address: cust.address,
         deltaPoints,
+        exactPoints: options?.exactPoints,
+        notifyWhatsApp: options?.notifyWhatsApp ?? false,
       }),
     });
     if (res.ok) {
-      showToast(
-        `${deltaPoints > 0 ? `+${deltaPoints}` : deltaPoints} TL Para Puan güncellendi!`
+      const data = await res.json();
+      const updatedPts =
+        data.user?.loyaltyPoints !== undefined
+          ? Number(data.user.loyaltyPoints)
+          : options?.exactPoints !== undefined
+          ? Math.max(0, Number(options.exactPoints))
+          : Math.max(0, Number((cust.loyaltyPoints + deltaPoints).toFixed(2)));
+      setCrmCustomers((prev) =>
+        prev.map((c) =>
+          c.phone === cust.phone ? { ...c, loyaltyPoints: updatedPts } : c
+        )
       );
+      showToast(
+        options?.exactPoints !== undefined
+          ? `✅ ${cust.name} cüzdan bakiyesi ${updatedPts.toFixed(2)} TL olarak güncellendi!`
+          : `🎁 ${cust.name}: ${
+              deltaPoints > 0 ? `+${deltaPoints}` : deltaPoints
+            } TL Para Puan güncellendi! (Yeni Bakiye: ${updatedPts.toFixed(2)} TL)`
+      );
+      setEditingPointsPhone(null);
       loadData();
     }
   };
@@ -5216,7 +5254,7 @@ export default function AdminDashboardPage() {
                     Müşteri Veritabanı & Sadakat Cüzdanı ({filteredCrmCustomers.length} Kişi)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Sipariş sıklığına göre filtreleyin, tek tıkla WhatsApp gönderin veya hediye Para Puan ekleyin
+                    Sipariş sıklığına göre filtreleyin, tek tıkla WhatsApp gönderin veya hediye Para Puan yönetin
                   </p>
                 </div>
 
@@ -5245,6 +5283,18 @@ export default function AdminDashboardPage() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setCrmSegment("with_points")}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      crmSegment === "with_points"
+                        ? "bg-emerald-600 text-white"
+                        : "bg-emerald-50 text-emerald-800"
+                    }`}
+                  >
+                    🎁 Puanı Olan (
+                    {crmCustomers.filter((c) => c.loyaltyPoints > 0).length})
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setCrmSegment("inactive")}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                       crmSegment === "inactive"
@@ -5258,101 +5308,285 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+              {/* Cüzdan & CRM Özet Kartları + Arama Çubuğu */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="bg-amber-50/80 border border-amber-200 rounded-xl px-3 py-2">
+                  <div className="text-[10px] font-bold uppercase text-amber-700">
+                    🎁 Toplam Cüzdan Puanı
+                  </div>
+                  <div className="text-sm font-black text-amber-900">
+                    {crmCustomers
+                      .reduce((s, c) => s + (c.loyaltyPoints || 0), 0)
+                      .toFixed(2)}{" "}
+                    {settings.currency}
+                  </div>
+                </div>
+                <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl px-3 py-2">
+                  <div className="text-[10px] font-bold uppercase text-emerald-700">
+                    💳 Puan Bakiyesi Olanlar
+                  </div>
+                  <div className="text-sm font-black text-emerald-900">
+                    {crmCustomers.filter((c) => c.loyaltyPoints > 0).length} Müşteri
+                  </div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                  <div className="text-[10px] font-bold uppercase text-slate-500">
+                    📈 Toplam Müşteri Cirosu
+                  </div>
+                  <div className="text-sm font-black text-slate-900">
+                    {crmCustomers
+                      .reduce((s, c) => s + (c.totalSpent || 0), 0)
+                      .toFixed(2)}{" "}
+                    {settings.currency}
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="text"
+                  value={crmSearchQuery}
+                  onChange={(e) => setCrmSearchQuery(e.target.value)}
+                  placeholder="🔍 Müşteri adı, telefon numarası veya adres ile hızlı ara..."
+                  className="w-full px-3.5 py-2 text-xs font-semibold border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-amber-500"
+                />
+                {crmSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setCrmSearchQuery("")}
+                    className="absolute right-3 top-2 text-xs font-bold text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    Temizle ✕
+                  </button>
+                )}
+              </div>
+
               {filteredCrmCustomers.length === 0 ? (
                 <p className="text-xs text-slate-500 py-8 text-center">
-                  Bu segmentte müşteri bulunmuyor.
+                  Bu filtreye uygun müşteri bulunmuyor.
                 </p>
               ) : (
                 <div className="divide-y divide-slate-100 max-h-[540px] overflow-y-auto pr-1">
                   {filteredCrmCustomers.map((cust) => {
                     const isChecked = selectedCrmPhones.includes(cust.phone);
+                    const isEditingPts = editingPointsPhone === cust.phone;
                     return (
                       <div
                         key={cust.phone}
-                        className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        className="py-3.5 flex flex-col gap-2.5"
                       >
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedCrmPhones([
-                                  ...selectedCrmPhones,
-                                  cust.phone,
-                                ]);
-                              } else {
-                                setSelectedCrmPhones(
-                                  selectedCrmPhones.filter(
-                                    (p) => p !== cust.phone
-                                  )
-                                );
-                              }
-                            }}
-                            className="mt-1 w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-                          />
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-extrabold text-sm text-slate-900">
-                                {cust.name}
-                              </span>
-                              <span className="text-xs font-mono font-bold text-slate-500">
-                                +{cust.phone}
-                              </span>
-                              {cust.isVip && (
-                                <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                                  ⭐ VIP
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedCrmPhones([
+                                    ...selectedCrmPhones,
+                                    cust.phone,
+                                  ]);
+                                } else {
+                                  setSelectedCrmPhones(
+                                    selectedCrmPhones.filter(
+                                      (p) => p !== cust.phone
+                                    )
+                                  );
+                                }
+                              }}
+                              className="mt-1 w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-extrabold text-sm text-slate-900">
+                                  {cust.name}
                                 </span>
-                              )}
-                              {cust.isInactive15Days && (
-                                <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
-                                  {cust.daysSinceLastOrder} gündür yok
+                                <span className="text-xs font-mono font-bold text-slate-500">
+                                  +{cust.phone}
                                 </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-slate-500 mt-0.5">
-                              Toplam{" "}
-                              <strong className="text-slate-800">
-                                {cust.orderCount} sipariş
-                              </strong>{" "}
-                              • Harcama:{" "}
-                              <strong className="text-emerald-700">
-                                {cust.totalSpent.toFixed(2)} {settings.currency}
-                              </strong>{" "}
-                              • Cüzdan Puanı:{" "}
-                              <strong className="text-amber-700">
-                                {cust.loyaltyPoints.toFixed(2)}{" "}
-                                {settings.currency}
-                              </strong>
-                            </div>
-                            {cust.address && (
-                              <div className="text-[11px] text-slate-400 truncate max-w-md">
-                                📍 {cust.address}
+                                {cust.isVip && (
+                                  <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                    ⭐ VIP
+                                  </span>
+                                )}
+                                {cust.loyaltyPoints > 0 && (
+                                  <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                    🎁 {cust.loyaltyPoints.toFixed(2)}{" "}
+                                    {settings.currency} Puan
+                                  </span>
+                                )}
+                                {cust.isInactive15Days && (
+                                  <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                                    {cust.daysSinceLastOrder} gündür yok
+                                  </span>
+                                )}
                               </div>
+                              <div className="text-xs text-slate-500 mt-0.5">
+                                Toplam{" "}
+                                <strong className="text-slate-800">
+                                  {cust.orderCount} sipariş
+                                </strong>{" "}
+                                • Harcama:{" "}
+                                <strong className="text-emerald-700">
+                                  {cust.totalSpent.toFixed(2)}{" "}
+                                  {settings.currency}
+                                </strong>{" "}
+                                • Cüzdan Puanı:{" "}
+                                <strong className="text-amber-700">
+                                  {cust.loyaltyPoints.toFixed(2)}{" "}
+                                  {settings.currency}
+                                </strong>
+                              </div>
+                              {cust.address && (
+                                <div className="text-[11px] text-slate-400 truncate max-w-md">
+                                  📍 {cust.address}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAdjustCustomerPoints(cust, 25, {
+                                  notifyWhatsApp: false,
+                                })
+                              }
+                              className="px-2 py-1.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
+                              title="Müşteriye +25 TL Hediye Para Puan Ekle"
+                            >
+                              +25₺
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAdjustCustomerPoints(cust, 50, {
+                                  notifyWhatsApp: false,
+                                })
+                              }
+                              className="px-2 py-1.5 rounded-lg text-[11px] font-bold bg-amber-100/80 hover:bg-amber-200 text-amber-900 border border-amber-300 cursor-pointer"
+                              title="Müşteriye +50 TL Hediye Para Puan Ekle"
+                            >
+                              +50₺
+                            </button>
+                            {cust.loyaltyPoints > 0 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAdjustCustomerPoints(cust, -25, {
+                                    notifyWhatsApp: false,
+                                  })
+                                }
+                                className="px-2 py-1.5 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer"
+                                title="Müşteriden 25 TL Para Puan Düş"
+                              >
+                                -25₺
+                              </button>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isEditingPts) {
+                                  setEditingPointsPhone(null);
+                                } else {
+                                  setEditingPointsPhone(cust.phone);
+                                  setCustomPointsInput("50");
+                                }
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer ${
+                                isEditingPts
+                                  ? "bg-slate-900 text-white border-slate-900"
+                                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              🎁 Cüzdan Yönet
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSendBulkCampaign([cust])}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 cursor-pointer"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>Mesaj</span>
+                            </button>
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-center">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleAdjustCustomerPoints(cust.phone, 25)
-                            }
-                            className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer"
-                            title="Müşteriye +25 TL Hediye Para Puan Ekle"
-                          >
-                            +25₺ Puan
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSendBulkCampaign([cust])}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 cursor-pointer"
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>Tekil Gönder</span>
-                          </button>
-                        </div>
+                        {isEditingPts && (
+                          <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-amber-950">
+                                Tutar ({settings.currency}):
+                              </span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={customPointsInput}
+                                onChange={(e) =>
+                                  setCustomPointsInput(e.target.value)
+                                }
+                                className="w-24 px-2.5 py-1 rounded-lg border border-amber-300 bg-white font-extrabold text-slate-900 text-xs"
+                              />
+                              <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={notifyPointsWhatsApp}
+                                  onChange={(e) =>
+                                    setNotifyPointsWhatsApp(e.target.checked)
+                                  }
+                                  className="w-3.5 h-3.5 accent-emerald-600 rounded"
+                                />
+                                <span>📲 Hediye Puanı WhatsApp ile Bildir</span>
+                              </label>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAdjustCustomerPoints(
+                                    cust,
+                                    Math.max(0, Number(customPointsInput || 0)),
+                                    { notifyWhatsApp: notifyPointsWhatsApp }
+                                  )
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer"
+                              >
+                                + Ekle
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAdjustCustomerPoints(
+                                    cust,
+                                    -Math.max(0, Number(customPointsInput || 0)),
+                                    { notifyWhatsApp: false }
+                                  )
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer"
+                              >
+                                - Düş
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAdjustCustomerPoints(cust, 0, {
+                                    exactPoints: Math.max(
+                                      0,
+                                      Number(customPointsInput || 0)
+                                    ),
+                                    notifyWhatsApp: notifyPointsWhatsApp,
+                                  })
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] cursor-pointer"
+                                title="Müşterinin cüzdan bakiyesini doğrudan girilen tutara eşitler"
+                              >
+                                Net Bakiye Yap
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

@@ -1614,9 +1614,23 @@ export function updateOrderStatus(
   const cou = courierName !== undefined ? courierName : existing.courierName;
   const pay = paymentMethod !== undefined ? paymentMethod : existing.paymentMethod;
 
-  // Eğer sipariş iptal/red edildiyse günlük stokları geri yükle
+  // Eğer sipariş iptal/red edildiyse günlük stokları ve kullanılan Para Puanları geri yükle
   if (status === "rejected" && existing.status !== "rejected") {
     adjustMenuStockForItems(existing.items, "restore");
+    const usedPts = Number(existing.loyaltyPointsUsed || 0);
+    const earnedPts = Number(existing.loyaltyPointsEarned || 0);
+    const netRefundDelta = Number((usedPts - earnedPts).toFixed(2));
+    if (netRefundDelta !== 0 && existing.customerPhone) {
+      adjustUserLoyaltyPoints(existing.customerPhone, netRefundDelta);
+    }
+  } else if (existing.status === "rejected" && status !== "rejected") {
+    adjustMenuStockForItems(existing.items, "decrement");
+    const usedPts = Number(existing.loyaltyPointsUsed || 0);
+    const earnedPts = Number(existing.loyaltyPointsEarned || 0);
+    const netReapplyDelta = Number((earnedPts - usedPts).toFixed(2));
+    if (netReapplyDelta !== 0 && existing.customerPhone) {
+      adjustUserLoyaltyPoints(existing.customerPhone, netReapplyDelta);
+    }
   }
 
   db.prepare(`
@@ -1684,9 +1698,14 @@ export function toggleOrderItemComplimentary(
     (sum, i) => sum + Number(i.totalPrice || 0),
     0
   );
-  const nextTotal = Math.max(
-    0,
-    nextSubtotal - (existing.discountAmount || 0) + (existing.deliveryFee || 0)
+  const nextTotal = Number(
+    Math.max(
+      0,
+      nextSubtotal -
+        (existing.discountAmount || 0) -
+        (existing.loyaltyPointsUsed || 0) +
+        (existing.deliveryFee || 0)
+    ).toFixed(2)
   );
   const updatedAt = new Date().toISOString();
 
@@ -1811,6 +1830,14 @@ export function removeItemFromOrder(
   const updatedAt = new Date().toISOString();
 
   if (nextItems.length === 0) {
+    if (existing.status !== "rejected" && existing.customerPhone) {
+      const usedPts = Number(existing.loyaltyPointsUsed || 0);
+      const earnedPts = Number(existing.loyaltyPointsEarned || 0);
+      const netRefundDelta = Number((usedPts - earnedPts).toFixed(2));
+      if (netRefundDelta !== 0) {
+        adjustUserLoyaltyPoints(existing.customerPhone, netRefundDelta);
+      }
+    }
     db.prepare(`
       UPDATE orders
       SET status = 'rejected', itemsJson = '[]', subtotal = 0, totalAmount = 0, rejectReason = 'Garson tarafından kalemler iptal edildi', updatedAt = ?
@@ -1823,9 +1850,14 @@ export function removeItemFromOrder(
     (sum, i) => sum + Number(i.totalPrice || 0),
     0
   );
-  const nextTotal = Math.max(
-    0,
-    nextSubtotal - (existing.discountAmount || 0) + (existing.deliveryFee || 0)
+  const nextTotal = Number(
+    Math.max(
+      0,
+      nextSubtotal -
+        (existing.discountAmount || 0) -
+        (existing.loyaltyPointsUsed || 0) +
+        (existing.deliveryFee || 0)
+    ).toFixed(2)
   );
 
   db.prepare(`
@@ -2075,7 +2107,9 @@ export function closeTableOrdersWithPayment(
 
   tableActive.forEach((ord, idx) => {
     const applyDisc = idx === 0 ? (ord.discountAmount || 0) + extraDiscount : ord.discountAmount || 0;
-    const nextTotal = Math.max(0, ord.subtotal - applyDisc);
+    const nextTotal = Number(
+      Math.max(0, ord.subtotal - applyDisc - (ord.loyaltyPointsUsed || 0)).toFixed(2)
+    );
     totalClosedAmount += nextTotal;
 
     const splitObj =
@@ -2289,23 +2323,36 @@ export function getUserByPhone(rawPhone: string): CustomerUser | null {
 
 export function adjustUserLoyaltyPoints(
   rawPhone: string,
-  delta: number
+  delta: number,
+  fallbackName?: string,
+  fallbackAddress?: string,
+  exactPoints?: number
 ): CustomerUser | null {
   const db = getDb();
   const phone = normalizePhone(rawPhone);
-  const user = getUserByPhone(phone);
-  if (!user) return null;
-  const nextPoints = Math.max(
-    0,
-    Math.round(((user.loyaltyPoints || 0) + delta) * 100) / 100
-  );
+  if (!phone) return null;
+  let user = getUserByPhone(phone);
+  if (!user) {
+    user = upsertUserAfterOtp(
+      phone,
+      fallbackName?.trim() || "Değerli Müşterimiz",
+      fallbackAddress?.trim() || undefined
+    );
+  }
+  const targetPoints =
+    exactPoints !== undefined && Number.isFinite(exactPoints)
+      ? Math.max(0, Math.round(Number(exactPoints) * 100) / 100)
+      : Math.max(
+          0,
+          Math.round(((user.loyaltyPoints || 0) + delta) * 100) / 100
+        );
   const prevMs = user.lastLoginAt ? Date.parse(user.lastLoginAt) : 0;
   const now = new Date(
     Math.max(Date.now(), (Number.isFinite(prevMs) ? prevMs : 0) + 1)
   ).toISOString();
   db.prepare(
     "UPDATE users SET loyaltyPoints = ?, lastLoginAt = ? WHERE phone = ?"
-  ).run(nextPoints, now, phone);
+  ).run(targetPoints, now, phone);
   return getUserByPhone(phone);
 }
 

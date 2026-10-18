@@ -233,7 +233,34 @@ export async function POST(req: NextRequest) {
     if (body.action === "adjust_points") {
       const phone = String(body.phone || "").trim();
       const delta = Number(body.deltaPoints ?? body.delta ?? 0);
-      const updatedUser = adjustUserLoyaltyPoints(phone, delta);
+      const exactPoints =
+        body.exactPoints !== undefined && body.exactPoints !== null
+          ? Number(body.exactPoints)
+          : undefined;
+      const prevUser = getUserByPhone(phone);
+      const prevPoints = Number(prevUser?.loyaltyPoints || 0);
+      const updatedUser = adjustUserLoyaltyPoints(
+        phone,
+        delta,
+        body.name ? String(body.name) : undefined,
+        body.address ? String(body.address) : undefined,
+        exactPoints
+      );
+      if (updatedUser && body.notifyWhatsApp) {
+        const settings = getSettings();
+        const actualDiff = Number(
+          ((updatedUser.loyaltyPoints || 0) - prevPoints).toFixed(2)
+        );
+        if (actualDiff > 0) {
+          const reasonNote = body.reason ? `\n📌 Not: _${String(body.reason).trim()}_` : "";
+          const msg = `🎁 *${settings.name}*\n\nMerhaba *${updatedUser.name}*, cüzdanınıza *+${actualDiff.toFixed(
+            2
+          )} ${settings.currency}* Hediye Para Puan tanımlandı! 🎉${reasonNote}\n💰 Güncel Cüzdan Bakiyeniz: *${updatedUser.loyaltyPoints.toFixed(
+            2
+          )} ${settings.currency}*\n\nKeyifli siparişler dileriz!`;
+          await sendWhatsAppMessage(phone, msg, "campaign").catch(() => {});
+        }
+      }
       await syncActivityWithCloud();
       return NextResponse.json({ user: updatedUser });
     }

@@ -64,6 +64,7 @@ import {
   RestaurantSettings,
   SavedAddress,
   SelectedModifier,
+  TableCall,
   TableReservation,
   formatTableLabel,
   getEnabledOrderTypes,
@@ -220,6 +221,9 @@ function CustomerMenuContent() {
   const [splitPeopleCount, setSplitPeopleCount] = useState<number>(1);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);
+  const [customLoyaltyPointsToUse, setCustomLoyaltyPointsToUse] = useState<
+    number | null
+  >(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -267,6 +271,7 @@ function CustomerMenuContent() {
   const [tableCallSending, setTableCallSending] = useState(false);
   const [tableCallToast, setTableCallToast] = useState<string>("");
   const [liveTableOrders, setLiveTableOrders] = useState<Order[]>([]);
+  const [liveTableCalls, setLiveTableCalls] = useState<TableCall[]>([]);
   const [tableBillExpanded, setTableBillExpanded] = useState(false);
 
   // 3 Açık + 3 Kapalı Tema Yönetimi
@@ -513,15 +518,21 @@ function CustomerMenuContent() {
   const fetchPublicTableOrders = useCallback(async (tNum: string) => {
     if (!tNum) {
       setLiveTableOrders([]);
+      setLiveTableCalls([]);
       return;
     }
     try {
-      const res = await fetch(
-        `/api/orders?publicTable=${encodeURIComponent(tNum)}`
-      );
-      if (res.ok) {
-        const data = await res.json();
+      const [ordRes, callRes] = await Promise.all([
+        fetch(`/api/orders?publicTable=${encodeURIComponent(tNum)}`),
+        fetch(`/api/table-calls?table=${encodeURIComponent(tNum)}`),
+      ]);
+      if (ordRes.ok) {
+        const data = await ordRes.json();
         setLiveTableOrders(data.orders || []);
+      }
+      if (callRes.ok) {
+        const cData = await callRes.json();
+        setLiveTableCalls(cData.calls || []);
       }
     } catch {
       // ignore
@@ -533,6 +544,7 @@ function CustomerMenuContent() {
       fetchPublicTableOrders(tableNumber);
     } else {
       setLiveTableOrders([]);
+      setLiveTableCalls([]);
     }
   }, [orderType, tableNumber, fetchPublicTableOrders]);
 
@@ -656,6 +668,7 @@ function CustomerMenuContent() {
             ? `Masa ${tableNumber} için Nakit Hesap isteğiniz iletildi!`
             : `Masa ${tableNumber} için Kredi Kartı (POS) Hesap isteğiniz iletildi!`;
         setTableCallToast(label);
+        fetchPublicTableOrders(tableNumber);
         setTimeout(() => setTableCallToast(""), 4500);
       }
     } finally {
@@ -1623,14 +1636,64 @@ function CustomerMenuContent() {
     availableUserPoints >= minRedeemPoints &&
     baseTotalBeforeLoyalty > 0;
 
+  const maxRedeemablePoints = useMemo(() => {
+    if (!canRedeemPoints) return 0;
+    return Number(Math.min(availableUserPoints, baseTotalBeforeLoyalty).toFixed(2));
+  }, [canRedeemPoints, availableUserPoints, baseTotalBeforeLoyalty]);
+
   const loyaltyPointsToUse = useMemo(() => {
     if (!canRedeemPoints || !useLoyaltyPoints) return 0;
-    return Number(Math.min(availableUserPoints, baseTotalBeforeLoyalty).toFixed(2));
-  }, [canRedeemPoints, useLoyaltyPoints, availableUserPoints, baseTotalBeforeLoyalty]);
+    if (
+      customLoyaltyPointsToUse !== null &&
+      Number.isFinite(customLoyaltyPointsToUse)
+    ) {
+      return Number(
+        Math.max(
+          0,
+          Math.min(customLoyaltyPointsToUse, maxRedeemablePoints)
+        ).toFixed(2)
+      );
+    }
+    return maxRedeemablePoints;
+  }, [
+    canRedeemPoints,
+    useLoyaltyPoints,
+    customLoyaltyPointsToUse,
+    maxRedeemablePoints,
+  ]);
 
   const totalAmount = Number(
     Math.max(0, baseTotalBeforeLoyalty - loyaltyPointsToUse).toFixed(2)
   );
+
+  // 🚀 Sepette "Minimum Paket Tutarı Tamamlayıcı" Tek Tık Öneriler
+  const minOrderTopUpItems = useMemo(() => {
+    if (orderType !== "delivery" || subtotal >= currentMinDeliveryAmount) {
+      return [];
+    }
+    const missing = Number((currentMinDeliveryAmount - subtotal).toFixed(2));
+    if (missing <= 0) return [];
+    const cartIds = new Set(cart.map((c) => c.menuItemId));
+    const candidates = items.filter(
+      (i) =>
+        i.available &&
+        (i.dailyStock === undefined || i.dailyStock === null || i.dailyStock > 0) &&
+        i.price > 0
+    );
+    // Önce sepette olmayan ve fiyatı eksik tutarı tek seferde tamamlayabilecek en uygun fiyatlı ürünleri sırala
+    const sorted = [...candidates].sort((a, b) => {
+      const aInCart = cartIds.has(a.id) ? 1 : 0;
+      const bInCart = cartIds.has(b.id) ? 1 : 0;
+      if (aInCart !== bInCart) return aInCart - bInCart;
+      const aCovers = a.price >= missing;
+      const bCovers = b.price >= missing;
+      if (aCovers && bCovers) return a.price - b.price;
+      if (aCovers && !bCovers) return -1;
+      if (!aCovers && bCovers) return 1;
+      return b.price - a.price;
+    });
+    return sorted.slice(0, 3);
+  }, [orderType, subtotal, currentMinDeliveryAmount, items, cart]);
 
   const estimatedPointsToEarn = useMemo(() => {
     if (!isLoyaltyEnabled || loyaltyPointsToUse > 0) return 0;
@@ -1943,6 +2006,7 @@ function CustomerMenuContent() {
         setCouponInput("");
         setCouponMessage(null);
         setUseLoyaltyPoints(false);
+        setCustomLoyaltyPointsToUse(null);
         setSelectedQuickPrefs([]);
         setSelectedTipPreset("none");
         setSplitPeopleCount(1);
@@ -2689,6 +2753,42 @@ function CustomerMenuContent() {
             </div>
           </div>
 
+          {/* 🔔 Canlı Garson / Hesap Çağrısı Durum Geri Bildirimi */}
+          {tableNumber && liveTableCalls.length > 0 && (
+            <div
+              className={`rounded-2xl px-3.5 py-2.5 border-2 flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold shadow-xs ${
+                liveTableCalls.some((c) => c.status === "pending")
+                  ? "bg-amber-50 border-amber-400 text-amber-950 animate-pulse"
+                  : "bg-emerald-50 border-emerald-400 text-emerald-900"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <BellRing className="w-4 h-4 shrink-0" />
+                {liveTableCalls.some((c) => c.status === "pending") ? (
+                  <span>
+                    ⏳ Masa {tableNumber} için{" "}
+                    {liveTableCalls.find((c) => c.status === "pending")?.type ===
+                    "waiter"
+                      ? "Garson Çağrınız"
+                      : liveTableCalls.find((c) => c.status === "pending")
+                          ?.type === "bill_cash"
+                      ? "Nakit Hesap İsteğiniz"
+                      : "Kredi Kartı (POS) Hesap İsteğiniz"}{" "}
+                    iletildi, garsonumuz yönlendiriliyor...
+                  </span>
+                ) : (
+                  <span>
+                    ✅ Garsonunuz çağrınızı yanıtladı, şu an Masa {tableNumber}{" "}
+                    için yanınıza geliyor!
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/80 border border-current">
+                Canlı Bildirim
+              </span>
+            </div>
+          )}
+
           {/* 2. ÖZELLİK: Masanın Canlı Açık Adisyonunu Gör & Ek Sipariş Ver */}
           {tableNumber && liveTableOrders.length > 0 && (
             <div className="bg-white border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm space-y-2.5">
@@ -2711,7 +2811,7 @@ function CustomerMenuContent() {
                     Toplam:{" "}
                     {liveTableOrders
                       .reduce((s, o) => s + o.totalAmount, 0)
-                      .toFixed(0)}{" "}
+                      .toFixed(2)}{" "}
                     {settings?.currency || "₺"}
                   </span>
                   <button
@@ -2725,6 +2825,49 @@ function CustomerMenuContent() {
                   </button>
                 </div>
               </div>
+
+              {/* Canlı Mutfak Durum Çubuğu */}
+              {(() => {
+                const allItems = liveTableOrders.flatMap((o) =>
+                  o.items.map((it) => ({
+                    ...it,
+                    ready: Boolean(it.prepared || o.status === "ready"),
+                  }))
+                );
+                const readyCount = allItems.filter((i) => i.ready).length;
+                const anyAccepted = liveTableOrders.some(
+                  (o) => o.status === "accepted" || o.status === "ready"
+                );
+                const allReady =
+                  allItems.length > 0 && readyCount === allItems.length;
+                return (
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 text-[11px] font-extrabold">
+                    <div className="px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-center gap-1">
+                      <span>✓ Sipariş Alındı</span>
+                    </div>
+                    <div
+                      className={`px-2.5 py-1.5 rounded-xl border flex items-center justify-center gap-1 ${
+                        anyAccepted || readyCount > 0
+                          ? "bg-amber-50 text-amber-900 border-amber-300"
+                          : "bg-slate-50 text-slate-400 border-slate-200"
+                      }`}
+                    >
+                      <span>
+                        👨‍🍳 Mutfakta ({readyCount}/{allItems.length} Hazır)
+                      </span>
+                    </div>
+                    <div
+                      className={`px-2.5 py-1.5 rounded-xl border flex items-center justify-center gap-1 ${
+                        allReady
+                          ? "bg-emerald-600 text-white border-emerald-600"
+                          : "bg-slate-50 text-slate-400 border-slate-200"
+                      }`}
+                    >
+                      <span>🍽️ Masanıza Servis</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {tableBillExpanded && (
                 <div className="pt-2 border-t border-slate-100 space-y-1.5">
@@ -2754,11 +2897,61 @@ function CustomerMenuContent() {
                           </span>
                         </div>
                         <span className="font-extrabold text-slate-900">
-                          {it.totalPrice.toFixed(0)} {settings?.currency || "₺"}
+                          {it.totalPrice.toFixed(2)} {settings?.currency || "₺"}
                         </span>
                       </div>
                     ))
                   )}
+                  {(() => {
+                    const tblSub = liveTableOrders.reduce(
+                      (s, o) => s + o.subtotal,
+                      0
+                    );
+                    const tblDisc = liveTableOrders.reduce(
+                      (s, o) => s + (o.discountAmount || 0),
+                      0
+                    );
+                    const tblPts = liveTableOrders.reduce(
+                      (s, o) => s + (o.loyaltyPointsUsed || 0),
+                      0
+                    );
+                    if (tblDisc === 0 && tblPts === 0) return null;
+                    return (
+                      <div className="bg-amber-50/70 border border-amber-200 rounded-xl px-3 py-2 text-xs space-y-1">
+                        <div className="flex justify-between text-slate-600">
+                          <span>Ara Toplam:</span>
+                          <span>
+                            {tblSub.toFixed(2)} {settings?.currency || "₺"}
+                          </span>
+                        </div>
+                        {tblDisc > 0 && (
+                          <div className="flex justify-between text-emerald-700 font-bold">
+                            <span>İndirim / Kampanya:</span>
+                            <span>
+                              -{tblDisc.toFixed(2)} {settings?.currency || "₺"}
+                            </span>
+                          </div>
+                        )}
+                        {tblDisc < 0 && (
+                          <div className="flex justify-between text-rose-600 font-bold">
+                            <span>Fiyat Farkı (Happy Hour):</span>
+                            <span>
+                              +{Math.abs(tblDisc).toFixed(2)}{" "}
+                              {settings?.currency || "₺"}
+                            </span>
+                          </div>
+                        )}
+                        {tblPts > 0 && (
+                          <div className="flex justify-between text-amber-800 font-bold">
+                            <span>🎁 Kullanılan Para Puan:</span>
+                            <span>
+                              -{tblPts.toFixed(2)} {settings?.currency || "₺"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -6115,7 +6308,7 @@ function CustomerMenuContent() {
 
           {/* 🎁 İsteğe Bağlı Müşteri Sadakat & Para Puan Harcama Kutusu */}
           {isLoyaltyEnabled && currentUser && (
-            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-1.5 text-xs">
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <span className="font-extrabold text-amber-900 flex items-center gap-1">
                   <Gift className="w-3.5 h-3.5 text-amber-600" />
@@ -6126,22 +6319,112 @@ function CustomerMenuContent() {
                 </span>
               </div>
               {canRedeemPoints ? (
-                <label className="flex items-center gap-2 pt-1 cursor-pointer font-bold text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={useLoyaltyPoints}
-                    onChange={(e) => setUseLoyaltyPoints(e.target.checked)}
-                    className="w-4 h-4 accent-amber-600 rounded"
-                  />
-                  <span>
-                    Biriken Para Puanımı Bu Siparişte Kullan (-
-                    {Math.min(
-                      availableUserPoints,
-                      baseTotalBeforeLoyalty
-                    ).toFixed(2)}{" "}
-                    {settings?.currency})
-                  </span>
-                </label>
+                <div className="space-y-2 pt-0.5">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={useLoyaltyPoints}
+                      onChange={(e) => {
+                        setUseLoyaltyPoints(e.target.checked);
+                        if (e.target.checked && customLoyaltyPointsToUse === null) {
+                          setCustomLoyaltyPointsToUse(maxRedeemablePoints);
+                        }
+                      }}
+                      className="w-4 h-4 accent-amber-600 rounded"
+                    />
+                    <span>
+                      Para Puanımı Bu Siparişte Kullan (-
+                      {loyaltyPointsToUse.toFixed(2)} {settings?.currency})
+                    </span>
+                  </label>
+
+                  {useLoyaltyPoints && maxRedeemablePoints > 1 && (
+                    <div className="bg-white/90 border border-amber-200 rounded-xl p-2.5 space-y-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-700">
+                          Kullanılacak Puan:
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {(
+                            [
+                              {
+                                label: "%25",
+                                val: Number((maxRedeemablePoints * 0.25).toFixed(2)),
+                              },
+                              {
+                                label: "%50",
+                                val: Number((maxRedeemablePoints * 0.5).toFixed(2)),
+                              },
+                              {
+                                label: "Tamamı",
+                                val: maxRedeemablePoints,
+                              },
+                            ] as const
+                          ).map((preset) => (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() => setCustomLoyaltyPointsToUse(preset.val)}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border transition cursor-pointer ${
+                                Math.abs(loyaltyPointsToUse - preset.val) < 0.05
+                                  ? "bg-amber-600 text-white border-amber-600"
+                                  : "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100"
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={1}
+                          max={maxRedeemablePoints}
+                          step={0.25}
+                          value={loyaltyPointsToUse}
+                          onChange={(e) =>
+                            setCustomLoyaltyPointsToUse(Number(e.target.value))
+                          }
+                          className="flex-1 accent-amber-600 cursor-pointer"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          max={maxRedeemablePoints}
+                          step="0.25"
+                          value={loyaltyPointsToUse}
+                          onChange={(e) =>
+                            setCustomLoyaltyPointsToUse(
+                              Math.max(
+                                0,
+                                Math.min(
+                                  maxRedeemablePoints,
+                                  Number(e.target.value || 0)
+                                )
+                              )
+                            )
+                          }
+                          className="w-20 px-2 py-1 text-right text-xs font-extrabold border border-amber-300 rounded-lg bg-amber-50/50 text-slate-900"
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                        <span>
+                          Harcanan: -{loyaltyPointsToUse.toFixed(2)}{" "}
+                          {settings?.currency}
+                        </span>
+                        <span className="text-amber-800">
+                          Cüzdanda Kalacak:{" "}
+                          {Math.max(
+                            0,
+                            availableUserPoints - loyaltyPointsToUse
+                          ).toFixed(2)}{" "}
+                          {settings?.currency}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <p className="text-[11px] text-amber-700">
                   Puanlarınızı harcayabilmek için en az {minRedeemPoints}{" "}
@@ -6295,17 +6578,46 @@ function CustomerMenuContent() {
           </div>
 
           {orderType === "delivery" && subtotal < currentMinDeliveryAmount && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-2.5 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>
-                <strong>{selectedZone?.name || "Bu bölge"}</strong> için
-                sepetinize{" "}
-                <strong>
-                  {(currentMinDeliveryAmount - subtotal).toFixed(2)}{" "}
-                  {settings?.currency}
-                </strong>{" "}
-                daha ürün eklemelisiniz.
-              </span>
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-xs space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>
+                  <strong>{selectedZone?.name || "Bu bölge"}</strong> için
+                  sepetinize{" "}
+                  <strong>
+                    {(currentMinDeliveryAmount - subtotal).toFixed(2)}{" "}
+                    {settings?.currency}
+                  </strong>{" "}
+                  daha ürün eklemelisiniz.
+                </span>
+              </div>
+              {minOrderTopUpItems.length > 0 && (
+                <div className="pt-1.5 border-t border-amber-200/80 space-y-1.5">
+                  <div className="text-[11px] font-extrabold text-amber-900">
+                    ⚡ Sepeti Hemen Tamamla (Tek Tıkla Ekle):
+                  </div>
+                  <div className="space-y-1">
+                    {minOrderTopUpItems.map((topItem) => (
+                      <div
+                        key={topItem.id}
+                        className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-amber-200/80"
+                      >
+                        <span className="font-bold text-slate-800 truncate pr-2">
+                          {topItem.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickAddUpsell(topItem)}
+                          className="inline-flex items-center gap-1 bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-2 py-1 rounded-md whitespace-nowrap transition cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" /> {topItem.price.toFixed(2)}{" "}
+                          {settings?.currency}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

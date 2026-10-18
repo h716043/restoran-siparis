@@ -247,9 +247,13 @@ export async function PATCH(
               "order_status"
             );
           } else if (updated.status === "rejected") {
+            const refundLine =
+              (updated.loyaltyPointsUsed || 0) > 0
+                ? `\n🎁 Harcadığınız *${Number(updated.loyaltyPointsUsed).toFixed(2)} ${settings.currency}* Para Puan cüzdanınıza iade edilmiştir.`
+                : "";
             const msg = `⚠️ *${settings.name}*\n\nÜzgünüz *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz iptal edildi.\nSebep: ${
               updated.rejectReason || "Yoğunluk"
-            }`;
+            }${refundLine}`;
             await sendWhatsAppMessage(
               updated.customerPhone,
               msg,

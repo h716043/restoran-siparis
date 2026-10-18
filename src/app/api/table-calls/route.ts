@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   createTableCall,
+  getAllTableCalls,
   getTableCalls,
+  isSameTableName,
   resolveTableCall,
 } from "@/lib/db";
 import {
@@ -9,9 +11,23 @@ import {
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await pullActivityFromCloud();
+    const { searchParams } = new URL(req.url);
+    const tableFilter = searchParams.get("table")?.trim();
+    if (tableFilter) {
+      const allCalls = getAllTableCalls();
+      const nowMs = Date.now();
+      const tableCalls = allCalls.filter((c) => {
+        if (!isSameTableName(c.tableNumber, tableFilter)) return false;
+        if (c.status === "pending") return true;
+        // Çözülmüş (resolved) çağrıları da son 3 dakika içinde oluşturulmuşsa müşteriye "Garsonunuz Yolda" geri bildirimi için döndür
+        const createdMs = new Date(c.createdAt).getTime();
+        return Number.isFinite(createdMs) && nowMs - createdMs <= 3 * 60 * 1000;
+      });
+      return NextResponse.json({ calls: tableCalls });
+    }
     const calls = getTableCalls();
     return NextResponse.json({ calls });
   } catch (error) {
