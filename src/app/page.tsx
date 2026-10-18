@@ -149,15 +149,29 @@ function CustomerMenuContent() {
   const [authError, setAuthError] = useState("");
   const [isExistingAccount, setIsExistingAccount] = useState(false);
 
-  // Müşteri Hesabım Modalı
+  // Müşteri Hesabım Modalı & Gelişmiş Adres Formu
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountTab, setAccountTab] = useState<
     "active_orders" | "past_orders" | "addresses"
   >("active_orders");
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
-  const [newAddressTitle, setNewAddressTitle] = useState("");
+  const [newAddressTitle, setNewAddressTitle] = useState("Evim");
   const [newAddressZoneId, setNewAddressZoneId] = useState("");
   const [newAddressFull, setNewAddressFull] = useState("");
+  const [newAddressBuildingNo, setNewAddressBuildingNo] = useState("");
+  const [newAddressFloor, setNewAddressFloor] = useState("");
+  const [newAddressApartmentNo, setNewAddressApartmentNo] = useState("");
+  const [newAddressDirections, setNewAddressDirections] = useState("");
+  const [newAddressCoords, setNewAddressCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [newAddressIsDefault, setNewAddressIsDefault] = useState(false);
+  const [locatingGpsTarget, setLocatingGpsTarget] = useState<
+    "modal" | "checkout" | null
+  >(null);
+  const [gpsFeedback, setGpsFeedback] = useState("");
+  const [autoMatchedZoneHint, setAutoMatchedZoneHint] = useState("");
   const [savingAddress, setSavingAddress] = useState(false);
   const profileMutationLockUntilRef = useRef<number>(0);
 
@@ -187,6 +201,17 @@ function CustomerMenuContent() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
+  const [checkoutBuildingNo, setCheckoutBuildingNo] = useState("");
+  const [checkoutFloor, setCheckoutFloor] = useState("");
+  const [checkoutApartmentNo, setCheckoutApartmentNo] = useState("");
+  const [checkoutDirections, setCheckoutDirections] = useState("");
+  const [checkoutCoords, setCheckoutCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [saveCheckoutAddressToBook, setSaveCheckoutAddressToBook] =
+    useState(true);
+  const [checkoutAddressTitle, setCheckoutAddressTitle] = useState("Evim");
   const [orderNote, setOrderNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);
@@ -376,9 +401,17 @@ function CustomerMenuContent() {
         setResName(parsed.name);
         setResPhone(parsed.phone);
         if (parsed.addresses && parsed.addresses.length > 0) {
-          setCustomerAddress(parsed.addresses[0].fullAddress);
-          if (parsed.addresses[0].zoneId) {
-            setSelectedZoneId(parsed.addresses[0].zoneId);
+          const preferred =
+            parsed.addresses.find((a) => a.isDefault) || parsed.addresses[0];
+          setCustomerAddress(preferred.fullAddress);
+          if (preferred.zoneId) {
+            setSelectedZoneId(preferred.zoneId);
+          }
+          if (
+            typeof preferred.lat === "number" &&
+            typeof preferred.lng === "number"
+          ) {
+            setCheckoutCoords({ lat: preferred.lat, lng: preferred.lng });
           }
         }
         fetchUserProfileAndOrders(parsed.phone);
@@ -688,9 +721,17 @@ function CustomerMenuContent() {
         setResName(user.name);
         setResPhone(user.phone);
         if (user.addresses && user.addresses.length > 0 && !customerAddress) {
-          setCustomerAddress(user.addresses[0].fullAddress);
-          if (user.addresses[0].zoneId) {
-            setSelectedZoneId(user.addresses[0].zoneId);
+          const preferred =
+            user.addresses.find((a) => a.isDefault) || user.addresses[0];
+          setCustomerAddress(preferred.fullAddress);
+          if (preferred.zoneId) {
+            setSelectedZoneId(preferred.zoneId);
+          }
+          if (
+            typeof preferred.lat === "number" &&
+            typeof preferred.lng === "number"
+          ) {
+            setCheckoutCoords({ lat: preferred.lat, lng: preferred.lng });
           }
         }
         fetchUserProfileAndOrders(user.phone);
@@ -715,46 +756,238 @@ function CustomerMenuContent() {
     setCustomerName("");
     setCustomerPhone("");
     setCustomerAddress("");
+    setCheckoutCoords(null);
     setAccountModalOpen(false);
+  };
+
+  const composeStructuredAddressString = useCallback(
+    (
+      streetRaw: string,
+      buildingNo?: string,
+      floor?: string,
+      apartmentNo?: string,
+      directions?: string
+    ) => {
+      const base = streetRaw.trim();
+      if (!base) return "";
+      const detailParts: string[] = [];
+      if (buildingNo?.trim() && !base.includes(`Bina: ${buildingNo.trim()}`)) {
+        detailParts.push(`Bina: ${buildingNo.trim()}`);
+      }
+      if (floor?.trim() && !base.includes(`Kat: ${floor.trim()}`)) {
+        detailParts.push(`Kat: ${floor.trim()}`);
+      }
+      if (apartmentNo?.trim() && !base.includes(`Daire: ${apartmentNo.trim()}`)) {
+        detailParts.push(`Daire: ${apartmentNo.trim()}`);
+      }
+      const detailsStr =
+        detailParts.length > 0 ? ` (${detailParts.join(", ")})` : "";
+      const dirStr =
+        directions?.trim() && !base.includes(directions.trim())
+          ? ` • Tarif: ${directions.trim()}`
+          : "";
+      return `${base}${detailsStr}${dirStr}`;
+    },
+    []
+  );
+
+  // 4. ÖZELLİK: Yazılan veya GPS'ten gelen adresten Mahalle / Teslimat Bölgesini Otomatik Algılama
+  const autoMatchDeliveryZoneFromText = useCallback(
+    (rawText: string, target: "modal" | "checkout") => {
+      if (!rawText || activeZones.length === 0) return null;
+      const normalizedText = rawText
+        .toLocaleLowerCase("tr-TR")
+        .replace(/[^a-z0-9çğıöşü\s]/gi, " ");
+      for (const z of activeZones) {
+        const keywords = z.name
+          .toLocaleLowerCase("tr-TR")
+          .split(/[^a-z0-9çğıöşü]+/i)
+          .map((w) => w.trim())
+          .filter((w) => w.length >= 3 && w !== "ve" && w !== "mah" && w !== "mahallesi");
+        if (keywords.some((kw) => normalizedText.includes(kw))) {
+          if (target === "modal") {
+            setNewAddressZoneId(z.id);
+          } else {
+            setSelectedZoneId(z.id);
+          }
+          setAutoMatchedZoneHint(
+            `✨ Teslimat bölgesi adresinizden otomatik seçildi: ${z.name}`
+          );
+          setTimeout(() => setAutoMatchedZoneHint(""), 5500);
+          return z;
+        }
+      }
+      return null;
+    },
+    [activeZones]
+  );
+
+  // 1. ÖZELLİK: 📍 Mevcut Konumumu Kullan (GPS + OpenStreetMap Nominatim Ters-Geocoding)
+  const handleDetectGpsLocation = useCallback(
+    (target: "modal" | "checkout") => {
+      if (typeof window === "undefined" || !("geolocation" in navigator)) {
+        setGpsFeedback("Tarayıcınız GPS konum özelliğini desteklemiyor.");
+        return;
+      }
+      setLocatingGpsTarget(target);
+      setGpsFeedback("📍 GPS uydusundan konumunuz alınıyor...");
+
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const lat = Number(pos.coords.latitude.toFixed(6));
+          const lng = Number(pos.coords.longitude.toFixed(6));
+          if (target === "modal") {
+            setNewAddressCoords({ lat, lng });
+          } else {
+            setCheckoutCoords({ lat, lng });
+          }
+
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=tr`,
+              { headers: { Accept: "application/json" } }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              const addr = data?.address || {};
+              const neighbourhood =
+                addr.neighbourhood ||
+                addr.suburb ||
+                addr.quarter ||
+                addr.village ||
+                "";
+              const road =
+                addr.road || addr.pedestrian || addr.residential || "";
+              const houseNum = addr.house_number || "";
+              const district =
+                addr.town || addr.city_district || addr.county || "";
+              const city = addr.city || addr.province || "";
+
+              const parts = [
+                neighbourhood,
+                road,
+                houseNum ? `No:${houseNum}` : "",
+                district,
+                city,
+              ].filter(Boolean);
+              const resolvedStreet =
+                parts.length > 0
+                  ? parts.join(", ")
+                  : data?.display_name || `GPS Konumu (${lat}, ${lng})`;
+
+              if (target === "modal") {
+                setNewAddressFull(resolvedStreet);
+                if (houseNum && !newAddressBuildingNo) {
+                  setNewAddressBuildingNo(String(houseNum));
+                }
+              } else {
+                setCustomerAddress(resolvedStreet);
+                if (houseNum && !checkoutBuildingNo) {
+                  setCheckoutBuildingNo(String(houseNum));
+                }
+              }
+
+              autoMatchDeliveryZoneFromText(
+                `${resolvedStreet} ${data?.display_name || ""}`,
+                target
+              );
+              setGpsFeedback(
+                "🎯 Konumunuz ve harita pininiz başarıyla eklendi! Bina/Kat/Daire bilgilerinizi kontrol edin."
+              );
+            } else {
+              setGpsFeedback(
+                `🎯 GPS koordinatınız (${lat}, ${lng}) kaydedildi! Lütfen sokak ve bina bilginizi yazın.`
+              );
+            }
+          } catch {
+            setGpsFeedback(
+              `🎯 GPS koordinatınız (${lat}, ${lng}) kaydedildi! Lütfen açık adresinizi tamamlayın.`
+            );
+          } finally {
+            setLocatingGpsTarget(null);
+            setTimeout(() => setGpsFeedback(""), 6500);
+          }
+        },
+        (err) => {
+          setLocatingGpsTarget(null);
+          if (err.code === 1) {
+            setGpsFeedback(
+              "⚠️ Konum izni reddedildi. Tarayıcı adres çubuğundan konum izni vererek tekrar deneyebilirsiniz."
+            );
+          } else {
+            setGpsFeedback(
+              "⚠️ GPS konumu alınamadı, lütfen adresinizi kutucuğa yazın."
+            );
+          }
+          setTimeout(() => setGpsFeedback(""), 5500);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    },
+    [autoMatchDeliveryZoneFromText, checkoutBuildingNo, newAddressBuildingNo]
+  );
+
+  const handleSelectSavedAddress = (addr: SavedAddress) => {
+    setCustomerAddress(addr.fullAddress);
+    if (addr.zoneId) setSelectedZoneId(addr.zoneId);
+    if (typeof addr.lat === "number" && typeof addr.lng === "number") {
+      setCheckoutCoords({ lat: addr.lat, lng: addr.lng });
+    } else {
+      setCheckoutCoords(null);
+    }
+    setCheckoutBuildingNo("");
+    setCheckoutFloor("");
+    setCheckoutApartmentNo("");
+    setCheckoutDirections("");
   };
 
   const handleStartEditAddress = (addr: SavedAddress) => {
     setEditingAddressId(addr.id);
-    setNewAddressTitle(addr.title || "");
+    setNewAddressTitle(addr.title || "Evim");
     if (addr.zoneId && activeZones.some((z) => z.id === addr.zoneId)) {
       setNewAddressZoneId(addr.zoneId);
     } else if (activeZones.length > 0 && !newAddressZoneId) {
       setNewAddressZoneId(activeZones[0].id);
     }
-    setNewAddressFull(addr.fullAddress || "");
+    setNewAddressFull(addr.streetAddress || addr.fullAddress || "");
+    setNewAddressBuildingNo(addr.buildingNo || "");
+    setNewAddressFloor(addr.floor || "");
+    setNewAddressApartmentNo(addr.apartmentNo || "");
+    setNewAddressDirections(addr.directions || "");
+    setNewAddressCoords(
+      typeof addr.lat === "number" && typeof addr.lng === "number"
+        ? { lat: addr.lat, lng: addr.lng }
+        : null
+    );
+    setNewAddressIsDefault(Boolean(addr.isDefault));
   };
 
   const handleCancelEditAddress = () => {
     setEditingAddressId(null);
-    setNewAddressTitle("");
+    setNewAddressTitle("Evim");
     setNewAddressFull("");
+    setNewAddressBuildingNo("");
+    setNewAddressFloor("");
+    setNewAddressApartmentNo("");
+    setNewAddressDirections("");
+    setNewAddressCoords(null);
+    setNewAddressIsDefault(false);
   };
 
-  const handleAddNewAddress = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser || !newAddressFull.trim()) return;
-    setSavingAddress(true);
+  // 3. ÖZELLİK: ⭐ Varsayılan Adres Yapma
+  const handleSetDefaultAddress = async (addrId: string) => {
+    if (!currentUser) return;
     profileMutationLockUntilRef.current = Date.now() + 6000;
-
-    const zoneObj = activeZones.find((z) => z.id === newAddressZoneId);
-    const targetId = editingAddressId || `addr-${Date.now()}`;
-    const savedAddr: SavedAddress = {
-      id: targetId,
-      title: newAddressTitle.trim() || "Ev / İş Adresim",
-      zoneId: zoneObj?.id,
-      zoneName: zoneObj?.name,
-      fullAddress: newAddressFull.trim(),
-    };
-
     const existingList = currentUser.addresses || [];
-    const updatedAddresses = editingAddressId
-      ? existingList.map((a) => (a.id === editingAddressId ? savedAddr : a))
-      : [savedAddr, ...existingList];
+    const targetAddr = existingList.find((a) => a.id === addrId);
+    if (!targetAddr) return;
+
+    const updatedAddresses = [
+      { ...targetAddr, isDefault: true },
+      ...existingList
+        .filter((a) => a.id !== addrId)
+        .map((a) => ({ ...a, isDefault: false })),
+    ];
 
     const optimisticUser: CustomerUser = {
       ...currentUser,
@@ -766,11 +999,108 @@ function CustomerMenuContent() {
       "restoran_customer_user",
       JSON.stringify(optimisticUser)
     );
-    setCustomerAddress(savedAddr.fullAddress);
-    if (savedAddr.zoneId) setSelectedZoneId(savedAddr.zoneId);
-    setEditingAddressId(null);
-    setNewAddressTitle("");
-    setNewAddressFull("");
+    handleSelectSavedAddress({ ...targetAddr, isDefault: true });
+
+    try {
+      const res = await fetch("/api/auth/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: currentUser.phone,
+          name: currentUser.name,
+          addresses: updatedAddresses,
+        }),
+      });
+      profileMutationLockUntilRef.current = Date.now() + 4000;
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem(
+            "restoran_customer_user",
+            JSON.stringify(data.user)
+          );
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleAddNewAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !newAddressFull.trim()) return;
+    setSavingAddress(true);
+    profileMutationLockUntilRef.current = Date.now() + 6000;
+
+    const matchedZone =
+      autoMatchDeliveryZoneFromText(newAddressFull, "modal") ||
+      activeZones.find((z) => z.id === newAddressZoneId);
+    const zoneObj =
+      activeZones.find((z) => z.id === newAddressZoneId) || matchedZone;
+    const targetId = editingAddressId || `addr-${Date.now()}`;
+    const composedFull = composeStructuredAddressString(
+      newAddressFull,
+      newAddressBuildingNo,
+      newAddressFloor,
+      newAddressApartmentNo,
+      newAddressDirections
+    );
+
+    const existingList = currentUser.addresses || [];
+    const shouldBeDefault =
+      newAddressIsDefault || existingList.length === 0;
+
+    const savedAddr: SavedAddress = {
+      id: targetId,
+      title: newAddressTitle.trim() || "Evim",
+      zoneId: zoneObj?.id,
+      zoneName: zoneObj?.name,
+      fullAddress: composedFull,
+      streetAddress: newAddressFull.trim(),
+      buildingNo: newAddressBuildingNo.trim() || undefined,
+      floor: newAddressFloor.trim() || undefined,
+      apartmentNo: newAddressApartmentNo.trim() || undefined,
+      directions: newAddressDirections.trim() || undefined,
+      lat: newAddressCoords?.lat,
+      lng: newAddressCoords?.lng,
+      isDefault: shouldBeDefault,
+    };
+
+    let updatedAddresses = editingAddressId
+      ? existingList.map((a) =>
+          a.id === editingAddressId
+            ? savedAddr
+            : shouldBeDefault
+            ? { ...a, isDefault: false }
+            : a
+        )
+      : [
+          savedAddr,
+          ...existingList.map((a) =>
+            shouldBeDefault ? { ...a, isDefault: false } : a
+          ),
+        ];
+
+    if (shouldBeDefault) {
+      updatedAddresses = [
+        savedAddr,
+        ...updatedAddresses.filter((a) => a.id !== savedAddr.id),
+      ];
+    }
+
+    const optimisticUser: CustomerUser = {
+      ...currentUser,
+      addresses: updatedAddresses,
+      lastLoginAt: new Date().toISOString(),
+    };
+    setCurrentUser(optimisticUser);
+    localStorage.setItem(
+      "restoran_customer_user",
+      JSON.stringify(optimisticUser)
+    );
+    handleSelectSavedAddress(savedAddr);
+    handleCancelEditAddress();
 
     try {
       const res = await fetch("/api/auth/profile", {
@@ -808,9 +1138,7 @@ function CustomerMenuContent() {
       (a) => a.id !== addrId
     );
     if (editingAddressId === addrId) {
-      setEditingAddressId(null);
-      setNewAddressTitle("");
-      setNewAddressFull("");
+      handleCancelEditAddress();
     }
 
     const optimisticUser: CustomerUser = {
@@ -824,14 +1152,14 @@ function CustomerMenuContent() {
       JSON.stringify(optimisticUser)
     );
     if (updatedAddresses.length > 0) {
+      const nextPreferred =
+        updatedAddresses.find((a) => a.isDefault) || updatedAddresses[0];
       if (!customerAddress || customerAddress === deletedAddr?.fullAddress) {
-        setCustomerAddress(updatedAddresses[0].fullAddress);
-        if (updatedAddresses[0].zoneId) {
-          setSelectedZoneId(updatedAddresses[0].zoneId);
-        }
+        handleSelectSavedAddress(nextPreferred);
       }
     } else if (customerAddress === deletedAddr?.fullAddress) {
       setCustomerAddress("");
+      setCheckoutCoords(null);
     }
 
     try {
@@ -1403,8 +1731,70 @@ function CustomerMenuContent() {
       return;
     }
 
+    const composedCheckoutAddress =
+      orderType === "delivery"
+        ? composeStructuredAddressString(
+            customerAddress,
+            checkoutBuildingNo,
+            checkoutFloor,
+            checkoutApartmentNo,
+            checkoutDirections
+          )
+        : "";
+
     setSubmitting(true);
     try {
+      // 5. ÖZELLİK: Sepet onay ekranında girilen yeni adresi (bina/kat/daire/GPS pini ile birlikte) Adres Defterine kaydet
+      if (
+        orderType === "delivery" &&
+        currentUser &&
+        composedCheckoutAddress &&
+        saveCheckoutAddressToBook
+      ) {
+        const existingList = currentUser.addresses || [];
+        const alreadyExists = existingList.some(
+          (a) => a.fullAddress === composedCheckoutAddress
+        );
+        if (!alreadyExists) {
+          profileMutationLockUntilRef.current = Date.now() + 6000;
+          const newBookEntry: SavedAddress = {
+            id: `addr-${Date.now()}`,
+            title: checkoutAddressTitle.trim() || "Evim",
+            zoneId: selectedZone?.id,
+            zoneName: selectedZone?.name,
+            fullAddress: composedCheckoutAddress,
+            streetAddress: customerAddress.trim(),
+            buildingNo: checkoutBuildingNo.trim() || undefined,
+            floor: checkoutFloor.trim() || undefined,
+            apartmentNo: checkoutApartmentNo.trim() || undefined,
+            directions: checkoutDirections.trim() || undefined,
+            lat: checkoutCoords?.lat,
+            lng: checkoutCoords?.lng,
+            isDefault: existingList.length === 0,
+          };
+          const nextAddresses = [newBookEntry, ...existingList];
+          const optUser: CustomerUser = {
+            ...currentUser,
+            addresses: nextAddresses,
+            lastLoginAt: new Date().toISOString(),
+          };
+          setCurrentUser(optUser);
+          localStorage.setItem(
+            "restoran_customer_user",
+            JSON.stringify(optUser)
+          );
+          await fetch("/api/auth/profile", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phone: currentUser.phone,
+              name: currentUser.name,
+              addresses: nextAddresses,
+            }),
+          }).catch(() => {});
+        }
+      }
+
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1418,8 +1808,13 @@ function CustomerMenuContent() {
             currentUser?.phone || customerPhone || "Masadan Sipariş",
           customerAddress:
             orderType === "delivery"
-              ? `${selectedZone ? `[${selectedZone.name}] ` : ""}${customerAddress}`
+              ? `${selectedZone ? `[${selectedZone.name}] ` : ""}${composedCheckoutAddress}`
               : undefined,
+          customerCoords:
+            orderType === "delivery" && checkoutCoords
+              ? checkoutCoords
+              : undefined,
+          skipAutoAddressInsert: true,
           deliveryZoneId:
             orderType === "delivery" ? selectedZone?.id : undefined,
           deliveryZoneName:
@@ -1457,6 +1852,10 @@ function CustomerMenuContent() {
         setCouponMessage(null);
         setUseLoyaltyPoints(false);
         setDeliveryTiming("asap");
+        setCheckoutBuildingNo("");
+        setCheckoutFloor("");
+        setCheckoutApartmentNo("");
+        setCheckoutDirections("");
         setCheckoutStep("cart");
         setMobileCartOpen(false);
         if (orderType === "dine_in" && tableNumber) {
@@ -4072,29 +4471,97 @@ function CustomerMenuContent() {
                 <div className="space-y-5">
                   <form
                     onSubmit={handleAddNewAddress}
-                    className={`p-4 rounded-2xl border space-y-3 transition ${
+                    className={`p-4 rounded-2xl border space-y-3.5 transition ${
                       editingAddressId
                         ? "bg-orange-50/70 border-orange-300"
                         : "bg-slate-50 border-slate-200"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
                         <Plus className="w-4 h-4 text-orange-600" />
                         {editingAddressId
                           ? "✏️ Seçili Teslimat Adresini Düzenle"
                           : "Yeni Teslimat Adresi Ekle"}
                       </h4>
-                      {editingAddressId && (
+                      <div className="flex items-center gap-2">
+                        {/* 1. ÖZELLİK: 📍 GPS ile Otomatik Adres & Konum Pini */}
                         <button
                           type="button"
-                          onClick={handleCancelEditAddress}
-                          className="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-2.5 py-1 rounded-lg cursor-pointer"
+                          disabled={locatingGpsTarget === "modal"}
+                          onClick={() => handleDetectGpsLocation("modal")}
+                          className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-xl shadow-xs transition cursor-pointer"
                         >
-                          Vazgeç
+                          <MapPin className="w-3.5 h-3.5" />
+                          <span>
+                            {locatingGpsTarget === "modal"
+                              ? "GPS Alınıyor..."
+                              : "📍 Konumumu Bul (GPS)"}
+                          </span>
                         </button>
-                      )}
+                        {editingAddressId && (
+                          <button
+                            type="button"
+                            onClick={handleCancelEditAddress}
+                            className="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-2.5 py-1.5 rounded-xl cursor-pointer"
+                          >
+                            Vazgeç
+                          </button>
+                        )}
+                      </div>
                     </div>
+
+                    {gpsFeedback && (
+                      <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-2">
+                        <span>{gpsFeedback}</span>
+                        {newAddressCoords && (
+                          <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-md whitespace-nowrap">
+                            Pin: {newAddressCoords.lat}, {newAddressCoords.lng}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {autoMatchedZoneHint && (
+                      <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-1.5 rounded-xl text-[11px] font-bold">
+                        {autoMatchedZoneHint}
+                      </div>
+                    )}
+
+                    {/* 3. ÖZELLİK: Tek Tıkla Hazır Başlık Seçici Rozetler */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-bold text-slate-600">
+                        Hızlı Adres Başlığı Seçin veya Yazın *
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { label: "🏠 Evim", value: "Evim" },
+                          { label: "🏢 İş Yerim", value: "İş Yerim" },
+                          { label: "🎓 Kampüs / Yurt", value: "Kampüs / Yurt" },
+                          { label: "❤️ Ailem", value: "Ailem" },
+                          { label: "📍 Diğer", value: "Diğer Adresim" },
+                        ].map((preset) => {
+                          const active =
+                            newAddressTitle.trim().toLowerCase() ===
+                            preset.value.toLowerCase();
+                          return (
+                            <button
+                              key={preset.value}
+                              type="button"
+                              onClick={() => setNewAddressTitle(preset.value)}
+                              className={`text-[11px] font-extrabold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                                active
+                                  ? "bg-orange-600 text-white border-orange-600 shadow-2xs"
+                                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -4106,7 +4573,7 @@ function CustomerMenuContent() {
                           placeholder="Örn: Evim, İş Yerim"
                           value={newAddressTitle}
                           onChange={(e) => setNewAddressTitle(e.target.value)}
-                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white font-semibold"
                         />
                       </div>
                       <div>
@@ -4126,19 +4593,112 @@ function CustomerMenuContent() {
                         </select>
                       </div>
                     </div>
+
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        Açık Adres (Sokak, Bina, Daire, Tarif) *
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[11px] font-bold text-slate-600">
+                          Cadde, Sokak, Apartman / Site Adı *
+                        </label>
+                        {newAddressCoords && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                            🎯 GPS Harita Pini Eklendi
+                            <button
+                              type="button"
+                              onClick={() => setNewAddressCoords(null)}
+                              className="text-slate-400 hover:text-red-600 ml-1"
+                              title="GPS Pinini Kaldır"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        )}
+                      </div>
                       <input
                         type="text"
                         required
-                        placeholder="Örn: Moda Cad. No:15 D:4 Kadıköy"
+                        placeholder="Örn: Caferağa Mah. Moda Cad. Çiçek Apt."
                         value={newAddressFull}
-                        onChange={(e) => setNewAddressFull(e.target.value)}
+                        onChange={(e) => {
+                          setNewAddressFull(e.target.value);
+                          autoMatchDeliveryZoneFromText(e.target.value, "modal");
+                        }}
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
                       />
                     </div>
+
+                    {/* 2. ÖZELLİK: Bina No, Kat, Daire No ve Kurye Yol Tarifi Kutucukları */}
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          🏢 Bina / Kapı No
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Örn: 15"
+                          value={newAddressBuildingNo}
+                          onChange={(e) =>
+                            setNewAddressBuildingNo(e.target.value)
+                          }
+                          className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-xl bg-white font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          🪜 Kat
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Örn: 3"
+                          value={newAddressFloor}
+                          onChange={(e) => setNewAddressFloor(e.target.value)}
+                          className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-xl bg-white font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          🚪 Daire No
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Örn: 8"
+                          value={newAddressApartmentNo}
+                          onChange={(e) =>
+                            setNewAddressApartmentNo(e.target.value)
+                          }
+                          className="w-full px-2.5 py-2 text-xs border border-slate-200 rounded-xl bg-white font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        🧭 Kurye İçin Yol Tarifi / Zil Notu (İsteğe Bağlı)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Örn: Köşedeki eczanenin üstü, bebek uyuyor zile basmayın..."
+                        value={newAddressDirections}
+                        onChange={(e) =>
+                          setNewAddressDirections(e.target.value)
+                        }
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={newAddressIsDefault}
+                        onChange={(e) =>
+                          setNewAddressIsDefault(e.target.checked)
+                        }
+                        className="w-4 h-4 accent-orange-600 rounded"
+                      />
+                      <span>
+                        ⭐ Bu adresi varsayılan teslimat adresim olarak kullan
+                      </span>
+                    </label>
+
                     <div className="flex items-center gap-2">
                       <button
                         type="submit"
@@ -4174,10 +4734,13 @@ function CustomerMenuContent() {
                     {currentUser.addresses.map((addr) => {
                       const isSelected = customerAddress === addr.fullAddress;
                       const isBeingEdited = editingAddressId === addr.id;
+                      const hasGps =
+                        typeof addr.lat === "number" &&
+                        typeof addr.lng === "number";
                       return (
                         <div
                           key={addr.id}
-                          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition ${
+                          className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
                             isBeingEdited
                               ? "border-orange-500 ring-2 ring-orange-500/20 bg-orange-50/60"
                               : isSelected
@@ -4187,33 +4750,77 @@ function CustomerMenuContent() {
                         >
                           <div className="flex items-start gap-2.5">
                             <Home className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <div className="flex items-center gap-2">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="font-bold text-sm text-slate-900">
                                   {addr.title}
                                 </span>
+                                {addr.isDefault && (
+                                  <span className="text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-md">
+                                    ⭐ Varsayılan
+                                  </span>
+                                )}
                                 {addr.zoneName && (
                                   <span className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
                                     {addr.zoneName}
                                   </span>
                                 )}
+                                {hasGps && (
+                                  <span className="text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded">
+                                    🎯 GPS Pinli
+                                  </span>
+                                )}
                               </div>
-                              <p className="text-xs text-slate-600 mt-0.5">
+                              <p className="text-xs text-slate-600">
                                 {addr.fullAddress}
                               </p>
+                              {(addr.buildingNo ||
+                                addr.floor ||
+                                addr.apartmentNo ||
+                                addr.directions) && (
+                                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                  {addr.buildingNo && (
+                                    <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                                      🏢 Bina: {addr.buildingNo}
+                                    </span>
+                                  )}
+                                  {addr.floor && (
+                                    <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                                      🪜 Kat: {addr.floor}
+                                    </span>
+                                  )}
+                                  {addr.apartmentNo && (
+                                    <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                                      🚪 Daire: {addr.apartmentNo}
+                                    </span>
+                                  )}
+                                  {addr.directions && (
+                                    <span className="text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded">
+                                      🧭 {addr.directions}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center justify-end gap-1.5 flex-shrink-0">
+                            {!addr.isDefault && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDefaultAddress(addr.id)}
+                                className="text-[11px] font-bold text-amber-700 hover:bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg transition cursor-pointer"
+                                title="Varsayılan Adres Yap"
+                              >
+                                ⭐ Varsayılan Yap
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => {
-                                setCustomerAddress(addr.fullAddress);
-                                if (addr.zoneId) setSelectedZoneId(addr.zoneId);
-                              }}
+                              onClick={() => handleSelectSavedAddress(addr)}
                               className="text-xs font-bold text-orange-600 hover:underline px-2 py-1 cursor-pointer"
                             >
-                              {isSelected ? "Seçili" : "Seç"}
+                              {isSelected ? "✓ Seçili" : "Seç"}
                             </button>
                             <button
                               type="button"
@@ -5667,55 +6274,208 @@ function CustomerMenuContent() {
         </div>
 
         {orderType === "delivery" && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <label className="block text-xs font-bold text-slate-700">
                 Teslimat Adresiniz *
               </label>
-              {currentUser && (
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    setAccountTab("addresses");
-                    setAccountModalOpen(true);
-                  }}
-                  className="text-[11px] font-bold text-orange-600 hover:underline"
+                  disabled={locatingGpsTarget === "checkout"}
+                  onClick={() => handleDetectGpsLocation("checkout")}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-[11px] font-bold shadow-sm transition cursor-pointer"
                 >
-                  + Yeni Adres Ekle / Yönet
+                  {locatingGpsTarget === "checkout" ? (
+                    <>⏳ Konum Alınıyor...</>
+                  ) : (
+                    <>📍 GPS ile Konumumu Bul</>
+                  )}
                 </button>
-              )}
+                {currentUser && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountTab("addresses");
+                      setAccountModalOpen(true);
+                    }}
+                    className="text-[11px] font-bold text-orange-600 hover:underline px-1.5 py-1"
+                  >
+                    + Adres Defteri
+                  </button>
+                )}
+              </div>
             </div>
+
+            {gpsFeedback && (
+              <div className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between gap-2">
+                <span>{gpsFeedback}</span>
+                {checkoutCoords && (
+                  <span className="text-[10px] font-mono bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded shrink-0">
+                    🎯 Pin Aktif
+                  </span>
+                )}
+              </div>
+            )}
+
+            {autoMatchedZoneHint && (
+              <div className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-800">
+                {autoMatchedZoneHint}
+              </div>
+            )}
 
             {currentUser && currentUser.addresses.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {currentUser.addresses.map((addr) => (
-                  <button
-                    key={addr.id}
-                    type="button"
-                    onClick={() => {
-                      setCustomerAddress(addr.fullAddress);
-                      if (addr.zoneId) setSelectedZoneId(addr.zoneId);
-                    }}
-                    className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${
-                      customerAddress === addr.fullAddress
-                        ? "bg-orange-600 text-white border-orange-600"
-                        : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
-                    }`}
-                  >
-                    📍 {addr.title}
-                  </button>
-                ))}
+                {currentUser.addresses.map((addr) => {
+                  const isSelected = customerAddress.trim() === addr.fullAddress.trim();
+                  return (
+                    <button
+                      key={addr.id}
+                      type="button"
+                      onClick={() => handleSelectSavedAddress(addr)}
+                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
+                        isSelected
+                          ? "bg-orange-600 text-white border-orange-600 shadow-sm"
+                          : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
+                      }`}
+                    >
+                      <span>{addr.isDefault ? "⭐" : "📍"}</span>
+                      <span>{addr.title}</span>
+                      {typeof addr.lat === "number" && typeof addr.lng === "number" && (
+                        <span
+                          className={`text-[9px] px-1 rounded ${
+                            isSelected
+                              ? "bg-white/20 text-white"
+                              : "bg-emerald-100 text-emerald-700"
+                          }`}
+                          title="GPS Konum Pinli"
+                        >
+                          🎯
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
             <textarea
               rows={2}
               required
-              placeholder="Sokak, Bina No, Daire ve Tarif..."
+              placeholder="Mahalle, Cadde, Sokak ve Apartman Adı..."
               value={customerAddress}
-              onChange={(e) => setCustomerAddress(e.target.value)}
+              onChange={(e) => {
+                setCustomerAddress(e.target.value);
+                autoMatchDeliveryZoneFromText(e.target.value, "checkout");
+              }}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
             />
+
+            {/* Yapılandırılmış Bina / Kat / Daire / Tarif Alanları (Yeni adres girilirken veya detay eklenirken) */}
+            {(!currentUser ||
+              !currentUser.addresses.some(
+                (a) => a.fullAddress.trim().toLowerCase() === customerAddress.trim().toLowerCase()
+              )) && (
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 space-y-2">
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                      Bina / Kapı No
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="No: 14"
+                      value={checkoutBuildingNo}
+                      onChange={(e) => setCheckoutBuildingNo(e.target.value)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                      Kat
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Kat: 3"
+                      value={checkoutFloor}
+                      onChange={(e) => setCheckoutFloor(e.target.value)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                      Daire No
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Daire: 8"
+                      value={checkoutApartmentNo}
+                      onChange={(e) => setCheckoutApartmentNo(e.target.value)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="🧭 Kurye İçin Yol Tarifi / Zil Notu (Örn: Köşedeki marketin üstü)"
+                    value={checkoutDirections}
+                    onChange={(e) => setCheckoutDirections(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white"
+                  />
+                </div>
+
+                {currentUser && customerAddress.trim().length > 3 && (
+                  <div className="pt-1 border-t border-slate-200/70 space-y-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={saveCheckoutAddressToBook}
+                        onChange={(e) => setSaveCheckoutAddressToBook(e.target.checked)}
+                        className="w-3.5 h-3.5 accent-orange-600 rounded"
+                      />
+                      <span className="text-[11px] font-bold text-slate-700">
+                        Bu adresi sonraki siparişlerim için Adres Defterime kaydet
+                      </span>
+                    </label>
+
+                    {saveCheckoutAddressToBook && (
+                      <div className="flex items-center gap-1.5 flex-wrap pl-5">
+                        <span className="text-[10px] font-semibold text-slate-500">
+                          Başlık:
+                        </span>
+                        {[
+                          { label: "🏠 Evim", value: "Evim" },
+                          { label: "🏢 İş Yerim", value: "İş Yerim" },
+                          { label: "🎓 Kampüs", value: "Kampüs / Yurt" },
+                          { label: "❤️ Ailem", value: "Ailem" },
+                        ].map((preset) => (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            onClick={() => setCheckoutAddressTitle(preset.value)}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md border transition ${
+                              checkoutAddressTitle === preset.value
+                                ? "bg-orange-600 text-white border-orange-600"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                        <input
+                          type="text"
+                          placeholder="Başlık..."
+                          value={checkoutAddressTitle}
+                          onChange={(e) => setCheckoutAddressTitle(e.target.value)}
+                          className="px-2 py-0.5 text-[11px] border border-slate-200 rounded-md bg-white w-24 font-semibold"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

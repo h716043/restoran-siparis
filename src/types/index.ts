@@ -100,6 +100,10 @@ export interface SplitPaymentInfo {
   creditAccountId?: string;
   creditAccountName?: string;
   posSyncInfo?: PosOrderSyncInfo;
+  customerCoords?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 export interface Order {
@@ -163,10 +167,18 @@ export interface TableReservation {
 
 export interface SavedAddress {
   id: string;
-  title: string; // Ev, İş vb.
+  title: string; // Evim, İş Yerim vb.
   zoneId?: string;
   zoneName?: string;
   fullAddress: string;
+  streetAddress?: string;
+  buildingNo?: string;
+  floor?: string;
+  apartmentNo?: string;
+  directions?: string;
+  lat?: number;
+  lng?: number;
+  isDefault?: boolean;
 }
 
 export interface CustomerUser {

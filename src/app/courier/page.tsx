@@ -781,9 +781,16 @@ export default function CourierPage() {
                     (nowMs - new Date(order.createdAt).getTime()) / 60000
                   )
                 );
-                const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                  order.customerAddress || ""
-                )}`;
+                const exactCoords = order.splitPaymentInfo?.customerCoords;
+                const hasExactGps =
+                  exactCoords &&
+                  typeof exactCoords.lat === "number" &&
+                  typeof exactCoords.lng === "number";
+                const mapsUrl = hasExactGps
+                  ? `https://www.google.com/maps/dir/?api=1&destination=${exactCoords.lat},${exactCoords.lng}`
+                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      order.customerAddress || ""
+                    )}`;
                 const waPhone = normalizeWhatsAppPhone(order.customerPhone);
                 const waLocationUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
                   `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişiniz için kuryeniz yola çıktı 🛵 Adresinizi daha hızlı bulabilmem için bu mesaja WhatsApp üzerinden konum gönderebilir misiniz? 📍`
@@ -904,11 +911,18 @@ export default function CourierPage() {
 
                     {/* Açık Adres Kutusu */}
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
-                      <div className="flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
-                        <MapPin className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
-                        <span className="font-semibold">
-                          {order.customerAddress || "Adres belirtilmedi"}
-                        </span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
+                          <MapPin className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
+                          <span className="font-semibold">
+                            {order.customerAddress || "Adres belirtilmedi"}
+                          </span>
+                        </div>
+                        {hasExactGps && (
+                          <span className="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-md whitespace-nowrap">
+                            🎯 GPS Pinli
+                          </span>
+                        )}
                       </div>
                       {order.orderNote && (
                         <div className="text-xs text-amber-300 bg-amber-950/50 border border-amber-800/50 px-2.5 py-1.5 rounded-lg">
@@ -930,10 +944,18 @@ export default function CourierPage() {
                         href={mapsUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center justify-center gap-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-200 font-bold text-[11px] py-2.5 px-2 rounded-xl border border-blue-800 transition"
+                        className={`flex items-center justify-center gap-1.5 font-bold text-[11px] py-2.5 px-2 rounded-xl border transition ${
+                          hasExactGps
+                            ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border-emerald-600/80 shadow-sm"
+                            : "bg-blue-950/80 hover:bg-blue-900 text-blue-200 border-blue-800"
+                        }`}
                       >
-                        <Navigation className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                        <span>Yol Tarifi</span>
+                        <Navigation
+                          className={`w-3.5 h-3.5 shrink-0 ${
+                            hasExactGps ? "text-emerald-400" : "text-blue-400"
+                          }`}
+                        />
+                        <span>{hasExactGps ? "GPS Pin Rota" : "Yol Tarifi"}</span>
                       </a>
                       <a
                         href={waLocationUrl}

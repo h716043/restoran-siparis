@@ -329,7 +329,9 @@ export async function POST(req: NextRequest) {
       customerRecord = upsertUserAfterOtp(
         body.customerPhone,
         body.customerName,
-        body.orderType === "delivery" ? body.customerAddress : undefined
+        body.orderType === "delivery" && !body.skipAutoAddressInsert
+          ? body.customerAddress
+          : undefined
       );
     }
 
@@ -433,6 +435,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const matchedSavedAddr = (customerRecord?.addresses || []).find(
+      (a) =>
+        a.fullAddress === body.customerAddress &&
+        typeof a.lat === "number" &&
+        typeof a.lng === "number"
+    );
+    const resolvedCoords =
+      body.customerCoords &&
+      typeof body.customerCoords.lat === "number" &&
+      typeof body.customerCoords.lng === "number"
+        ? {
+            lat: Number(body.customerCoords.lat),
+            lng: Number(body.customerCoords.lng),
+          }
+        : matchedSavedAddr &&
+          typeof matchedSavedAddr.lat === "number" &&
+          typeof matchedSavedAddr.lng === "number"
+        ? { lat: matchedSavedAddr.lat, lng: matchedSavedAddr.lng }
+        : undefined;
+
     const order = createOrder({
       orderType: body.orderType,
       tableNumber: body.tableNumber,
@@ -448,12 +470,18 @@ export async function POST(req: NextRequest) {
       orderNote: body.orderNote,
       paymentMethod: body.paymentMethod || "cash",
       splitPaymentInfo:
-        body.paymentMethod === "credit"
+        body.paymentMethod === "credit" || resolvedCoords
           ? {
               cashAmount: 0,
               cardAmount: 0,
-              creditAccountId: body.creditAccountId,
-              creditAccountName: body.creditAccountName || body.customerName,
+              ...(body.paymentMethod === "credit"
+                ? {
+                    creditAccountId: body.creditAccountId,
+                    creditAccountName:
+                      body.creditAccountName || body.customerName,
+                  }
+                : {}),
+              ...(resolvedCoords ? { customerCoords: resolvedCoords } : {}),
             }
           : undefined,
       subtotal: computedSubtotal,
