@@ -6184,37 +6184,39 @@ function CustomerMenuContent() {
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-slate-700">
-                  👥 Hesabı Böl (Alman Usulü):
-                </span>
-                <div className="flex items-center gap-1">
-                  {[1, 2, 3, 4, 5, 6].map((cnt) => (
-                    <button
-                      key={cnt}
-                      type="button"
-                      onClick={() => setSplitPeopleCount(cnt)}
-                      className={`w-6 h-6 rounded-md text-[10px] font-extrabold border transition cursor-pointer ${
-                        splitPeopleCount === cnt
-                          ? "bg-indigo-600 text-white border-indigo-600"
-                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      {cnt === 1 ? "Tek" : `${cnt}K`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {splitPeopleCount > 1 && (
-                <div className="flex items-center justify-between text-xs font-extrabold text-indigo-800 bg-indigo-50/80 border border-indigo-200/70 rounded-lg px-2.5 py-1">
-                  <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
-                  <span>
-                    {(totalAmount / splitPeopleCount).toFixed(2)} {settings?.currency}
+            {orderType === "dine_in" && (
+              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    👥 Hesabı Böl (Alman Usulü):
                   </span>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5, 6].map((cnt) => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setSplitPeopleCount(cnt)}
+                        className={`w-6 h-6 rounded-md text-[10px] font-extrabold border transition cursor-pointer ${
+                          splitPeopleCount === cnt
+                            ? "bg-indigo-600 text-white border-indigo-600"
+                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                        }`}
+                      >
+                        {cnt === 1 ? "Tek" : `${cnt}K`}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              )}
-            </div>
+                {splitPeopleCount > 1 && (
+                  <div className="flex items-center justify-between text-xs font-extrabold text-indigo-800 bg-indigo-50/80 border border-indigo-200/70 rounded-lg px-2.5 py-1">
+                    <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
+                    <span>
+                      {(totalAmount / splitPeopleCount).toFixed(2)} {settings?.currency}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tutar Özeti */}
@@ -6827,7 +6829,7 @@ function CustomerMenuContent() {
               {totalAmount.toFixed(2)} {settings?.currency}
             </span>
           </div>
-          {splitPeopleCount > 1 && (
+          {orderType === "dine_in" && splitPeopleCount > 1 && (
             <div className="flex items-center justify-between text-xs font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1">
               <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
               <span>
