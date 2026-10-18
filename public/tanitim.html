@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Restoran Online Sipariş, Mutfak/Garson POS & SambaPOS V5 — Tanıtım ve Sunum Sayfası</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --card: #0f172a;
+      --card-2: #1e293b;
+      --border: #334155;
+      --primary: #ea580c;
+      --primary-light: #fb923c;
+      --emerald: #10b981;
+      --indigo: #6366f1;
+      --rose: #f43f5e;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.68;
+    }
+
+    /* Üst Gezinme Çubuğu */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(7, 11, 20, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(51, 65, 85, 0.7);
+      padding: 0.9rem 1.5rem;
+    }
+
+    .navbar-inner {
+      max-width: 1320px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-weight: 900;
+      font-size: 1.15rem;
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .brand-icon {
+      width: 2.4rem;
+      height: 2.4rem;
+      border-radius: 0.75rem;
+      background: linear-gradient(135deg, #ea580c, #e11d48);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      box-shadow: 0 6px 18px rgba(234, 88, 12, 0.4);
+    }
+
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .nav-links a {
+      color: #cbd5e1;
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 700;
+      padding: 0.5rem 0.9rem;
+      border-radius: 0.65rem;
+      transition: all 0.2s;
+    }
+
+    .nav-links a:hover {
+      background: rgba(234, 88, 12, 0.2);
+      color: #fdba74;
+    }
+
+    .nav-links a.cta {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .nav-links a.cta:hover {
+      background: #c2410c;
+    }
+
+    /* Hero Bölümü */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 4.5rem 1.5rem 4rem;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(234, 88, 12, 0.22), transparent 42%),
+        radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.16), transparent 45%),
+        linear-gradient(180deg, #070b14 0%, #0f172a 100%);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero-inner {
+      max-width: 1320px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      gap: 2.5rem;
+      align-items: center;
+    }
+
+    @media (max-width: 980px) {
+      .hero-inner {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(234, 88, 12, 0.2);
+      border: 1px solid rgba(251, 146, 60, 0.5);
+      color: #fdba74;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 0.42rem 1rem;
+      border-radius: 999px;
+      margin-bottom: 1.15rem;
+    }
+
+    .hero h1 {
+      font-size: 2.75rem;
+      font-weight: 900;
+      line-height: 1.16;
+      margin-bottom: 1.1rem;
+    }
+
+    .hero h1 span {
+      background: linear-gradient(90deg, #fb923c, #34d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 1.08rem;
+      color: #cbd5e1;
+      margin-bottom: 1.65rem;
+    }
+
+    .hero-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.85rem 1.45rem;
+      border-radius: 0.9rem;
+      font-weight: 800;
+      font-size: 0.92rem;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #ea580c, #e11d48);
+      color: #fff;
+      box-shadow: 0 10px 25px rgba(234, 88, 12, 0.35);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px rgba(234, 88, 12, 0.5);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.9);
+      color: #f8fafc;
+      border: 1px solid #475569;
+    }
+
+    .btn-secondary:hover {
+      border-color: #fb923c;
+      color: #fdba74;
+    }
+
+    .hero-visual {
+      position: relative;
+      border-radius: 1.5rem;
+      overflow: hidden;
+      border: 2px solid rgba(251, 146, 60, 0.5);
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.65);
+      background: #0f172a;
+    }
+
+    .hero-visual img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .hero-stats {
+      max-width: 1320px;
+      margin: 2.75rem auto 0;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.15rem;
+    }
+
+    @media (max-width: 820px) {
+      .hero-stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .stat-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 1.1rem;
+      padding: 1.2rem 1.35rem;
+    }
+
+    .stat-card .num {
+      font-size: 1.65rem;
+      font-weight: 900;
+      color: #fb923c;
+    }
+
+    .stat-card .lbl {
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      font-weight: 600;
+    }
+
+    /* Bölüm kapsayıcıları */
+    .section {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 4.25rem 1.5rem;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+    }
+
+    .section-title-box {
+      text-align: center;
+      max-width: 820px;
+      margin: 0 auto 2.75rem;
+    }
+
+    .section-title-box h2 {
+      font-size: 2.1rem;
+      font-weight: 900;
+      margin-bottom: 0.65rem;
+    }
+
+    .section-title-box p {
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    /* Video Galerisi */
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1080px) {
+      .video-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .video-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.35rem;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .video-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--primary-light);
+    }
+
+    .video-wrapper {
+      position: relative;
+      background: #000;
+      aspect-ratio: 16 / 9;
+      width: 100%;
+    }
+
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .video-body {
+      padding: 1.35rem 1.45rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 0.85rem;
+    }
+
+    .video-tag {
+      display: inline-block;
+      font-size: 0.73rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      background: rgba(234, 88, 12, 0.2);
+      color: #fdba74;
+      border: 1px solid rgba(251, 146, 60, 0.4);
+      width: fit-content;
+    }
+
+    .video-body h3 {
+      font-size: 1.18rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .video-body p {
+      font-size: 0.9rem;
+      color: #94a3b8;
+    }
+
+    /* Görsel Vitrin Grid (AI + Gerçek Ekran Görüntüleri) */
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.75rem;
+    }
+
+    @media (max-width: 900px) {
+      .showcase-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .showcase-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.35rem;
+      overflow: hidden;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .showcase-img-wrap {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      background: #090d16;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .showcase-img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.35s ease;
+      cursor: zoom-in;
+    }
+
+    .showcase-card:hover .showcase-img-wrap img {
+      transform: scale(1.03);
+    }
+
+    .showcase-content {
+      padding: 1.45rem 1.6rem;
+    }
+
+    .showcase-content h3 {
+      font-size: 1.22rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+
+    .showcase-content p {
+      font-size: 0.92rem;
+      color: #cbd5e1;
+      margin-bottom: 0.85rem;
+    }
+
+    .showcase-list {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.45rem;
+      font-size: 0.84rem;
+      color: #94a3b8;
+    }
+
+    .showcase-list li strong {
+      color: #34d399;
+    }
+
+    /* Özellik Kartları (6'lı Grid) */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.35rem;
+    }
+
+    @media (max-width: 980px) {
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .feat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.25rem;
+      padding: 1.5rem;
+      transition: border-color 0.2s;
+    }
+
+    .feat-card:hover {
+      border-color: var(--emerald);
+    }
+
+    .feat-icon {
+      font-size: 1.75rem;
+      margin-bottom: 0.75rem;
+      display: inline-block;
+    }
+
+    .feat-card h4 {
+      font-size: 1.08rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+
+    .feat-card p {
+      font-size: 0.88rem;
+      color: #94a3b8;
+    }
+
+    /* Lightbox (Büyük Resim Önizleme) */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      cursor: zoom-out;
+    }
+
+    .lightbox.open {
+      display: flex;
+    }
+
+    .lightbox img {
+      max-width: 94vw;
+      max-height: 90vh;
+      border-radius: 1rem;
+      border: 2px solid var(--primary);
+      box-shadow: 0 25px 70px rgba(0, 0, 0, 0.9);
+    }
+
+    .footer {
+      text-align: center;
+      padding: 3rem 1.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+      background: #050811;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ÜST BAR -->
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a href="#" class="brand">
+        <span class="brand-icon">🍽️</span>
+        <span>Restoran POS, Mutfak KDS &amp; SambaPOS V5 Ekosistemi</span>
+      </a>
+      <div class="nav-links">
+        <a href="#videolar">🎬 Tanıtım Videoları</a>
+        <a href="#senaryolar">📸 Görsel Galeri</a>
+        <a href="#gercek-ekranlar">🖥️ Canlı Sistem Ekranları</a>
+        <a href="#ozellikler">✨ Tüm Özellikler</a>
+        <a href="KURULUM-VE-KULLANIM-REHBERI.html">📘 Kurulum Rehberi</a>
+        <a href="SISTEM-KULLANIM-KILAVUZU.html" class="cta">📖 Kullanım Kılavuzu</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO ALANI -->
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <div class="badge">🚀 YENİ NESİL HİBRİT RESTORAN OTOMASYONU &amp; ONLİNE SİPARİŞ SİSTEMİ</div>
+        <h1>
+          Komisyonsuz Online Sipariş, <span>Canlı SambaPOS V5</span> ve Mutfak/Garson Otomasyonu
+        </h1>
+        <p>
+          Müşteri vitrininiz <strong>Netlify / Özel Alan Adınız</strong> üzerinde 7/24 kesintisiz sipariş alırken;
+          <strong>Mutfak KDS</strong>, <strong>Garson Cep Terminali</strong>, <strong>Kurye Navigasyon Ekranı</strong>,
+          <strong>Ücretsiz WhatsApp OTP</strong> ve <strong>SambaPOS V5 Canlı Masa Senkronizasyonu</strong>
+          tamamen kendi kasa bilgisayarınızda çalışır.
+        </p>
+        <div class="hero-buttons">
+          <a href="#videolar" class="btn btn-primary">🎬 Tanıtım Videolarını İzle</a>
+          <a href="#gercek-ekranlar" class="btn btn-secondary">🖥️ Canlı Sistem Ekranlarını İncele</a>
+          <a href="http://localhost:5439/admin" target="_blank" class="btn btn-secondary">⚙️ Canlı Demo (Port 5439)</a>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <img
+          data-promo="hero-ecosystem.jpg"
+          src="public/promo/hero-ecosystem.jpg"
+          alt="Restoran Dijital Ekosistemi"
+          onclick="openLightbox(this.src)"
+        />
+      </div>
+    </div>
+
+    <div class="hero-stats">
+      <div class="stat-card">
+        <div class="num">%0 Komisyon</div>
+        <div class="lbl">Kendi Web Sitenizden Masa, Paket ve Gel-Al Sipariş</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">₺0 SMS Maliyeti</div>
+        <div class="lbl">Kendi WhatsApp Numaranızdan Otomatik OTP &amp; Bildirim</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">%100 SambaPOS</div>
+        <div class="lbl">Canlı Masa Durumları, Menü Çekme &amp; Müşteri Aktarımı</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">&lt; 20 ms Hız</div>
+        <div class="lbl">Çift Tıklama Korumalı Mutfak Onayı &amp; 80mm Fiş Basımı</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 1. TANITIM VİDEOLARI BÖLÜMÜ -->
+  <section id="videolar" class="section">
+    <div class="section-title-box">
+      <div class="badge">🎬 HAREKETLİ VİDEO SUNUMLARI</div>
+      <h2>Sistemin Çalışma Akışını Videolarla Keşfedin</h2>
+      <p>
+        Siparişin müşteriden mutfağa, WhatsApp'tan SambaPOS'a ve Garson terminalinden kasaya nasıl aktığını gösteren 3 özel tanıtım videosu:
+      </p>
+    </div>
+
+    <div class="video-grid">
+      <!-- Video 1 -->
+      <div class="video-card">
+        <div class="video-wrapper">
+          <video
+            data-promo-video="tanitim-video-1-siparis-akisi.webm"
+            src="public/promo/tanitim-video-1-siparis-akisi.webm"
+            controls
+            autoplay
+            muted
+            loop
+            playsinline
+          ></video>
+        </div>
+        <div class="video-body">
+          <div>
+            <span class="video-tag">Video 1 • Sipariş &amp; Mutfak Akışı</span>
+            <h3 style="margin-top:0.55rem;">Online &amp; QR Sipariş ➔ WhatsApp OTP ➔ Mutfak Onayı</h3>
+            <p>
+              Müşterinin seçmeli menü/porsiyon siparişi vermesi, 6 haneli ücretsiz WhatsApp OTP doğrulaması, mutfakta çift tıklama korumalı (<code style="color:#fbbf24;">⏳ ONAYLANIYOR...</code>) onay ve otomatik 80mm fiş basımı.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Video 2 -->
+      <div class="video-card">
+        <div class="video-wrapper">
+          <video
+            data-promo-video="tanitim-video-2-sambapos-masalar.webm"
+            src="public/promo/tanitim-video-2-sambapos-masalar.webm"
+            controls
+            autoplay
+            muted
+            loop
+            playsinline
+          ></video>
+        </div>
+        <div class="video-body">
+          <div>
+            <span class="video-tag">Video 2 • Canlı Salon &amp; SambaPOS</span>
+            <h3 style="margin-top:0.55rem;">SambaPOS V5 Canlı Masa Haritası &amp; Alman Usulü Tahsilat</h3>
+            <p>
+              POS modülü açıkken <strong style="color:#fb923c;">Yeni Siparişler</strong>, <strong style="color:#fda4af;">Adisyon İstendi</strong> ve <strong style="color:#34d399;">Hazır</strong> masa durumlarının canlı çekilmesi; erken kalkanın ürünlerini seçip adisyondan düşme ve parçalı ödeme.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Video 3 -->
+      <div class="video-card">
+        <div class="video-wrapper">
+          <video
+            data-promo-video="tanitim-video-3-admin-ve-musteri.webm"
+            src="public/promo/tanitim-video-3-admin-ve-musteri.webm"
+            controls
+            autoplay
+            muted
+            loop
+            playsinline
+          ></video>
+        </div>
+        <div class="video-body">
+          <div>
+            <span class="video-tag">Video 3 • Esnek Yönetim &amp; CRM</span>
+            <h3 style="margin-top:0.55rem;">Sipariş Türü Seçimi, Masa Düzenleme &amp; Müşteri Aktarımı</h3>
+            <p>
+              Admin panelinden <strong>Tek Masa, Tek Paket, Tek Gel-Al</strong> veya ikili/üçlü kanal seçimi, siteden masa isimlerini düzenleme/silme, kayıtlı müşteri arama ve siteden SambaPOS'a müşteri aktarımı.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. GÖRSEL SENARYO VİTRİNİ (AI TANITIM GÖRSELLERİ) -->
+  <section id="senaryolar" class="section">
+    <div class="section-title-box">
+      <div class="badge">📸 SAHA KULLANIM SENARYOLARI</div>
+      <h2>Restoranın Her Noktasında Kusursuz Uyum</h2>
+      <p>
+        Kasa, mutfak, salon garsonları, masadaki müşteriler ve yoldaki kuryeler tek bir merkezden senkronize çalışır.
+        <em>(Görselleri büyütmek için üzerlerine tıklayabilirsiniz).</em>
+      </p>
+    </div>
+
+    <div class="showcase-grid">
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="hero-ecosystem.jpg"
+            src="public/promo/hero-ecosystem.jpg"
+            alt="Uçtan Uca Restoran Dijital Ekosistemi"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>1. Tüm Restoran Tek Ekosistemde</h3>
+          <p>
+            Masada QR okutan müşteri, el terminaliyle sipariş alan garson, 80mm fiş kesen kasa ve mutfak KDS ekranı aynı anda haberleşir.
+          </p>
+          <ul class="showcase-list">
+            <li><strong>✓</strong> 7/24 Açık Netlify Müşteri Vitrini</li>
+            <li><strong>✓</strong> Yerel Kasa PC Güvenliği (Port 5439)</li>
+            <li><strong>✓</strong> Anlık Turso Bulut Senkronizasyonu</li>
+            <li><strong>✓</strong> Çoklu Şube / Yeni Firma Paketi</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="kitchen-kds-pos.jpg"
+            src="public/promo/kitchen-kds-pos.jpg"
+            alt="Mutfak KDS ve Kasa POS Ekranı"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>2. Mutfak KDS, Kasa POS &amp; 80mm Termal Fiş</h3>
+          <p>
+            Yeni sipariş geldiğinde sesli zil çalar, istasyon bazlı (Izgara, Soğuk, İçecek) filtrelenir, tek tıkla onaylanır ve 80mm yazıcıdan otomatik fiş çıkar.
+          </p>
+          <ul class="showcase-list">
+            <li><strong>✓</strong> Çift Tıklama Korumalı Hızlı Onay</li>
+            <li><strong>✓</strong> Kalem Bazlı Hazır (✓) İşaretleme</li>
+            <li><strong>✓</strong> Telefonla Arayan Müşteri Tanıma</li>
+            <li><strong>✓</strong> Alman Usulü &amp; Parçalı Tahsilat</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="waiter-qr-table.jpg"
+            src="public/promo/waiter-qr-table.jpg"
+            alt="Garson Cep Terminali ve Masa QR Sipariş"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>3. Garson Cep Terminali &amp; Masadan QR Sipariş</h3>
+          <p>
+            Garsonlar ek cihaz maliyetine girmeden kendi telefonlarından Wi-Fi ile masalara sipariş girer; müşteriler WhatsApp'tan anlık bildirim alır.
+          </p>
+          <ul class="showcase-list">
+            <li><strong>✓</strong> Garson PIN ile Hızlı Giriş</li>
+            <li><strong>✓</strong> SambaPOS Canlı Masa Durumları</li>
+            <li><strong>✓</strong> Mutfaktan "Tepsi Hazır" Çağrısı</li>
+            <li><strong>✓</strong> Masadan QR Garson / Hesap Çağrısı</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="courier-cloud-sync.jpg"
+            src="public/promo/courier-cloud-sync.jpg"
+            alt="Kurye Teslimat ve Navigasyon Ekranı"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>4. Kurye Cep Terminali &amp; Harita Navigasyonu</h3>
+          <p>
+            Paket kuryeye atandığı anda müşteriye WhatsApp mesajı gider, kurye telefonundan tek tıkla müşteriyi arar veya Google Haritalar yol tarifini açar.
+          </p>
+          <ul class="showcase-list">
+            <li><strong>✓</strong> Kurye PIN ile Kişisel Paket Listesi</li>
+            <li><strong>✓</strong> Tek Tıkla Google Maps Navigasyon</li>
+            <li><strong>✓</strong> Kapıda Nakit / POS Tahsilat Takibi</li>
+            <li><strong>✓</strong> Gün Sonu Kurye Hesap Mutabakatı</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. GERÇEK SİSTEM EKRAN GÖRÜNTÜLERİ -->
+  <section id="gercek-ekranlar" class="section">
+    <div class="section-title-box">
+      <div class="badge">🖥️ GERÇEK UYGULAMA EKRAN GÖRÜNTÜLERİ</div>
+      <h2>Sistemin Canlı Ekranlarından Kareler</h2>
+      <p>
+        SambaPOS V5 canlı masa eşleşmesi, Mutfak canlı masa haritası, Admin sipariş türü (kanal) seçimi ve masa yönetimi ekranları:
+      </p>
+    </div>
+
+    <div class="showcase-grid">
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="gercek-sambapos-masalar.png"
+            src="public/promo/gercek-sambapos-masalar.png"
+            alt="SambaPOS V5 Canlı Masa Ekranı"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>🔌 SambaPOS V5 Canlı Masa Durumları ile Birebir Eşleşme</h3>
+          <p>
+            SambaPOS'taki <strong>B10, B12 (Adisyon İstendi), B19, B29, M14, M15, M30</strong> gibi açık masalar, renk kodları (<code style="color:#fb923c;">#CA6919</code> / <code style="color:#fda4af;">#631816</code>) ve içerisindeki adisyon kalemleriyle birlikte Garson ve Mutfak ekranlarına canlı yansır.
+          </p>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="gercek-mutfak-canli-masalar.png"
+            src="public/promo/gercek-mutfak-canli-masalar.png"
+            alt="Mutfak ve Kasa Canlı Salon Masa Haritası"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>🪑 Mutfak &amp; Kasa Canlı Salon Masa Haritası</h3>
+          <p>
+            POS modülü açıkken SambaPOS'taki masa durumlarını, POS modülü kapalıyken ise standart site masa adisyonlarını tek ekranda gösterir; masa taşıma, birleştirme ve parçalı tahsilat imkanı sunar.
+          </p>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="gercek-admin-kanal-secimi.png"
+            src="public/promo/gercek-admin-kanal-secimi.png"
+            alt="Admin Paneli Sipariş Türü ve Kanal Seçimi"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>🛵🪑🛍️ Esnek Sipariş Türü (Kanal) Seçimi</h3>
+          <p>
+            Admin panelinden ister <strong>Tek Masa</strong>, ister <strong>Tek Paket</strong>, ister <strong>Tek Gel-Al</strong>, isterseniz <strong>Masa+Gel-Al</strong>, <strong>Paket+Gel-Al</strong>, <strong>Masa+Paket</strong> veya <strong>Tümü</strong> kombinasyonlarını tek tıkla aktif edin.
+          </p>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-img-wrap">
+          <img
+            data-promo="gercek-masa-yonetimi.png"
+            src="public/promo/gercek-masa-yonetimi.png"
+            alt="Siteden Masa İsimlerini Ekleme, Düzenleme ve Silme"
+            onclick="openLightbox(this.src)"
+          />
+        </div>
+        <div class="showcase-content">
+          <h3>✏️ Siteden Masa Ekleme, Düzenleme, Silme &amp; POS'a Gönderme</h3>
+          <p>
+            Masa isimlerini (<code style="color:#34d399;">B10-B31, M10-M31</code>) siteden ekleyin, kalem ikonuyla yeniden adlandırın veya silin; yaptığınız değişiklikler otomatik olarak SambaPOS'a ve QR kodlara yansısın.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. TÜM ÖZELLİKLER ÖZETİ -->
+  <section id="ozellikler" class="section">
+    <div class="section-title-box">
+      <div class="badge">✨ ÖNE ÇIKAN TEKNOLOJİLER</div>
+      <h2>Neden Bu Sistemi Tercih Etmelisiniz?</h2>
+      <p>Restoranınızın günlük operasyonunu hızlandıran ve maliyetleri sıfırlayan temel avantajlar:</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feat-card">
+        <span class="feat-icon">🔌</span>
+        <h4>Çift Modlu Masa Yönetimi (POS / Standart)</h4>
+        <p>SambaPOS modülü açıksa masa durumlarını ve açık adisyonları POS'tan canlı çeker; kapalıysa sitenin kendi standart masa adisyon sistemi devreye girer.</p>
+      </div>
+      <div class="feat-card">
+        <span class="feat-icon">📤</span>
+        <h4>Siteden SambaPOS'a Müşteri &amp; Masa Aktarımı</h4>
+        <p>Sitede kayıtlı müşterileri (Ad, Telefon, Adres) ve masa listesini tek yönlü olarak SambaPOS V5 veritabanına otomatik aktarır.</p>
+      </div>
+      <div class="feat-card">
+        <span class="feat-icon">🔍</span>
+        <h4>Hızlı Kayıtlı Müşteri Arama &amp; Seçme</h4>
+        <p>Binlerce müşteri arasında isim, telefon veya adresle anlık arama yaparak Kasa POS siparişinde ve Cari (Veresiye) defterinde tek tıkla müşteri seçin.</p>
+      </div>
+      <div class="feat-card">
+        <span class="feat-icon">🛡️</span>
+        <h4>Mutfakta Çift Tıklama Engeli &amp; Hızlı Onay</h4>
+        <p>Sipariş onaylanırken butonu anında kilitler (⏳ ONAYLANIYOR...), POS ve WhatsApp işlemlerini arka planda yürüterek mükerrer kayıtları önler.</p>
+      </div>
+      <div class="feat-card">
+        <span class="feat-icon">💳</span>
+        <h4>Alman Usulü &amp; Parçalı Tahsilat + Cari Defter</h4>
+        <p>Masadan erken kalkanın yediği ürünleri seçip adisyondan düşün, ikram (0 ₺) yapın, Nakit+Kart bölün veya müşterinin Veresiye/Cari hesabına yazın.</p>
+      </div>
+      <div class="feat-card">
+        <span class="feat-icon">💬</span>
+        <h4>Ücretsiz WhatsApp QR &amp; 80mm Z Raporu</h4>
+        <p>Kendi WhatsApp hattınızdan ücretsiz 6 haneli OTP kodu ve sipariş durumu mesajları gönderin; akşam tek tıkla 80mm termal Z raporu fişi alın.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIGHTBOX -->
+  <div id="lightbox" class="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="Önizleme" />
+  </div>
+
+  <footer class="footer">
+    Restoran Online Sipariş, Mutfak/Garson POS &amp; SambaPOS V5 Tanıtım Sunumu •
+    <a href="KURULUM-VE-KULLANIM-REHBERI.html" style="color:#fb923c;text-decoration:none;font-weight:700;">Kurulum Rehberi</a> •
+    <a href="SISTEM-KULLANIM-KILAVUZU.html" style="color:#34d399;text-decoration:none;font-weight:700;">Kullanım Kılavuzu</a>
+  </footer>
+
+  <script>
+    function openLightbox(src) {
+      const lb = document.getElementById("lightbox");
+      const img = document.getElementById("lightbox-img");
+      img.src = src;
+      lb.classList.add("open");
+    }
+    function closeLightbox() {
+      document.getElementById("lightbox").classList.remove("open");
+    }
+
+    // Dosya hem doğrudan klasörden (file://) hem üst paket klasöründen hem de localhost:5439 üzerinden açıldığında medya yollarını otomatik çözer
+    (function resolvePromoPaths() {
+      const isHttp = location.protocol.startsWith("http");
+      const candidatePrefixes = isHttp
+        ? ["/promo/", "public/promo/"]
+        : ["public/promo/", "restoran-siparis-yeni-firma/public/promo/", "/promo/"];
+
+      document.querySelectorAll("img[data-promo]").forEach((img) => {
+        const file = img.getAttribute("data-promo");
+        let idx = 0;
+        img.onerror = function () {
+          idx++;
+          if (idx < candidatePrefixes.length) {
+            img.src = candidatePrefixes[idx] + file;
+          }
+        };
+        img.src = candidatePrefixes[0] + file;
+      });
+
+      document.querySelectorAll("video[data-promo-video]").forEach((vid) => {
+        const file = vid.getAttribute("data-promo-video");
+        let idx = 0;
+        vid.onerror = function () {
+          idx++;
+          if (idx < candidatePrefixes.length) {
+            vid.src = candidatePrefixes[idx] + file;
+            vid.load();
+            vid.play().catch(() => {});
+          }
+        };
+        vid.src = candidatePrefixes[0] + file;
+      });
+    })();
+  </script>
+</body>
+</html>
