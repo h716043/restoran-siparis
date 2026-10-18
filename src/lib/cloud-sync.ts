@@ -215,6 +215,9 @@ export async function pullActivityFromCloud(force = false): Promise<boolean> {
 export async function syncActivityWithCloud(): Promise<boolean> {
   try {
     if (!resolveTursoCredentials()) return false;
+    if (inFlightPull) {
+      await inFlightPull.catch(() => false);
+    }
     await ensureCloudTable();
 
     // 1. Önce buluttaki mevcut sipariş/rezervasyon/çağrı verilerini çekip yerelle birleştir

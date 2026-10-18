@@ -35,15 +35,17 @@ export async function GET(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    await pullActivityFromCloud(true);
     const body = await req.json();
     const { phone, name, addresses } = body;
     if (!phone) {
       return NextResponse.json({ error: "Telefon gerekli" }, { status: 400 });
     }
-    const updated = updateUserAddresses(phone, name, addresses || []);
+    const cleanAddresses = Array.isArray(addresses) ? addresses : [];
+    await pullActivityFromCloud(true);
+    const updated = updateUserAddresses(phone, name, cleanAddresses);
     await syncActivityWithCloud();
-    return NextResponse.json({ user: updated });
+    const finalUser = getUserByPhone(phone) || updated;
+    return NextResponse.json({ user: finalUser });
   } catch (error) {
     console.error("PUT /api/auth/profile error:", error);
     return NextResponse.json({ error: "Profil güncellenemedi" }, { status: 500 });

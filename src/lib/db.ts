@@ -2282,10 +2282,13 @@ export function adjustUserLoyaltyPoints(
     0,
     Math.round(((user.loyaltyPoints || 0) + delta) * 100) / 100
   );
-  db.prepare("UPDATE users SET loyaltyPoints = ? WHERE phone = ?").run(
-    nextPoints,
-    phone
-  );
+  const prevMs = user.lastLoginAt ? Date.parse(user.lastLoginAt) : 0;
+  const now = new Date(
+    Math.max(Date.now(), (Number.isFinite(prevMs) ? prevMs : 0) + 1)
+  ).toISOString();
+  db.prepare(
+    "UPDATE users SET loyaltyPoints = ?, lastLoginAt = ? WHERE phone = ?"
+  ).run(nextPoints, now, phone);
   return getUserByPhone(phone);
 }
 
@@ -2297,7 +2300,10 @@ export function upsertUserAfterOtp(
   const db = getDb();
   const phone = normalizePhone(rawPhone);
   const existing = getUserByPhone(phone);
-  const now = new Date().toISOString();
+  const prevMs = existing?.lastLoginAt ? Date.parse(existing.lastLoginAt) : 0;
+  const now = new Date(
+    Math.max(Date.now(), (Number.isFinite(prevMs) ? prevMs : 0) + 1)
+  ).toISOString();
 
   if (existing) {
     const updatedName = name?.trim() ? name.trim() : existing.name;
@@ -2355,9 +2361,37 @@ export function updateUserAddresses(
 ): CustomerUser | null {
   const db = getDb();
   const phone = normalizePhone(rawPhone);
-  db.prepare(`
-    UPDATE users SET name = ?, addressesJson = ? WHERE phone = ?
-  `).run(name, JSON.stringify(addresses), phone);
+  const existing = getUserByPhone(phone);
+  const prevMs = existing?.lastLoginAt ? Date.parse(existing.lastLoginAt) : 0;
+  const now = new Date(
+    Math.max(Date.now(), (Number.isFinite(prevMs) ? prevMs : 0) + 1)
+  ).toISOString();
+
+  if (existing) {
+    db.prepare(`
+      UPDATE users
+      SET name = ?, addressesJson = ?, lastLoginAt = ?
+      WHERE phone = ?
+    `).run(
+      name?.trim() || existing.name,
+      JSON.stringify(addresses || []),
+      now,
+      phone
+    );
+  } else {
+    const id = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    db.prepare(`
+      INSERT INTO users (id, phone, name, addressesJson, loyaltyPoints, createdAt, lastLoginAt)
+      VALUES (?, ?, ?, ?, 0, ?, ?)
+    `).run(
+      id,
+      phone,
+      name?.trim() || "Değerli Müşterimiz",
+      JSON.stringify(addresses || []),
+      now,
+      now
+    );
+  }
   return getUserByPhone(phone);
 }
 
@@ -2634,10 +2668,10 @@ export function mergeActivityFromCloud(payload: {
       INSERT INTO users (id, phone, name, addressesJson, loyaltyPoints, createdAt, lastLoginAt)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(phone) DO UPDATE SET
-        name = excluded.name,
-        addressesJson = excluded.addressesJson,
-        loyaltyPoints = CASE WHEN excluded.lastLoginAt >= users.lastLoginAt THEN excluded.loyaltyPoints ELSE users.loyaltyPoints END,
-        lastLoginAt = CASE WHEN excluded.lastLoginAt >= users.lastLoginAt THEN excluded.lastLoginAt ELSE users.lastLoginAt END
+        name = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.name ELSE users.name END,
+        addressesJson = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.addressesJson ELSE users.addressesJson END,
+        loyaltyPoints = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.loyaltyPoints ELSE users.loyaltyPoints END,
+        lastLoginAt = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.lastLoginAt ELSE users.lastLoginAt END
     `);
     for (const u of payload.users) {
       upsertUser.run(

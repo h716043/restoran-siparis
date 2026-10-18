@@ -6,6 +6,7 @@ import React, {
   useMemo,
   Suspense,
   useCallback,
+  useRef,
 } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -153,10 +154,12 @@ function CustomerMenuContent() {
   const [accountTab, setAccountTab] = useState<
     "active_orders" | "past_orders" | "addresses"
   >("active_orders");
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [newAddressTitle, setNewAddressTitle] = useState("");
   const [newAddressZoneId, setNewAddressZoneId] = useState("");
   const [newAddressFull, setNewAddressFull] = useState("");
   const [savingAddress, setSavingAddress] = useState(false);
+  const profileMutationLockUntilRef = useRef<number>(0);
 
   // Simülasyon modunda ekranda beliren gerçekçi WhatsApp mesaj bildirimi
   const [simulatedWaPopup, setSimulatedWaPopup] = useState<{
@@ -330,6 +333,7 @@ function CustomerMenuContent() {
 
   const fetchUserProfileAndOrders = useCallback(async (phone: string) => {
     if (!phone) return;
+    const reqStartTime = Date.now();
     try {
       const [profRes, resvRes] = await Promise.all([
         fetch(`/api/auth/profile?phone=${encodeURIComponent(phone)}`),
@@ -337,7 +341,11 @@ function CustomerMenuContent() {
       ]);
       if (profRes.ok) {
         const data = await profRes.json();
-        if (data.user) {
+        if (
+          data.user &&
+          Date.now() > profileMutationLockUntilRef.current &&
+          reqStartTime > profileMutationLockUntilRef.current
+        ) {
           setCurrentUser(data.user);
           localStorage.setItem(
             "restoran_customer_user",
@@ -710,21 +718,59 @@ function CustomerMenuContent() {
     setAccountModalOpen(false);
   };
 
+  const handleStartEditAddress = (addr: SavedAddress) => {
+    setEditingAddressId(addr.id);
+    setNewAddressTitle(addr.title || "");
+    if (addr.zoneId && activeZones.some((z) => z.id === addr.zoneId)) {
+      setNewAddressZoneId(addr.zoneId);
+    } else if (activeZones.length > 0 && !newAddressZoneId) {
+      setNewAddressZoneId(activeZones[0].id);
+    }
+    setNewAddressFull(addr.fullAddress || "");
+  };
+
+  const handleCancelEditAddress = () => {
+    setEditingAddressId(null);
+    setNewAddressTitle("");
+    setNewAddressFull("");
+  };
+
   const handleAddNewAddress = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !newAddressFull.trim()) return;
     setSavingAddress(true);
+    profileMutationLockUntilRef.current = Date.now() + 6000;
 
     const zoneObj = activeZones.find((z) => z.id === newAddressZoneId);
-    const newAddr: SavedAddress = {
-      id: `addr-${Date.now()}`,
+    const targetId = editingAddressId || `addr-${Date.now()}`;
+    const savedAddr: SavedAddress = {
+      id: targetId,
       title: newAddressTitle.trim() || "Ev / İş Adresim",
       zoneId: zoneObj?.id,
       zoneName: zoneObj?.name,
       fullAddress: newAddressFull.trim(),
     };
 
-    const updatedAddresses = [newAddr, ...(currentUser.addresses || [])];
+    const existingList = currentUser.addresses || [];
+    const updatedAddresses = editingAddressId
+      ? existingList.map((a) => (a.id === editingAddressId ? savedAddr : a))
+      : [savedAddr, ...existingList];
+
+    const optimisticUser: CustomerUser = {
+      ...currentUser,
+      addresses: updatedAddresses,
+      lastLoginAt: new Date().toISOString(),
+    };
+    setCurrentUser(optimisticUser);
+    localStorage.setItem(
+      "restoran_customer_user",
+      JSON.stringify(optimisticUser)
+    );
+    setCustomerAddress(savedAddr.fullAddress);
+    if (savedAddr.zoneId) setSelectedZoneId(savedAddr.zoneId);
+    setEditingAddressId(null);
+    setNewAddressTitle("");
+    setNewAddressFull("");
 
     try {
       const res = await fetch("/api/auth/profile", {
@@ -736,17 +782,16 @@ function CustomerMenuContent() {
           addresses: updatedAddresses,
         }),
       });
+      profileMutationLockUntilRef.current = Date.now() + 4000;
       if (res.ok) {
         const data = await res.json();
-        setCurrentUser(data.user);
-        localStorage.setItem(
-          "restoran_customer_user",
-          JSON.stringify(data.user)
-        );
-        setCustomerAddress(newAddr.fullAddress);
-        if (newAddr.zoneId) setSelectedZoneId(newAddr.zoneId);
-        setNewAddressTitle("");
-        setNewAddressFull("");
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem(
+            "restoran_customer_user",
+            JSON.stringify(data.user)
+          );
+        }
       }
     } finally {
       setSavingAddress(false);
@@ -755,28 +800,63 @@ function CustomerMenuContent() {
 
   const handleDeleteAddress = async (addrId: string) => {
     if (!currentUser) return;
-    const updatedAddresses = currentUser.addresses.filter(
+    profileMutationLockUntilRef.current = Date.now() + 6000;
+    const deletedAddr = (currentUser.addresses || []).find(
+      (a) => a.id === addrId
+    );
+    const updatedAddresses = (currentUser.addresses || []).filter(
       (a) => a.id !== addrId
     );
-    const res = await fetch("/api/auth/profile", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone: currentUser.phone,
-        name: currentUser.name,
-        addresses: updatedAddresses,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setCurrentUser(data.user);
-      localStorage.setItem(
-        "restoran_customer_user",
-        JSON.stringify(data.user)
-      );
-      if (data.user.addresses.length > 0) {
-        setCustomerAddress(data.user.addresses[0].fullAddress);
+    if (editingAddressId === addrId) {
+      setEditingAddressId(null);
+      setNewAddressTitle("");
+      setNewAddressFull("");
+    }
+
+    const optimisticUser: CustomerUser = {
+      ...currentUser,
+      addresses: updatedAddresses,
+      lastLoginAt: new Date().toISOString(),
+    };
+    setCurrentUser(optimisticUser);
+    localStorage.setItem(
+      "restoran_customer_user",
+      JSON.stringify(optimisticUser)
+    );
+    if (updatedAddresses.length > 0) {
+      if (!customerAddress || customerAddress === deletedAddr?.fullAddress) {
+        setCustomerAddress(updatedAddresses[0].fullAddress);
+        if (updatedAddresses[0].zoneId) {
+          setSelectedZoneId(updatedAddresses[0].zoneId);
+        }
       }
+    } else if (customerAddress === deletedAddr?.fullAddress) {
+      setCustomerAddress("");
+    }
+
+    try {
+      const res = await fetch("/api/auth/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: currentUser.phone,
+          name: currentUser.name,
+          addresses: updatedAddresses,
+        }),
+      });
+      profileMutationLockUntilRef.current = Date.now() + 4000;
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem(
+            "restoran_customer_user",
+            JSON.stringify(data.user)
+          );
+        }
+      }
+    } catch {
+      // ignore
     }
   };
 
@@ -3992,12 +4072,29 @@ function CustomerMenuContent() {
                 <div className="space-y-5">
                   <form
                     onSubmit={handleAddNewAddress}
-                    className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3"
+                    className={`p-4 rounded-2xl border space-y-3 transition ${
+                      editingAddressId
+                        ? "bg-orange-50/70 border-orange-300"
+                        : "bg-slate-50 border-slate-200"
+                    }`}
                   >
-                    <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
-                      <Plus className="w-4 h-4 text-orange-600" />
-                      Yeni Teslimat Adresi Ekle
-                    </h4>
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                        <Plus className="w-4 h-4 text-orange-600" />
+                        {editingAddressId
+                          ? "✏️ Seçili Teslimat Adresini Düzenle"
+                          : "Yeni Teslimat Adresi Ekle"}
+                      </h4>
+                      {editingAddressId && (
+                        <button
+                          type="button"
+                          onClick={handleCancelEditAddress}
+                          className="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-2.5 py-1 rounded-lg cursor-pointer"
+                        >
+                          Vazgeç
+                        </button>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -4042,15 +4139,32 @@ function CustomerMenuContent() {
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
                       />
                     </div>
-                    <button
-                      type="submit"
-                      disabled={savingAddress}
-                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition"
-                    >
-                      {savingAddress
-                        ? "Kaydediliyor..."
-                        : "+ Adres Defterime Kaydet"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="submit"
+                        disabled={savingAddress}
+                        className={`${
+                          editingAddressId
+                            ? "bg-orange-600 hover:bg-orange-700"
+                            : "bg-slate-900 hover:bg-slate-800"
+                        } text-white text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer`}
+                      >
+                        {savingAddress
+                          ? "Kaydediliyor..."
+                          : editingAddressId
+                          ? "✓ Adres Değişikliğini Kaydet"
+                          : "+ Adres Defterime Kaydet"}
+                      </button>
+                      {editingAddressId && (
+                        <button
+                          type="button"
+                          onClick={handleCancelEditAddress}
+                          className="text-xs font-bold text-slate-600 hover:text-slate-900 px-3 py-2.5 rounded-xl border border-slate-300 bg-white cursor-pointer"
+                        >
+                          İptal
+                        </button>
+                      )}
+                    </div>
                   </form>
 
                   <div className="space-y-2.5">
@@ -4059,11 +4173,14 @@ function CustomerMenuContent() {
                     </h4>
                     {currentUser.addresses.map((addr) => {
                       const isSelected = customerAddress === addr.fullAddress;
+                      const isBeingEdited = editingAddressId === addr.id;
                       return (
                         <div
                           key={addr.id}
                           className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition ${
-                            isSelected
+                            isBeingEdited
+                              ? "border-orange-500 ring-2 ring-orange-500/20 bg-orange-50/60"
+                              : isSelected
                               ? "border-orange-500 bg-orange-50/40"
                               : "border-slate-200 bg-white"
                           }`}
@@ -4087,21 +4204,30 @@ function CustomerMenuContent() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => {
                                 setCustomerAddress(addr.fullAddress);
                                 if (addr.zoneId) setSelectedZoneId(addr.zoneId);
                               }}
-                              className="text-xs font-bold text-orange-600 hover:underline px-2 py-1"
+                              className="text-xs font-bold text-orange-600 hover:underline px-2 py-1 cursor-pointer"
                             >
                               {isSelected ? "Seçili" : "Seç"}
                             </button>
                             <button
                               type="button"
+                              onClick={() => handleStartEditAddress(addr)}
+                              className="text-xs font-bold text-slate-700 hover:text-orange-700 bg-slate-100 hover:bg-orange-100 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                              title="Adresi Düzenle"
+                            >
+                              Düzenle
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDeleteAddress(addr.id)}
-                              className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg"
+                              className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer"
+                              title="Adresi Sil"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
