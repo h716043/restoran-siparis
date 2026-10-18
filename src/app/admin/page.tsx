@@ -256,7 +256,10 @@ export default function AdminDashboardPage() {
   const [bulkCategoryId, setBulkCategoryId] = useState("all");
   const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
   const [bulkValue, setBulkValue] = useState<number>(10);
-  const [bulkRounding, setBulkRounding] = useState<"none" | "nearest_5" | "nearest_10">("nearest_5");
+  const [bulkRounding, setBulkRounding] = useState<
+    "none" | "nearest_1" | "nearest_5" | "nearest_10"
+  >("nearest_5");
+  const [bulkIncludeModifiers, setBulkIncludeModifiers] = useState(true);
   const [bulkUpdating, setBulkUpdating] = useState(false);
 
   // 🪑 Masa Yönetimi (Ekleme / İsim Düzenleme / Silme / SambaPOS Eşitleme) State'leri
@@ -3974,11 +3977,36 @@ export default function AdminDashboardPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
-                      🏷️ Toplu Fiyat Güncelleme (Tek Tıkla Zam / İndirim)
+                      🏷️ Toplu Fiyat Güncelleme (Tek Tıkla Zam / İndirim & Canlı Önizleme)
                     </h3>
                     <p className="text-xs text-slate-500">
                       Tüm menüye veya seçili kategoriye yüzdelik (%) ya da sabit tutar (₺) bazında toplu fiyat güncellemesi uygulayın.
                     </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {[
+                      { label: "+%10 Zam", mode: "percent" as const, val: 10 },
+                      { label: "+%15 Zam", mode: "percent" as const, val: 15 },
+                      { label: "+%20 Zam", mode: "percent" as const, val: 20 },
+                      { label: "-%10 İndirim", mode: "percent" as const, val: -10 },
+                      { label: "+20 ₺", mode: "fixed" as const, val: 20 },
+                    ].map((pr) => (
+                      <button
+                        key={pr.label}
+                        type="button"
+                        onClick={() => {
+                          setBulkMode(pr.mode);
+                          setBulkValue(pr.val);
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-extrabold border transition cursor-pointer ${
+                          bulkMode === pr.mode && Number(bulkValue) === pr.val
+                            ? "bg-orange-600 text-white border-orange-600"
+                            : "bg-white hover:bg-orange-50 text-slate-700 border-orange-200"
+                        }`}
+                      >
+                        {pr.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-end">
@@ -4035,13 +4063,18 @@ export default function AdminDashboardPage() {
                       value={bulkRounding}
                       onChange={(e) =>
                         setBulkRounding(
-                          e.target.value as "none" | "nearest_5" | "nearest_10"
+                          e.target.value as
+                            | "none"
+                            | "nearest_1"
+                            | "nearest_5"
+                            | "nearest_10"
                         )
                       }
                       className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white"
                     >
                       <option value="nearest_5">En Yakın 5 ₺&apos;ye Yuvarla</option>
                       <option value="nearest_10">En Yakın 10 ₺&apos;ye Yuvarla</option>
+                      <option value="nearest_1">En Yakın 1 ₺&apos;ye Yuvarla (Tam TL)</option>
                       <option value="none">Yuvarlama Yapma (Tam Kuruş)</option>
                     </select>
                   </div>
@@ -4062,6 +4095,7 @@ export default function AdminDashboardPage() {
                               mode: bulkMode,
                               value: Number(bulkValue),
                               rounding: bulkRounding,
+                              includeModifiers: bulkIncludeModifiers,
                             }),
                           });
                           if (res.ok) {
@@ -4080,6 +4114,70 @@ export default function AdminDashboardPage() {
                       {bulkUpdating ? "Uygulanıyor..." : "⚡ Fiyatları Güncelle"}
                     </button>
                   </div>
+                </div>
+
+                {/* Opsiyon Fiyatları Dahil Etme Seçeneği ve Canlı Örnek Önizleme */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-orange-200/60 text-xs">
+                  <label className="inline-flex items-center gap-2 font-bold text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={bulkIncludeModifiers}
+                      onChange={(e) =>
+                        setBulkIncludeModifiers(e.target.checked)
+                      }
+                      className="w-4 h-4 accent-orange-600 rounded"
+                    />
+                    <span>
+                      🍽️ Porsiyon farkları ve ücretli ekstra malzeme fiyatlarına da aynı oranı uygula
+                    </span>
+                  </label>
+
+                  {Boolean(bulkValue) && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-extrabold text-orange-900">
+                        🔍 Canlı Önizleme:
+                      </span>
+                      {items
+                        .filter(
+                          (i) =>
+                            bulkCategoryId === "all" ||
+                            i.categoryId === bulkCategoryId
+                        )
+                        .slice(0, 3)
+                        .map((sample) => {
+                          let nextP =
+                            bulkMode === "percent"
+                              ? sample.price * (1 + Number(bulkValue) / 100)
+                              : sample.price + Number(bulkValue);
+                          if (bulkRounding === "nearest_1") {
+                            nextP = Math.round(nextP);
+                          } else if (bulkRounding === "nearest_5") {
+                            nextP = Math.round(nextP / 5) * 5;
+                          } else if (bulkRounding === "nearest_10") {
+                            nextP = Math.round(nextP / 10) * 10;
+                          } else {
+                            nextP = Math.round(nextP * 100) / 100;
+                          }
+                          nextP = Math.max(1, nextP);
+                          return (
+                            <span
+                              key={sample.id}
+                              className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-orange-200 text-[11px]"
+                            >
+                              <strong className="text-slate-700 truncate max-w-[110px]">
+                                {sample.name}:
+                              </strong>
+                              <span className="line-through text-slate-400">
+                                {sample.price}₺
+                              </span>
+                              <span className="font-black text-emerald-700">
+                                → {nextP}₺
+                              </span>
+                            </span>
+                          );
+                        })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -7228,7 +7326,7 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Varsayılan Min. Paket ({settings.currency})
@@ -7259,6 +7357,27 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                     })
                   }
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-emerald-700 mb-1">
+                  🎉 Ücretsiz Getirme Barajı ({settings.currency})
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="0 = Kapalı (Örn: 600)"
+                  value={settings.freeDeliveryThreshold || 0}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      freeDeliveryThreshold: Math.max(
+                        0,
+                        Number(e.target.value) || 0
+                      ),
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border border-emerald-300 bg-emerald-50/40 rounded-xl font-bold text-emerald-950"
                 />
               </div>
               <div>

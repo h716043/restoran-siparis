@@ -1073,32 +1073,59 @@ export function bulkUpdateMenuPrices(params: {
   categoryId?: string;
   mode: "percent" | "fixed";
   value: number;
-  rounding?: "none" | "nearest_5" | "nearest_10";
+  rounding?: "none" | "nearest_1" | "nearest_5" | "nearest_10";
+  includeModifiers?: boolean;
 }): MenuItem[] {
   const db = getDb();
   const items = getMenuItems();
-  const applyPriceChange = (oldPrice: number) => {
+  const applyPriceChange = (oldPrice: number, minFloor = 5) => {
     let next =
       params.mode === "percent"
         ? oldPrice * (1 + params.value / 100)
         : oldPrice + params.value;
-    next = Math.max(5, next);
-    if (params.rounding === "nearest_5") {
+    next = Math.max(minFloor, next);
+    if (params.rounding === "nearest_1") {
+      next = Math.round(next);
+    } else if (params.rounding === "nearest_5") {
       next = Math.round(next / 5) * 5;
     } else if (params.rounding === "nearest_10") {
       next = Math.round(next / 10) * 10;
     } else {
       next = Math.round(next * 100) / 100;
     }
-    return Math.max(5, next);
+    return Math.max(minFloor, next);
   };
 
   for (const item of items) {
-    if (params.categoryId && params.categoryId !== "all" && item.categoryId !== params.categoryId) {
+    if (
+      params.categoryId &&
+      params.categoryId !== "all" &&
+      item.categoryId !== params.categoryId
+    ) {
       continue;
     }
-    const newPrice = applyPriceChange(item.price);
-    db.prepare("UPDATE menu_items SET price = ? WHERE id = ?").run(newPrice, item.id);
+    const newPrice = applyPriceChange(item.price, 5);
+    if (params.includeModifiers && item.modifierGroups?.length) {
+      const updatedGroups = item.modifierGroups.map((g) => ({
+        ...g,
+        options: (g.options || []).map((opt) => ({
+          ...opt,
+          price: opt.price > 0 ? applyPriceChange(opt.price, 1) : opt.price,
+          subOptions: opt.subOptions?.map((sub) => ({
+            ...sub,
+            price: sub.price > 0 ? applyPriceChange(sub.price, 1) : sub.price,
+          })),
+        })),
+      }));
+      db.prepare(
+        "UPDATE menu_items SET price = ?, modifierGroupsJson = ? WHERE id = ?"
+      ).run(newPrice, JSON.stringify(updatedGroups), item.id);
+    } else {
+      db.prepare("UPDATE menu_items SET price = ? WHERE id = ?").run(
+        newPrice,
+        item.id
+      );
+    }
   }
   return getMenuItems();
 }
@@ -1460,6 +1487,30 @@ export function submitOrderReview(
     SET rating = ?, reviewText = ?, reviewedAt = ?, updatedAt = ?
     WHERE id = ?
   `).run(cleanRating, reviewText?.trim() || null, now, now, orderId);
+
+  return getOrderById(orderId);
+}
+
+/** Müşterinin henüz hazırlanmakta olan veya bekleyen siparişine sonradan ek not iletmesini sağlar */
+export function appendOrderCustomerNote(
+  orderId: string,
+  additionalNote: string
+): Order | null {
+  const db = getDb();
+  const existing = getOrderById(orderId);
+  if (!existing) return null;
+  const cleanAdd = additionalNote.trim();
+  if (!cleanAdd) return existing;
+  const now = new Date().toISOString();
+  const nextNote = existing.orderNote
+    ? `${existing.orderNote} | 📝 Müşteri Ek Notu: ${cleanAdd}`
+    : `📝 Müşteri Notu: ${cleanAdd}`;
+
+  db.prepare(`
+    UPDATE orders
+    SET orderNote = ?, updatedAt = ?
+    WHERE id = ?
+  `).run(nextNote, now, orderId);
 
   return getOrderById(orderId);
 }

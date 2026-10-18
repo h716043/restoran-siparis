@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import Link from "next/link";
 import {
   Bell,
@@ -1363,6 +1363,22 @@ export default function KitchenTabletPage() {
     (r) => r.status === "pending"
   );
 
+  // 👨‍🍳 Müşteri Sipariş Geçmişi & VIP Rozeti Hesaplaması (Telefon Numarasına Göre)
+  const customerStatsByPhone = useMemo(() => {
+    const map = new Map<string, { orderCount: number; totalSpent: number }>();
+    for (const o of orders) {
+      if (o.status === "rejected") continue;
+      const digits = (o.customerPhone || "").replace(/\D/g, "");
+      if (digits.length < 10) continue;
+      const norm = digits.slice(-10);
+      const prev = map.get(norm) || { orderCount: 0, totalSpent: 0 };
+      prev.orderCount += 1;
+      prev.totalSpent += o.totalAmount || 0;
+      map.set(norm, prev);
+    }
+    return map;
+  }, [orders]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Üst Tablet Kontrol Barı */}
@@ -2082,8 +2098,40 @@ export default function KitchenTabletPage() {
                               )}
                             </span>
                           </div>
-                          <div className="font-bold text-base mt-1">
-                            {order.customerName}
+                          <div className="font-bold text-base mt-1 flex flex-wrap items-center gap-2">
+                            <span>{order.customerName}</span>
+                            {(() => {
+                              const digits = (order.customerPhone || "").replace(
+                                /\D/g,
+                                ""
+                              );
+                              if (digits.length < 10) return null;
+                              const st = customerStatsByPhone.get(
+                                digits.slice(-10)
+                              );
+                              if (!st) return null;
+                              if (st.orderCount === 1) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-full">
+                                    🌟 İlk Siparişi!
+                                  </span>
+                                );
+                              }
+                              if (st.orderCount >= 5) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-purple-500/25 text-purple-200 border border-purple-400/50 px-2.5 py-0.5 rounded-full shadow-2xs">
+                                    👑 VIP Müşteri ({st.orderCount}. Sipariş •{" "}
+                                    {st.totalSpent.toFixed(0)}{" "}
+                                    {settings?.currency || "₺"})
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full">
+                                  🔄 {st.orderCount}. Siparişi
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="text-xs text-slate-400 flex flex-wrap items-center gap-3 mt-0.5">
                             <span className="inline-flex items-center gap-1">
@@ -4828,6 +4876,24 @@ export default function KitchenTabletPage() {
             </p>
             {printTicketMode === "full" && (
               <>
+                {(() => {
+                  const digits = (
+                    selectedOrderForPrint.customerPhone || ""
+                  ).replace(/\D/g, "");
+                  if (digits.length < 10) return null;
+                  const st = customerStatsByPhone.get(digits.slice(-10));
+                  if (!st) return null;
+                  return (
+                    <p className="font-bold">
+                      <strong>Müşteri Notu:</strong>{" "}
+                      {st.orderCount === 1
+                        ? "🌟 İLK SİPARİŞİ (Hoş Geldiniz!)"
+                        : st.orderCount >= 5
+                        ? `👑 VIP MÜŞTERİ (${st.orderCount}. Siparişi)`
+                        : `🔄 ${st.orderCount}. Siparişi`}
+                    </p>
+                  );
+                })()}
                 <p>
                   <strong>Telefon:</strong>{" "}
                   {selectedOrderForPrint.customerPhone}
@@ -5017,6 +5083,45 @@ export default function KitchenTabletPage() {
                     : "MASADA ÖDEME"}
                 </span>
               </div>
+
+              {selectedOrderForPrint.orderType === "delivery" &&
+                selectedOrderForPrint.customerAddress && (
+                  <div className="mt-2 pt-2 border-b border-dashed border-black pb-2 text-center space-y-1">
+                    <p className="text-[10px] font-black uppercase">
+                      🛵 KURYE YOL TARİFİ QR (GOOGLE HARİTALAR)
+                    </p>
+                    {(() => {
+                      const rawAddr = selectedOrderForPrint.customerAddress;
+                      const gpsMatch = rawAddr.match(
+                        /(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/
+                      );
+                      const queryTarget = gpsMatch
+                        ? `${gpsMatch[1]},${gpsMatch[2]}`
+                        : `${rawAddr} ${
+                            selectedOrderForPrint.deliveryZoneName || ""
+                          }`.trim();
+                      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        queryTarget
+                      )}`;
+                      const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=130x130&margin=2&data=${encodeURIComponent(
+                        mapsUrl
+                      )}`;
+                      return (
+                        <div className="flex flex-col items-center justify-center">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={qrSrc}
+                            alt="Kurye Harita QR"
+                            className="w-24 h-24 mx-auto border border-black p-0.5 bg-white"
+                          />
+                          <span className="text-[9px] leading-tight mt-0.5">
+                            Telefon kamerasıyla okutarak navigasyonu başlatın
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
               <div className="text-center pt-2 text-[10px]">
                 <p className="font-bold">Afiyet Olsun! Teşekkür Ederiz.</p>

@@ -56,6 +56,73 @@ export async function PATCH(
       return NextResponse.json({ order: reviewed });
     }
 
+    // Müşteri tarafından mutfak onaylamadan önce ("pending" aşamasında) sipariş iptali
+    if (body.action === "customer_cancel") {
+      const targetOrder = getOrderById(id);
+      if (!targetOrder) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      if (targetOrder.status !== "pending") {
+        return NextResponse.json(
+          {
+            error:
+              "Siparişiniz mutfak tarafından hazırlanmaya başlandığı için doğrudan iptal edilemez. Lütfen restoranımızla iletişime geçin.",
+          },
+          { status: 400 }
+        );
+      }
+      const cancelled = updateOrderStatus(
+        id,
+        "rejected",
+        undefined,
+        body.reason
+          ? `Müşteri İptali: ${String(body.reason).trim()}`
+          : "Müşteri tarafından onay öncesi iptal edildi"
+      );
+      const { getUserByPhone, pushCatalogToCloud } = await import(
+        "@/lib/cloud-sync"
+      ).then(async (cs) => {
+        const dbMod = await import("@/lib/db");
+        return {
+          getUserByPhone: dbMod.getUserByPhone,
+          pushCatalogToCloud: cs.pushCatalogToCloud,
+        };
+      });
+      const updatedUser = cancelled?.customerPhone
+        ? getUserByPhone(cancelled.customerPhone)
+        : null;
+      await syncActivityWithCloud();
+      await pushCatalogToCloud().catch(() => {});
+      return NextResponse.json({ order: cancelled, user: updatedUser });
+    }
+
+    // Müşteri tarafından aktif siparişe sonradan ek not iletme
+    if (body.action === "customer_update_note") {
+      const targetOrder = getOrderById(id);
+      if (!targetOrder) {
+        return NextResponse.json(
+          { error: "Sipariş bulunamadı" },
+          { status: 404 }
+        );
+      }
+      if (!["pending", "accepted"].includes(targetOrder.status)) {
+        return NextResponse.json(
+          { error: "Bu siparişe artık ek not eklenemez." },
+          { status: 400 }
+        );
+      }
+      const { appendOrderCustomerNote } = await import("@/lib/db");
+      const updatedNoteOrder = appendOrderCustomerNote(
+        id,
+        String(body.note || "")
+      );
+      await syncActivityWithCloud();
+      return NextResponse.json({ order: updatedNoteOrder });
+    }
+
     const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
     const courierPin = req.headers.get("x-courier-pin")?.trim();

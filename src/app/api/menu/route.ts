@@ -142,14 +142,21 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.type === "bulk_update_prices") {
+      const catId = body.categoryId || "all";
+      const beforeItems = getMenuItems();
+      const updatedCount =
+        catId === "all"
+          ? beforeItems.length
+          : beforeItems.filter((i) => i.categoryId === catId).length;
       const updatedItems = bulkUpdateMenuPrices({
-        categoryId: body.categoryId || "all",
+        categoryId: catId,
         mode: body.mode === "fixed" ? "fixed" : "percent",
         value: Number(body.value || 0),
         rounding: body.rounding || "nearest_5",
+        includeModifiers: Boolean(body.includeModifiers),
       });
       await pushCatalogToCloud();
-      return NextResponse.json({ items: updatedItems });
+      return NextResponse.json({ items: updatedItems, updatedCount });
     }
 
     if (body.type === "category") {

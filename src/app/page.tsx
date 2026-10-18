@@ -1479,11 +1479,26 @@ function CustomerMenuContent() {
     return settings?.minDeliveryAmount || 0;
   }, [orderType, selectedZone, settings]);
 
-  const deliveryFee = useMemo(() => {
+  const rawDeliveryFeeBeforeFreeThreshold = useMemo(() => {
     if (orderType !== "delivery" || cart.length === 0) return 0;
     if (selectedZone) return selectedZone.deliveryFee;
     return settings?.deliveryFee || 0;
   }, [orderType, selectedZone, settings, cart.length]);
+
+  const deliveryFee = useMemo(() => {
+    if (orderType !== "delivery" || cart.length === 0) return 0;
+    const freeThreshold = Number(settings?.freeDeliveryThreshold || 0);
+    if (freeThreshold > 0 && subtotal >= freeThreshold) {
+      return 0;
+    }
+    return rawDeliveryFeeBeforeFreeThreshold;
+  }, [
+    orderType,
+    cart.length,
+    settings?.freeDeliveryThreshold,
+    subtotal,
+    rawDeliveryFeeBeforeFreeThreshold,
+  ]);
 
   // ⏱️ Saatlik Happy Hour / Öğle Menüsü Otomatik İndirim Kontrolü
   const isHappyHourActive = useMemo(() => {
@@ -1729,6 +1744,101 @@ function CustomerMenuContent() {
       }
     } finally {
       setSubmittingReview(false);
+    }
+  };
+
+  // ⏱️ Müşteri Tarafından Sipariş İptali (Yalnızca Mutfak Onaylamadan Önce - status === "pending")
+  const handleCustomerCancelOrder = async (ord: Order) => {
+    if (ord.status !== "pending") {
+      alert(
+        "Siparişiniz mutfak tarafından hazırlanmaya başlandığı için doğrudan iptal edilemez. Lütfen restoran ile iletişime geçin."
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `#${ord.orderNumber} numaralı siparişinizi iptal etmek istediğinize emin misiniz?${
+        (ord.loyaltyPointsUsed || 0) > 0
+          ? `\n\n🎁 Kullandığınız ${ord.loyaltyPointsUsed?.toFixed(2)} ${
+              settings?.currency || "₺"
+            } Para Puan cüzdanınıza anında iade edilecektir.`
+          : ""
+      }`
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/orders/${ord.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "customer_cancel" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Sipariş iptal edilemedi.");
+        return;
+      }
+      if (data.user) {
+        setCurrentUser(data.user);
+        try {
+          localStorage.setItem(
+            "restoran_user_session",
+            JSON.stringify(data.user)
+          );
+        } catch {
+          // ignore
+        }
+      }
+      if (guestActiveOrder?.id === ord.id) {
+        setGuestActiveOrder(null);
+      }
+      if (currentUser?.phone) {
+        await fetchUserProfileAndOrders(currentUser.phone);
+      }
+      setTableCallToast(
+        `✅ #${ord.orderNumber} numaralı siparişiniz iptal edildi${
+          (ord.loyaltyPointsUsed || 0) > 0
+            ? " ve Para Puanınız cüzdanınıza iade edildi!"
+            : "."
+        }`
+      );
+      setTimeout(() => setTableCallToast(""), 4500);
+    } catch {
+      alert("Bağlantı hatası oluştu.");
+    }
+  };
+
+  // 📝 Müşteri Tarafından Aktif Siparişe Ek Not Ekleme (pending veya accepted durumunda)
+  const handleCustomerAddNote = async (ord: Order) => {
+    const extra = window.prompt(
+      `#${ord.orderNumber} numaralı siparişiniz için mutfağa veya kuryeye iletmek istediğiniz ek notu yazın:\n(Örn: Zile basmayın, acısı az olsun, kapıya bırakın)`,
+      ""
+    );
+    if (!extra || !extra.trim()) return;
+    try {
+      const res = await fetch(`/api/orders/${ord.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "customer_update_note",
+          note: extra.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Not eklenemedi.");
+        return;
+      }
+      if (guestActiveOrder?.id === ord.id && data.order) {
+        setGuestActiveOrder(data.order);
+      }
+      if (currentUser?.phone) {
+        await fetchUserProfileAndOrders(currentUser.phone);
+      }
+      setTableCallToast(
+        `📝 Ek notunuz #${ord.orderNumber} numaralı siparişinize eklendi ve mutfak ekranına iletildi!`
+      );
+      setTimeout(() => setTableCallToast(""), 4500);
+    } catch {
+      alert("Bağlantı hatası oluştu.");
     }
   };
 
@@ -2996,18 +3106,39 @@ function CustomerMenuContent() {
                       : "🍽️ Siparişiniz servise / teslime hazır!")}
                 </span>
               </div>
-              {currentUser && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAccountTab("active_orders");
-                    setAccountModalOpen(true);
-                  }}
-                  className="font-extrabold text-xs bg-white hover:bg-orange-100 text-orange-700 border border-orange-300 px-3 py-1.5 rounded-xl transition cursor-pointer"
-                >
-                  Sipariş Detayı →
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(bannerActiveOrder.status === "pending" ||
+                  bannerActiveOrder.status === "accepted") && (
+                  <button
+                    type="button"
+                    onClick={() => handleCustomerAddNote(bannerActiveOrder)}
+                    className="font-extrabold text-xs bg-white hover:bg-amber-50 text-slate-800 border border-amber-300 px-2.5 py-1.5 rounded-xl transition cursor-pointer"
+                  >
+                    📝 Ek Not İlet
+                  </button>
+                )}
+                {bannerActiveOrder.status === "pending" && (
+                  <button
+                    type="button"
+                    onClick={() => handleCustomerCancelOrder(bannerActiveOrder)}
+                    className="font-extrabold text-xs bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 px-2.5 py-1.5 rounded-xl transition cursor-pointer"
+                  >
+                    ❌ Siparişi İptal Et
+                  </button>
+                )}
+                {currentUser && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountTab("active_orders");
+                      setAccountModalOpen(true);
+                    }}
+                    className="font-extrabold text-xs bg-white hover:bg-orange-100 text-orange-700 border border-orange-300 px-3 py-1.5 rounded-xl transition cursor-pointer"
+                  >
+                    Sipariş Detayı →
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* 4 Adımlı Canlı Sipariş Zaman Çizelgesi */}
@@ -4589,7 +4720,34 @@ function CustomerMenuContent() {
                               </span>
                             </div>
                           ))}
+                          {ord.orderNote && (
+                            <div className="pt-1.5 mt-1.5 border-t border-slate-100 text-[11px] text-amber-800 font-semibold">
+                              📌 Notunuz: {ord.orderNote}
+                            </div>
+                          )}
                         </div>
+
+                        {(ord.status === "pending" ||
+                          ord.status === "accepted") && (
+                          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleCustomerAddNote(ord)}
+                              className="inline-flex items-center gap-1 text-xs font-extrabold bg-white hover:bg-amber-50 text-slate-800 border border-amber-300 px-3 py-1.5 rounded-xl transition cursor-pointer"
+                            >
+                              📝 Mutfağa / Kuryeye Ek Not İlet
+                            </button>
+                            {ord.status === "pending" && (
+                              <button
+                                type="button"
+                                onClick={() => handleCustomerCancelOrder(ord)}
+                                className="inline-flex items-center gap-1 text-xs font-extrabold bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 px-3 py-1.5 rounded-xl transition cursor-pointer"
+                              >
+                                ❌ Siparişi İptal Et
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -5990,7 +6148,7 @@ function CustomerMenuContent() {
     }
 
     if (checkoutStep === "cart") {
-      // 🎯 Minimum Paket Tutarı & İndirim Kuponu Hedefi Canlı İlerleme Hesabı
+      // 🎯 Minimum Paket Tutarı, Ücretsiz Teslimat Barajı & İndirim Kuponu Hedefi Canlı İlerleme Hesabı
       const nextCouponGoal =
         appliedCoupon && subtotal < appliedCoupon.minOrderAmount
           ? appliedCoupon
@@ -6005,8 +6163,18 @@ function CustomerMenuContent() {
         currentMinDeliveryAmount > 0 &&
         subtotal < currentMinDeliveryAmount;
 
+      const freeThreshold = Number(settings?.freeDeliveryThreshold || 0);
+      const hasFreeDeliveryGoal =
+        orderType === "delivery" &&
+        freeThreshold > 0 &&
+        rawDeliveryFeeBeforeFreeThreshold > 0;
+      const needsFreeDelivery =
+        hasFreeDeliveryGoal && subtotal < freeThreshold;
+
       const progressPct = needsMinDelivery
         ? Math.min(100, Math.round((subtotal / currentMinDeliveryAmount) * 100))
+        : needsFreeDelivery
+        ? Math.min(100, Math.round((subtotal / freeThreshold) * 100))
         : nextCouponGoal
         ? Math.min(
             100,
@@ -6016,12 +6184,14 @@ function CustomerMenuContent() {
 
       return (
         <div className="p-4 space-y-4">
-          {/* 🎯 Canlı Minimum Paket Tutarı / Kupon Hedefi Doluluk Çubuğu */}
+          {/* 🎯 Canlı Minimum Paket Tutarı / Ücretsiz Teslimat / Kupon Hedefi Doluluk Çubuğu */}
           {(orderType === "delivery" || nextCouponGoal) && (
             <div
               className={`rounded-xl p-2.5 border text-xs space-y-1.5 ${
                 needsMinDelivery
                   ? "bg-amber-50/80 border-amber-200 text-amber-900"
+                  : needsFreeDelivery
+                  ? "bg-teal-50/80 border-teal-200 text-teal-950"
                   : nextCouponGoal
                   ? "bg-indigo-50/70 border-indigo-200 text-indigo-900"
                   : "bg-emerald-50/80 border-emerald-200 text-emerald-900"
@@ -6037,6 +6207,16 @@ function CustomerMenuContent() {
                     </strong>{" "}
                     kaldı
                   </span>
+                ) : needsFreeDelivery ? (
+                  <span>
+                    🎉 Ücretsiz Teslimat için{" "}
+                    <strong className="text-teal-700">
+                      {(freeThreshold - subtotal).toFixed(0)}{" "}
+                      {settings?.currency}
+                    </strong>{" "}
+                    kaldı! ({rawDeliveryFeeBeforeFreeThreshold}{" "}
+                    {settings?.currency} getirme ücreti sıfırlanır)
+                  </span>
                 ) : nextCouponGoal ? (
                   <span>
                     🎁{" "}
@@ -6046,6 +6226,11 @@ function CustomerMenuContent() {
                     </strong>{" "}
                     daha ekleyin,{" "}
                     <strong>{nextCouponGoal.code}</strong> kuponunu kullanın!
+                  </span>
+                ) : hasFreeDeliveryGoal && subtotal >= freeThreshold ? (
+                  <span>
+                    🎉 Tebrikler! {freeThreshold} {settings?.currency} barajını
+                    geçtiniz, <strong>Getirme Ücreti ÜCRETSİZ!</strong>
                   </span>
                 ) : (
                   <span>
@@ -6059,6 +6244,8 @@ function CustomerMenuContent() {
                   className={`h-full rounded-full transition-all duration-300 ${
                     needsMinDelivery
                       ? "bg-orange-500"
+                      : needsFreeDelivery
+                      ? "bg-teal-600"
                       : nextCouponGoal
                       ? "bg-indigo-600"
                       : "bg-emerald-500"
@@ -6563,9 +6750,23 @@ function CustomerMenuContent() {
                   Getirme Ücreti ({selectedZone?.name.split("/")[0] || "Bölge"})
                 </span>
                 <span>
-                  {deliveryFee === 0
-                    ? "Ücretsiz"
-                    : `${deliveryFee.toFixed(2)} ${settings?.currency}`}
+                  {deliveryFee === 0 ? (
+                    rawDeliveryFeeBeforeFreeThreshold > 0 ? (
+                      <span>
+                        <span className="line-through text-slate-400 mr-1.5">
+                          {rawDeliveryFeeBeforeFreeThreshold.toFixed(2)}{" "}
+                          {settings?.currency}
+                        </span>
+                        <strong className="text-emerald-600">
+                          🎉 Ücretsiz
+                        </strong>
+                      </span>
+                    ) : (
+                      <strong className="text-emerald-600">Ücretsiz</strong>
+                    )
+                  ) : (
+                    `${deliveryFee.toFixed(2)} ${settings?.currency}`
+                  )}
                 </span>
               </div>
             )}

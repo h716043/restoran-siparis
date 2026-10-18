@@ -402,6 +402,8 @@ export interface RestaurantSettings {
   autoOpenCloseByHours?: boolean;
   minDeliveryAmount: number;
   deliveryFee: number;
+  /** X TL ve üzeri paket siparişlerde getirme ücretini otomatik 0 TL yapar (0 = Kapalı) */
+  freeDeliveryThreshold?: number;
   estimatedPrepMinutes: number;
   tableCount: number;
   /** Özel masa isimleri listesi (Örn: ["Masa 1", "B10", "Bahçe 1", "Teras 2"]). Boşsa 1..tableCount kullanılır. */
