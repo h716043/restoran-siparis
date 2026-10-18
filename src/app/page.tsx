@@ -361,39 +361,43 @@ function CustomerMenuContent() {
     }
   }, [tableParam, settings, orderType]);
 
-  const fetchUserProfileAndOrders = useCallback(async (phone: string) => {
-    if (!phone) return;
-    const reqStartTime = Date.now();
-    try {
-      const [profRes, resvRes] = await Promise.all([
-        fetch(`/api/auth/profile?phone=${encodeURIComponent(phone)}`),
-        fetch(`/api/reservations?phone=${encodeURIComponent(phone)}`),
-      ]);
-      if (profRes.ok) {
-        const data = await profRes.json();
-        if (
-          data.user &&
-          Date.now() > profileMutationLockUntilRef.current &&
-          reqStartTime > profileMutationLockUntilRef.current
-        ) {
-          setCurrentUser(data.user);
-          localStorage.setItem(
-            "restoran_customer_user",
-            JSON.stringify(data.user)
-          );
+  const fetchUserProfileAndOrders = useCallback(
+    async (phone: string, force = false) => {
+      if (!phone) return;
+      const reqStartTime = Date.now();
+      try {
+        const [profRes, resvRes] = await Promise.all([
+          fetch(`/api/auth/profile?phone=${encodeURIComponent(phone)}`),
+          fetch(`/api/reservations?phone=${encodeURIComponent(phone)}`),
+        ]);
+        if (profRes.ok) {
+          const data = await profRes.json();
+          if (
+            data.user &&
+            (force ||
+              (Date.now() > profileMutationLockUntilRef.current &&
+                reqStartTime > profileMutationLockUntilRef.current))
+          ) {
+            setCurrentUser(data.user);
+            localStorage.setItem(
+              "restoran_customer_user",
+              JSON.stringify(data.user)
+            );
+          }
+          if (data.orders) {
+            setCustomerOrders(data.orders);
+          }
         }
-        if (data.orders) {
-          setCustomerOrders(data.orders);
+        if (resvRes.ok) {
+          const rData = await resvRes.json();
+          setMyReservations(rData.reservations || []);
         }
+      } catch {
+        // ignore
       }
-      if (resvRes.ok) {
-        const rData = await resvRes.json();
-        setMyReservations(rData.reservations || []);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     try {
@@ -1629,11 +1633,11 @@ function CustomerMenuContent() {
   );
 
   const estimatedPointsToEarn = useMemo(() => {
-    if (!isLoyaltyEnabled) return 0;
+    if (!isLoyaltyEnabled || loyaltyPointsToUse > 0) return 0;
     const pct = Number(settings?.loyaltyConfig?.earnPercent || 0);
     if (pct <= 0) return 0;
     return Math.round(((totalAmount * pct) / 100) * 100) / 100;
-  }, [isLoyaltyEnabled, settings?.loyaltyConfig?.earnPercent, totalAmount]);
+  }, [isLoyaltyEnabled, loyaltyPointsToUse, settings?.loyaltyConfig?.earnPercent, totalAmount]);
 
   const handleSubmitOrderReview = async (orderId: string) => {
     setSubmittingReview(true);
@@ -1912,8 +1916,10 @@ function CustomerMenuContent() {
           discountAmount,
           couponCode: activePriceAdjustment.codeTag,
           useLoyaltyPoints: Boolean(useLoyaltyPoints && canRedeemPoints),
+          loyaltyPointsUsed: loyaltyPointsToUse,
+          baseTotalBeforeLoyalty,
           deliveryFee,
-          totalAmount: baseTotalBeforeLoyalty,
+          totalAmount,
           items: cart,
         }),
       });
@@ -1925,6 +1931,13 @@ function CustomerMenuContent() {
         }
         setFormError(data.error || "Sipariş gönderilemedi.");
       } else {
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem(
+            "restoran_customer_user",
+            JSON.stringify(data.user)
+          );
+        }
         setCart([]);
         setAppliedCoupon(null);
         setCouponInput("");
@@ -1945,7 +1958,7 @@ function CustomerMenuContent() {
           fetchPublicTableOrders(tableNumber);
         }
         if (currentUser?.phone) {
-          await fetchUserProfileAndOrders(currentUser.phone);
+          await fetchUserProfileAndOrders(currentUser.phone, true);
           setAccountTab("active_orders");
           setAccountModalOpen(true);
         } else {

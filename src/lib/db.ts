@@ -1709,7 +1709,10 @@ export function toggleOrderItemComplimentary(
 export function appendItemsToOrder(
   orderId: string,
   newItems: Order["items"],
-  extraNote?: string
+  extraNote?: string,
+  extraDiscount = 0,
+  extraLoyaltyPointsUsed = 0,
+  extraLoyaltyPointsEarned = 0
 ): Order | null {
   const db = getDb();
   const existing = getOrderById(orderId);
@@ -1720,10 +1723,21 @@ export function appendItemsToOrder(
     (sum, i) => sum + Number(i.totalPrice || 0),
     0
   );
-  const nextSubtotal = existing.subtotal + addedSubtotal;
-  const nextTotal = Math.max(
-    0,
-    nextSubtotal - (existing.discountAmount || 0) + (existing.deliveryFee || 0)
+  const nextSubtotal = Number((existing.subtotal + addedSubtotal).toFixed(2));
+  const nextDiscount = Number(
+    ((existing.discountAmount || 0) + extraDiscount).toFixed(2)
+  );
+  const nextLoyaltyUsed = Number(
+    ((existing.loyaltyPointsUsed || 0) + extraLoyaltyPointsUsed).toFixed(2)
+  );
+  const nextLoyaltyEarned = Number(
+    ((existing.loyaltyPointsEarned || 0) + extraLoyaltyPointsEarned).toFixed(2)
+  );
+  const nextTotal = Number(
+    Math.max(
+      0,
+      nextSubtotal - nextDiscount - nextLoyaltyUsed + (existing.deliveryFee || 0)
+    ).toFixed(2)
   );
   const nextNote = extraNote?.trim()
     ? existing.orderNote
@@ -1737,12 +1751,15 @@ export function appendItemsToOrder(
   const updatedAt = new Date().toISOString();
   db.prepare(`
     UPDATE orders
-    SET status = ?, itemsJson = ?, subtotal = ?, totalAmount = ?, orderNote = ?, updatedAt = ?
+    SET status = ?, itemsJson = ?, subtotal = ?, discountAmount = ?, loyaltyPointsUsed = ?, loyaltyPointsEarned = ?, totalAmount = ?, orderNote = ?, updatedAt = ?
     WHERE id = ?
   `).run(
     nextStatus,
     JSON.stringify(mergedItems),
     nextSubtotal,
+    nextDiscount,
+    nextLoyaltyUsed,
+    nextLoyaltyEarned,
     nextTotal,
     nextNote,
     updatedAt,

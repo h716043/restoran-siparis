@@ -335,51 +335,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // İsteğe Bağlı Müşteri Sadakat & Para Puan (Cüzdan) Hesaplaması
-    const loyaltyEnabled = settings.loyaltyConfig?.enabled === true;
-    const earnPercent = Number(settings.loyaltyConfig?.earnPercent || 0);
-    const minRedeem = Number(settings.loyaltyConfig?.minRedeemPoints || 0);
-
-    let loyaltyPointsUsed = 0;
-    let loyaltyPointsEarned = 0;
-
-    if (loyaltyEnabled && customerRecord) {
-      const requestedPoints = Number(body.loyaltyPointsUsed || 0);
-      const availablePoints = Number(customerRecord.loyaltyPoints || 0);
-      const rawSubtotal = Number(body.subtotal);
-      const safeSubtotal = Number.isFinite(rawSubtotal)
-        ? rawSubtotal
-        : Array.isArray(body.items)
-        ? body.items.reduce(
-            (sum: number, item: { totalPrice?: number; unitPrice?: number; quantity?: number }) =>
-              sum +
-              (Number.isFinite(Number(item.totalPrice))
-                ? Number(item.totalPrice)
-                : Number(item.unitPrice || 0) * Number(item.quantity || 1)),
-            0
-          )
-        : 0;
-
-      if (requestedPoints > 0 && availablePoints >= minRedeem) {
-        loyaltyPointsUsed = Math.min(
-          requestedPoints,
-          availablePoints,
-          safeSubtotal
-        );
-      }
-      const netAmountForPoints = Math.max(
-        0,
-        safeSubtotal - Number(body.discountAmount || 0)
-      );
-      if (earnPercent > 0 && netAmountForPoints > 0) {
-        loyaltyPointsEarned = Math.round((netAmountForPoints * earnPercent) / 100);
-      }
-      const netPointDelta = loyaltyPointsEarned - loyaltyPointsUsed;
-      if (netPointDelta !== 0) {
-        adjustUserLoyaltyPoints(customerRecord.phone, netPointDelta);
-      }
-    }
-
     const fallbackSubtotal = Array.isArray(body.items)
       ? body.items.reduce(
           (sum: number, item: { totalPrice?: number; unitPrice?: number; quantity?: number }) =>
@@ -399,9 +354,68 @@ export async function POST(req: NextRequest) {
     const computedDeliveryFee = Number.isFinite(Number(body.deliveryFee))
       ? Number(body.deliveryFee)
       : 0;
-    const computedTotal = Number.isFinite(Number(body.totalAmount))
-      ? Number(body.totalAmount)
-      : Math.max(0, computedSubtotal - computedDiscount + computedDeliveryFee);
+    const payableBeforeLoyalty = Number.isFinite(Number(body.baseTotalBeforeLoyalty))
+      ? Number(body.baseTotalBeforeLoyalty)
+      : Number(
+          Math.max(
+            0,
+            computedSubtotal - computedDiscount + computedDeliveryFee
+          ).toFixed(2)
+        );
+
+    // İsteğe Bağlı Müşteri Sadakat & Para Puan (Cüzdan) Hesaplaması
+    const loyaltyEnabled = settings.loyaltyConfig?.enabled === true;
+    const earnPercent = Number(settings.loyaltyConfig?.earnPercent || 0);
+    const minRedeem = Number(settings.loyaltyConfig?.minRedeemPoints || 0);
+
+    let loyaltyPointsUsed = 0;
+    let loyaltyPointsEarned = 0;
+
+    if (loyaltyEnabled && customerRecord) {
+      const availablePoints = Number(customerRecord.loyaltyPoints || 0);
+      const requestedPoints =
+        Number(body.loyaltyPointsUsed || 0) > 0
+          ? Number(body.loyaltyPointsUsed)
+          : body.useLoyaltyPoints
+          ? availablePoints
+          : 0;
+
+      if (requestedPoints > 0 && availablePoints >= minRedeem) {
+        loyaltyPointsUsed = Number(
+          Math.min(
+            requestedPoints,
+            availablePoints,
+            payableBeforeLoyalty
+          ).toFixed(2)
+        );
+      }
+
+      // Müşteri bu siparişte Para Puan harcamadıysa yeni Para Puan kazanır; harcadıysa harcanan puan düşülür
+      if (loyaltyPointsUsed === 0) {
+        const netAmountForPoints = Math.max(
+          0,
+          computedSubtotal - computedDiscount
+        );
+        if (earnPercent > 0 && netAmountForPoints > 0) {
+          loyaltyPointsEarned = Number(
+            ((netAmountForPoints * earnPercent) / 100).toFixed(2)
+          );
+        }
+      }
+
+      const netPointDelta = Number(
+        (loyaltyPointsEarned - loyaltyPointsUsed).toFixed(2)
+      );
+      if (netPointDelta !== 0) {
+        customerRecord =
+          adjustUserLoyaltyPoints(customerRecord.phone, netPointDelta) ||
+          customerRecord;
+      }
+    }
+
+    const computedTotal = Number(
+      Math.max(0, payableBeforeLoyalty - loyaltyPointsUsed).toFixed(2)
+    );
 
     // 2. ÖZELLİK: Masa QR müşterisi açık masa adisyonuna ek sipariş veriyorsa mevcut masa adisyonuna birleştir
     if (
@@ -422,13 +436,16 @@ export async function POST(req: NextRequest) {
         const appended = appendItemsToOrder(
           existingOpenOrder.id,
           body.items,
-          body.orderNote
+          body.orderNote,
+          computedDiscount,
+          loyaltyPointsUsed,
+          loyaltyPointsEarned
         );
         if (appended) {
           await syncActivityWithCloud();
           await pushCatalogToCloud();
           return NextResponse.json(
-            { order: appended, appended: true },
+            { order: appended, appended: true, user: customerRecord },
             { status: 201 }
           );
         }
@@ -525,7 +542,7 @@ export async function POST(req: NextRequest) {
     await autoSyncOrdersWithPosIfNeeded().catch(() => {});
     await syncActivityWithCloud();
     await pushCatalogToCloud();
-    return NextResponse.json({ order }, { status: 201 });
+    return NextResponse.json({ order, user: customerRecord }, { status: 201 });
   } catch (error) {
     console.error("POST /api/orders error:", error);
     return NextResponse.json(
