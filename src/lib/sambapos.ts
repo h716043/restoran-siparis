@@ -3184,5 +3184,166 @@ export async function syncSiteTablesToSambaPos(options: {
   }
 }
 
+/**
+ * Sitedeki kayıtlı müşterileri (veya tek bir yeni/güncel müşteriyi) SambaPOS V5 üzerindeki
+ * `Müşteriler` (`EntityTypeId = 1`) varlık tablosuna ve `Accounts` (Müşteri Hesapları) tablosuna aktarır.
+ */
+export async function exportCustomersToSambaPos(
+  customers: Array<{
+    name: string;
+    phone?: string;
+    address?: string;
+    notes?: string;
+  }>
+): Promise<{
+  ok: boolean;
+  exportedCount: number;
+  message: string;
+}> {
+  const validCustomers = customers
+    .map((c) => ({
+      name: String(c.name || "").trim(),
+      phone: String(c.phone || "").trim(),
+      address: String(c.address || "").trim(),
+      notes: String(c.notes || "").trim(),
+    }))
+    .filter((c) => c.name.length > 0 || c.phone.length > 0);
 
+  if (validCustomers.length === 0) {
+    return {
+      ok: false,
+      exportedCount: 0,
+      message: "SambaPOS'a aktarılacak kayıtlı müşteri bulunamadı.",
+    };
+  }
 
+  try {
+    const escSql = (s: string) => s.replace(/'/g, "''");
+    const nowDate = new Date();
+    const sambaDateJson = `\\/Date(${nowDate.getTime()}+0300)\\/`;
+
+    const sqlLines: string[] = [
+      `SET NOCOUNT ON;`,
+      `DECLARE @entityTypeId INT = (SELECT TOP 1 Id FROM EntityTypes WHERE Name = N'Müşteriler' OR Id = 1 ORDER BY CASE WHEN Name = N'Müşteriler' THEN 0 ELSE 1 END);`,
+      `DECLARE @accountTypeId INT = ISNULL((SELECT TOP 1 AccountTypeId FROM EntityTypes WHERE Id = @entityTypeId), 5);`,
+      `DECLARE @now DATETIME = GETDATE();`,
+      `DECLARE @entId INT;`,
+      `DECLARE @accId INT;`,
+    ];
+
+    for (const cust of validCustomers) {
+      const displayName = cust.name || cust.phone;
+      const digits = cust.phone.replace(/\D/g, "");
+      const phone10 = digits.length >= 10 ? digits.slice(-10) : digits;
+      const customFields: Array<{ Name: string; Value: string }> = [];
+      if (cust.phone) {
+        customFields.push({ Name: "Telefon", Value: cust.phone });
+      }
+      if (cust.address) {
+        customFields.push({ Name: "Adres", Value: cust.address });
+      }
+      if (displayName) {
+        customFields.push({ Name: "Müşteri Adı", Value: displayName });
+      }
+      const customDataJson = JSON.stringify(customFields);
+      const searchStr = [displayName, cust.phone, cust.address]
+        .filter(Boolean)
+        .join(" ");
+      const accName = cust.phone
+        ? `${displayName}-${cust.phone}`
+        : displayName;
+
+      const escName = escSql(displayName);
+      const escPhone10 = escSql(phone10);
+      const escCustom = escSql(customDataJson);
+      const escSearch = escSql(searchStr);
+      const escAccName = escSql(accName);
+      const escNotes = escSql(cust.notes);
+
+      sqlLines.push(`
+        SET @entId = NULL;
+        ${
+          escPhone10.length >= 10
+            ? `SET @entId = (SELECT TOP 1 Id FROM Entities WHERE EntityTypeId = @entityTypeId AND (Name = N'${escName}' OR CustomData LIKE N'%${escPhone10}%'));`
+            : `SET @entId = (SELECT TOP 1 Id FROM Entities WHERE EntityTypeId = @entityTypeId AND Name = N'${escName}');`
+        }
+
+        IF @entId IS NULL BEGIN
+          SET @accId = 0;
+          IF @accountTypeId > 0 BEGIN
+            SET @accId = (SELECT TOP 1 Id FROM Accounts WHERE AccountTypeId = @accountTypeId AND (Name = N'${escAccName}' OR Name = N'${escName}'));
+            IF @accId IS NULL BEGIN
+              INSERT INTO Accounts (AccountTypeId, ForeignCurrencyId, Name)
+              VALUES (@accountTypeId, 0, N'${escAccName}');
+              SET @accId = SCOPE_IDENTITY();
+            END
+          END
+
+          INSERT INTO Entities (EntityTypeId, LastUpdateTime, SearchString, CustomData, Notes, AccountId, WarehouseId, Name)
+          VALUES (@entityTypeId, @now, N'${escSearch}', N'${escCustom}', ${
+        escNotes ? `N'${escNotes}'` : `NULL`
+      }, ISNULL(@accId, 0), 0, N'${escName}');
+          SET @entId = SCOPE_IDENTITY();
+
+          IF NOT EXISTS (SELECT 1 FROM EntityStateValues WHERE EntityId = @entId) BEGIN
+            INSERT INTO EntityStateValues (EntityId, EntityStates)
+            VALUES (@entId, N'[{"D":"${sambaDateJson}","S":"Yeni Müşteri","SN":"Status"}]');
+          END
+        END ELSE BEGIN
+          UPDATE Entities
+          SET Name = N'${escName}',
+              SearchString = N'${escSearch}',
+              CustomData = N'${escCustom}',
+              LastUpdateTime = @now
+          WHERE Id = @entId;
+        END
+      `);
+    }
+
+    runLocalSambaSqlQuery(sqlLines.join("\r\n"));
+
+    // GraphQL Message Server açıksa önbelleği sıfırla
+    try {
+      const settings = getSettings();
+      const cfg = settings.posIntegrationConfig?.sambaPos;
+      if (cfg?.enabled) {
+        const accessToken = await authenticateSambaPos(cfg);
+        await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation { postResetEntityCacheMessage { id } }`
+        );
+      }
+    } catch {
+      // ignore if Message Server port 9000 is down
+    }
+
+    return {
+      ok: true,
+      exportedCount: validCustomers.length,
+      message: `✅ Sitedeki ${validCustomers.length} kayıtlı müşteri SambaPOS V5 "Müşteriler" ve "Müşteri Hesapları" tablosuna başarıyla aktarıldı!`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      exportedCount: 0,
+      message: `❌ Müşteriler SambaPOS'a aktarılırken hata oluştu: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+}
+
+/** Tek bir müşteriyi arka planda sessizce SambaPOS'a aktarır */
+export async function syncCustomerToSambaPos(customer: {
+  name: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+}): Promise<void> {
+  try {
+    await exportCustomersToSambaPos([customer]);
+  } catch {
+    // ignore background sync errors
+  }
+}

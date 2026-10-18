@@ -61,6 +61,7 @@ import {
   RestaurantSettings,
   WhatsAppLog,
   formatTableLabel,
+  getEnabledOrderTypes,
   getRestaurantTables,
   isSameTableName,
 } from "@/types";
@@ -201,6 +202,15 @@ export default function AdminDashboardPage() {
     "payment"
   );
   const [creditTxNote, setCreditTxNote] = useState("");
+  const [creditRegisteredSearch, setCreditRegisteredSearch] = useState("");
+  const [creditTxSearch, setCreditTxSearch] = useState("");
+  const [creditListSearch, setCreditListSearch] = useState("");
+  const [creditListFilter, setCreditListFilter] = useState<
+    "all" | "with_debt" | "zero"
+  >("all");
+  const [expandedCreditAccId, setExpandedCreditAccId] = useState<string | null>(
+    null
+  );
 
   // Menü Stok Filtresi
   const [menuStockFilter, setMenuStockFilter] = useState<
@@ -1348,13 +1358,24 @@ export default function AdminDashboardPage() {
         customerName: newCreditCustomerName.trim(),
         customerPhone: newCreditCustomerPhone.trim(),
         amount: 0,
+        type: "debt",
         txType: "debt",
         description: "Cari hesap açılışı",
       }),
     });
     if (res.ok) {
+      const data = await res.json();
+      const createdAcc = (data.settings?.creditAccounts || []).find(
+        (a: CreditAccount) =>
+          a.customerName.trim().toLocaleLowerCase("tr-TR") ===
+          newCreditCustomerName.trim().toLocaleLowerCase("tr-TR")
+      );
+      if (createdAcc) {
+        setSelectedCreditAccId(createdAcc.id);
+      }
       setNewCreditCustomerName("");
       setNewCreditCustomerPhone("");
+      setCreditRegisteredSearch("");
       showToast("Yeni cari/veresiye hesabı açıldı!");
       loadData();
     }
@@ -1362,21 +1383,38 @@ export default function AdminDashboardPage() {
 
   const handleAddCreditTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    const acc = (settings?.creditAccounts || []).find(
-      (a) => a.id === selectedCreditAccId
-    );
-    if (!acc || !creditTxAmount) return;
+    if (!selectedCreditAccId || !creditTxAmount) return;
     const amt = Math.max(0, Number(creditTxAmount));
     if (amt <= 0) return;
+
+    let accId: string | undefined;
+    let custName = "";
+    let custPhone = "";
+
+    if (selectedCreditAccId.startsWith("reg::")) {
+      const parts = selectedCreditAccId.split("::");
+      custName = (parts[1] || "").trim();
+      custPhone = (parts[2] || "").trim();
+    } else {
+      const acc = (settings?.creditAccounts || []).find(
+        (a) => a.id === selectedCreditAccId
+      );
+      if (!acc) return;
+      accId = acc.id;
+      custName = acc.customerName;
+      custPhone = acc.customerPhone || "";
+    }
+
     const res = await fetch("/api/orders", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "credit_transaction",
-        accountId: acc.id,
-        customerName: acc.customerName,
-        customerPhone: acc.customerPhone,
+        accountId: accId,
+        customerName: custName,
+        customerPhone: custPhone,
         amount: amt,
+        type: creditTxType,
         txType: creditTxType,
         description:
           creditTxNote.trim() ||
@@ -1384,15 +1422,75 @@ export default function AdminDashboardPage() {
       }),
     });
     if (res.ok) {
+      const data = await res.json();
+      if (selectedCreditAccId.startsWith("reg::") && data.settings?.creditAccounts) {
+        const matched = (data.settings.creditAccounts as CreditAccount[]).find(
+          (a) =>
+            a.customerName.trim().toLocaleLowerCase("tr-TR") ===
+            custName.toLocaleLowerCase("tr-TR")
+        );
+        if (matched) setSelectedCreditAccId(matched.id);
+      }
       setCreditTxAmount("");
       setCreditTxNote("");
       showToast(
         creditTxType === "payment"
-          ? `✅ ${acc.customerName} hesabından tahsilat düşüldü!`
-          : `🧾 ${acc.customerName} hesabına borç eklendi!`
+          ? `✅ ${custName} hesabından tahsilat düşüldü!`
+          : `🧾 ${custName} hesabına borç eklendi!`
       );
       loadData();
     }
+  };
+
+  const [sambaCustomerExporting, setSambaCustomerExporting] = useState(false);
+
+  const handleExportCustomersToSambaPos = async () => {
+    setSambaCustomerExporting(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "export_to_sambapos" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(
+          data.message ||
+            "Sitedeki kayıtlı müşteriler SambaPOS V5'e başarıyla aktarıldı!"
+        );
+      } else {
+        alert(data.message || "Müşteriler SambaPOS'a aktarılamadı.");
+      }
+    } catch {
+      alert("Müşteriler SambaPOS'a aktarılırken bağlantı hatası oluştu.");
+    } finally {
+      setSambaCustomerExporting(false);
+    }
+  };
+
+  const handleDeleteCreditAccount = async (acc: CreditAccount) => {
+    if (!settings) return;
+    if (
+      !confirm(
+        `"${acc.customerName}" cari hesabını (Bakiye: ${acc.balance.toFixed(
+          2
+        )} ${settings.currency}) silmek istediğinize emin misiniz?`
+      )
+    )
+      return;
+    const nextAccounts = (settings.creditAccounts || []).filter(
+      (a) => a.id !== acc.id
+    );
+    if (selectedCreditAccId === acc.id) {
+      setSelectedCreditAccId("");
+    }
+    await persistSettings(
+      {
+        ...settings,
+        creditAccounts: nextAccounts,
+      },
+      `"${acc.customerName}" cari hesabı silindi.`
+    );
   };
 
   const handleSendCreditWhatsApp = (acc: CreditAccount) => {
@@ -2498,183 +2596,657 @@ export default function AdminDashboardPage() {
             </div>
 
             {/* 🧾 3. MÜŞTERİ VERESİYE / CARİ HESAP (AÇIK HESAP) DEFTERİ */}
-            <div className="bg-white p-6 rounded-2xl border border-amber-200 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div>
-                  <h3 className="font-bold text-base text-slate-900">
-                    🧾 Müşteri Veresiye / Cari Hesap (Açık Hesap) Defteri
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Komşu esnaf ve kurumsal müşterilerin açık hesap bakiyelerini takip edin, tahsilat düşün ve WhatsApp&apos;tan ekstre gönderin
-                  </p>
-                </div>
-                <span className="text-xs font-black bg-amber-100 text-amber-900 px-3 py-1 rounded-full">
-                  Toplam Alacak Bakiyesi:{" "}
-                  {(settings?.creditAccounts || [])
-                    .reduce((s, a) => s + a.balance, 0)
-                    .toFixed(2)}{" "}
-                  {settings?.currency}
-                </span>
-              </div>
+            {(() => {
+              const allCreditAccounts = settings?.creditAccounts || [];
+              // Tüm kayıtlı müşterileri (CRM + Üyeler + SambaPOS) tek listede birleştir
+              const regMap = new Map<
+                string,
+                { name: string; phone: string; address?: string }
+              >();
+              for (const c of crmCustomers) {
+                const key = `${(c.name || "").trim().toLocaleLowerCase("tr-TR")}__${(
+                  c.phone || ""
+                ).replace(/\D/g, "")}`;
+                if (c.name || c.phone) {
+                  regMap.set(key, {
+                    name: c.name || c.phone,
+                    phone: c.phone || "",
+                    address: c.address,
+                  });
+                }
+              }
+              for (const u of users) {
+                const key = `${(u.name || "").trim().toLocaleLowerCase("tr-TR")}__${(
+                  u.phone || ""
+                ).replace(/\D/g, "")}`;
+                if (!regMap.has(key) && (u.name || u.phone)) {
+                  regMap.set(key, {
+                    name: u.name || u.phone,
+                    phone: u.phone || "",
+                    address: u.addresses?.[0]?.fullAddress,
+                  });
+                }
+              }
+              const allRegisteredCustomers = Array.from(regMap.values());
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                {/* Sol: Yeni Cari Aç & Borç/Tahsilat İşle */}
-                <div className="lg:col-span-5 space-y-4">
-                  <form
-                    onSubmit={handleCreateNewCreditAccount}
-                    className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5"
-                  >
-                    <div className="text-xs font-extrabold text-slate-800">
-                      + Yeni Cari / Veresiye Müşteri Kartı Aç
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={newCreditCustomerName}
-                        onChange={(e) =>
-                          setNewCreditCustomerName(e.target.value)
-                        }
-                        placeholder="Müşteri / Esnaf Adı"
-                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
-                      />
-                      <input
-                        type="text"
-                        value={newCreditCustomerPhone}
-                        onChange={(e) =>
-                          setNewCreditCustomerPhone(e.target.value)
-                        }
-                        placeholder="WhatsApp Tel (0532...)"
-                        className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold rounded-lg cursor-pointer"
-                    >
-                      + Cari Hesap Oluştur
-                    </button>
-                  </form>
+              // 1) Sol üst form için kayıtlı müşteri arama sonuçları
+              const regSearchQ = creditRegisteredSearch
+                .trim()
+                .toLocaleLowerCase("tr-TR");
+              const matchingRegisteredForNew = allRegisteredCustomers
+                .filter((rc) => {
+                  if (!regSearchQ) return true;
+                  return (
+                    rc.name.toLocaleLowerCase("tr-TR").includes(regSearchQ) ||
+                    rc.phone.toLocaleLowerCase("tr-TR").includes(regSearchQ)
+                  );
+                })
+                .slice(0, 30);
 
-                  {(settings?.creditAccounts || []).length > 0 && (
-                    <form
-                      onSubmit={handleAddCreditTransaction}
-                      className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-200 space-y-2.5"
-                    >
-                      <div className="text-xs font-extrabold text-amber-900">
-                        💳 Cari Hesaptan Tahsilat Düş / Borç Ekle
-                      </div>
-                      <select
-                        required
-                        value={selectedCreditAccId}
-                        onChange={(e) => setSelectedCreditAccId(e.target.value)}
-                        className="w-full px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
-                      >
-                        <option value="">Müşteri Seçin...</option>
-                        {(settings?.creditAccounts || []).map((acc) => (
-                          <option key={acc.id} value={acc.id}>
-                            {acc.customerName} (Bakiye:{" "}
-                            {acc.balance.toFixed(2)} {settings?.currency})
-                          </option>
-                        ))}
-                      </select>
-                      <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={creditTxType}
-                          onChange={(e) =>
-                            setCreditTxType(
-                              e.target.value as "debt" | "payment"
-                            )
-                          }
-                          className="px-2.5 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
-                        >
-                          <option value="payment">💵 Tahsilat Al (-)</option>
-                          <option value="debt">🧾 Borç Yaz (+)</option>
-                        </select>
-                        <input
-                          type="number"
-                          min={1}
-                          required
-                          value={creditTxAmount}
-                          onChange={(e) => setCreditTxAmount(e.target.value)}
-                          placeholder="Tutar (₺)"
-                          className="px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
-                        />
-                      </div>
-                      <input
-                        type="text"
-                        value={creditTxNote}
-                        onChange={(e) => setCreditTxNote(e.target.value)}
-                        placeholder="Açıklama (Örn: Nakit tahsilat / Öğle yemeği)"
-                        className="w-full px-3 py-2 text-xs border border-amber-300 rounded-lg bg-white"
-                      />
+              // 2) Sol alt form (Tahsilat / Borç Ekle) için arama filtresi
+              const txSearchQ = creditTxSearch.trim().toLocaleLowerCase("tr-TR");
+              const filteredTxCreditAccounts = allCreditAccounts.filter((acc) => {
+                if (!txSearchQ) return true;
+                return (
+                  acc.customerName
+                    .toLocaleLowerCase("tr-TR")
+                    .includes(txSearchQ) ||
+                  (acc.customerPhone || "")
+                    .toLocaleLowerCase("tr-TR")
+                    .includes(txSearchQ)
+                );
+              });
+              const registeredNotYetInCredit = allRegisteredCustomers.filter(
+                (rc) =>
+                  !allCreditAccounts.some(
+                    (acc) =>
+                      acc.customerName.trim().toLocaleLowerCase("tr-TR") ===
+                        rc.name.trim().toLocaleLowerCase("tr-TR") ||
+                      (rc.phone &&
+                        acc.customerPhone &&
+                        rc.phone.replace(/\D/g, "").slice(-10) ===
+                          acc.customerPhone.replace(/\D/g, "").slice(-10))
+                  )
+              );
+              const filteredTxRegistered = registeredNotYetInCredit
+                .filter((rc) => {
+                  if (!txSearchQ) return true;
+                  return (
+                    rc.name.toLocaleLowerCase("tr-TR").includes(txSearchQ) ||
+                    rc.phone.toLocaleLowerCase("tr-TR").includes(txSearchQ)
+                  );
+                })
+                .slice(0, 50);
+
+              // 3) Sağ taraf (Cari Hesap Listesi) için arama ve durum filtresi
+              const listSearchQ = creditListSearch
+                .trim()
+                .toLocaleLowerCase("tr-TR");
+              const filteredRightCreditAccounts = allCreditAccounts.filter(
+                (acc) => {
+                  if (creditListFilter === "with_debt" && acc.balance <= 0)
+                    return false;
+                  if (creditListFilter === "zero" && acc.balance > 0)
+                    return false;
+                  if (!listSearchQ) return true;
+                  return (
+                    acc.customerName
+                      .toLocaleLowerCase("tr-TR")
+                      .includes(listSearchQ) ||
+                    (acc.customerPhone || "")
+                      .toLocaleLowerCase("tr-TR")
+                      .includes(listSearchQ)
+                  );
+                }
+              );
+
+              return (
+                <div className="bg-white p-6 rounded-2xl border border-amber-200 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="font-bold text-base text-slate-900">
+                        🧾 Müşteri Veresiye / Cari Hesap (Açık Hesap) Defteri
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Sitedeki kayıtlı müşterilerden seçerek cari hesap açın, arama yapın, tahsilat düşün ve müşterileri SambaPOS V5&apos;e aktarın
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
-                        type="submit"
-                        className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold rounded-lg cursor-pointer"
+                        type="button"
+                        disabled={sambaCustomerExporting}
+                        onClick={handleExportCustomersToSambaPos}
+                        className="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-sm transition cursor-pointer"
                       >
-                        İşlemi Kaydet
+                        {sambaCustomerExporting
+                          ? "⏳ SambaPOS'a Aktarılıyor..."
+                          : "📤 Sitedeki Müşterileri SambaPOS'a Aktar"}
                       </button>
-                    </form>
-                  )}
-                </div>
+                      <span className="text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1 rounded-full">
+                        Kayıtlı Cari: {allCreditAccounts.length} Müşteri
+                      </span>
+                      <span className="text-xs font-black bg-amber-100 text-amber-900 px-3 py-1 rounded-full">
+                        Toplam Alacak Bakiyesi:{" "}
+                        {allCreditAccounts
+                          .reduce((s, a) => s + a.balance, 0)
+                          .toFixed(2)}{" "}
+                        {settings?.currency}
+                      </span>
+                    </div>
+                  </div>
 
-                {/* Sağ: Cari Hesap Listesi */}
-                <div className="lg:col-span-7 space-y-2.5 max-h-96 overflow-y-auto">
-                  {(settings?.creditAccounts || []).length === 0 ? (
-                    <p className="text-xs text-slate-400 py-10 text-center">
-                      Henüz açılmış bir veresiye / cari müşteri hesabı bulunmuyor. Masa hesabı kapatırken &quot;Cari / Veresiye&quot; seçtiğinizde de otomatik oluşur.
-                    </p>
-                  ) : (
-                    (settings?.creditAccounts || []).map((acc) => (
-                      <div
-                        key={acc.id}
-                        className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                    {/* Sol: Yeni Cari Aç & Borç/Tahsilat İşle */}
+                    <div className="lg:col-span-5 space-y-4">
+                      <form
+                        onSubmit={handleCreateNewCreditAccount}
+                        className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5"
                       >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-sm text-slate-900">
-                              {acc.customerName}
-                            </span>
-                            {acc.customerPhone && (
-                              <span className="text-xs text-slate-500">
-                                ({acc.customerPhone})
-                              </span>
-                            )}
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-extrabold text-slate-800">
+                            + Yeni Cari / Veresiye Müşteri Kartı Aç
                           </div>
-                          {acc.transactions && acc.transactions.length > 0 && (
-                            <div className="text-[11px] text-slate-500">
-                              Son İşlem:{" "}
-                              {acc.transactions[0].type === "debt" ? "+" : "-"}
-                              {acc.transactions[0].amount.toFixed(2)}{" "}
-                              {settings?.currency} —{" "}
-                              {acc.transactions[0].description}
+                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                            {allRegisteredCustomers.length} Kayıtlı Müşteri
+                          </span>
+                        </div>
+
+                        {/* Kayıtlı Müşterilerden Arama ve Seçme Kutusu */}
+                        {allRegisteredCustomers.length > 0 && (
+                          <div className="bg-white p-2.5 rounded-lg border border-indigo-200 space-y-2">
+                            <label className="block text-[11px] font-extrabold text-indigo-900">
+                              👤 Kayıtlı Müşterilerden Ara & Otomatik Doldur:
+                            </label>
+                            <input
+                              type="text"
+                              value={creditRegisteredSearch}
+                              onChange={(e) =>
+                                setCreditRegisteredSearch(e.target.value)
+                              }
+                              placeholder="🔍 Kayıtlı müşteri adı veya telefon ara..."
+                              className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none"
+                            />
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) return;
+                                const [cName, cPhone] = val.split("::");
+                                setNewCreditCustomerName(cName || "");
+                                setNewCreditCustomerPhone(cPhone || "");
+                              }}
+                              className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-200 rounded-lg bg-white text-slate-800"
+                            >
+                              <option value="">
+                                📋 Kayıtlı Müşteri Listesinden Seç ({matchingRegisteredForNew.length} sonuç)...
+                              </option>
+                              {matchingRegisteredForNew.map((rc, i) => (
+                                <option
+                                  key={`${rc.name}-${rc.phone}-${i}`}
+                                  value={`${rc.name}::${rc.phone}`}
+                                >
+                                  {rc.name} {rc.phone ? `(${rc.phone})` : ""}
+                                </option>
+                              ))}
+                            </select>
+                            {creditRegisteredSearch.trim().length > 0 &&
+                              matchingRegisteredForNew.length > 0 && (
+                                <div className="max-h-28 overflow-y-auto space-y-1 pt-0.5">
+                                  {matchingRegisteredForNew
+                                    .slice(0, 6)
+                                    .map((rc, i) => (
+                                      <button
+                                        key={`quick-reg-${i}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setNewCreditCustomerName(rc.name);
+                                          setNewCreditCustomerPhone(
+                                            rc.phone || ""
+                                          );
+                                          setCreditRegisteredSearch("");
+                                        }}
+                                        className="w-full text-left px-2.5 py-1.5 rounded-md bg-indigo-50/70 hover:bg-indigo-100 text-[11px] font-bold text-indigo-950 flex items-center justify-between cursor-pointer"
+                                      >
+                                        <span className="truncate">
+                                          👤 {rc.name}
+                                        </span>
+                                        <span className="text-[10px] text-indigo-700 shrink-0 ml-2">
+                                          {rc.phone || "Seç →"}
+                                        </span>
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={newCreditCustomerName}
+                            onChange={(e) =>
+                              setNewCreditCustomerName(e.target.value)
+                            }
+                            placeholder="Müşteri / Esnaf Adı"
+                            className="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white"
+                          />
+                          <input
+                            type="text"
+                            value={newCreditCustomerPhone}
+                            onChange={(e) =>
+                              setNewCreditCustomerPhone(e.target.value)
+                            }
+                            placeholder="WhatsApp Tel (0532...)"
+                            className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold rounded-lg cursor-pointer"
+                        >
+                          + Cari Hesap Oluştur
+                        </button>
+                      </form>
+
+                      <form
+                        onSubmit={handleAddCreditTransaction}
+                        className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-200 space-y-2.5"
+                      >
+                        <div className="text-xs font-extrabold text-amber-900">
+                          💳 Cari Hesaptan Tahsilat Düş / Borç Ekle
+                        </div>
+
+                        {/* Çok Müşteri Olduğunda Hızlı Arama Kutusu */}
+                        <div className="space-y-1.5">
+                          <input
+                            type="text"
+                            value={creditTxSearch}
+                            onChange={(e) => setCreditTxSearch(e.target.value)}
+                            placeholder="🔍 Müşteri veya cari hesap ara (İsim / Telefon)..."
+                            className="w-full px-3 py-1.5 text-xs border border-amber-300 rounded-lg bg-white focus:border-amber-600 outline-none"
+                          />
+
+                          {/* Arama yapıldığında hızlı tıklanabilir sonuçlar */}
+                          {creditTxSearch.trim().length > 0 && (
+                            <div className="max-h-32 overflow-y-auto bg-white border border-amber-200 rounded-lg p-1.5 space-y-1">
+                              {filteredTxCreditAccounts.length === 0 &&
+                              filteredTxRegistered.length === 0 ? (
+                                <div className="text-[11px] text-slate-400 text-center py-1.5">
+                                  Aramaya uygun müşteri bulunamadı.
+                                </div>
+                              ) : (
+                                <>
+                                  {filteredTxCreditAccounts
+                                    .slice(0, 8)
+                                    .map((acc) => (
+                                      <button
+                                        key={`q-acc-${acc.id}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedCreditAccId(acc.id);
+                                          setCreditTxSearch("");
+                                        }}
+                                        className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs font-bold flex items-center justify-between cursor-pointer ${
+                                          selectedCreditAccId === acc.id
+                                            ? "bg-amber-600 text-white"
+                                            : "hover:bg-amber-50 text-slate-900"
+                                        }`}
+                                      >
+                                        <span className="truncate">
+                                          🧾 {acc.customerName}{" "}
+                                          {acc.customerPhone
+                                            ? `(${acc.customerPhone})`
+                                            : ""}
+                                        </span>
+                                        <span className="font-black shrink-0 ml-2">
+                                          {acc.balance.toFixed(2)}{" "}
+                                          {settings?.currency}
+                                        </span>
+                                      </button>
+                                    ))}
+                                  {filteredTxRegistered
+                                    .slice(0, 6)
+                                    .map((rc, idx) => {
+                                      const regVal = `reg::${rc.name}::${rc.phone}`;
+                                      return (
+                                        <button
+                                          key={`q-reg-${idx}`}
+                                          type="button"
+                                          onClick={() => {
+                                            setSelectedCreditAccId(regVal);
+                                            setCreditTxSearch("");
+                                          }}
+                                          className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs font-bold flex items-center justify-between cursor-pointer ${
+                                            selectedCreditAccId === regVal
+                                              ? "bg-indigo-600 text-white"
+                                              : "hover:bg-indigo-50 text-indigo-950"
+                                          }`}
+                                        >
+                                          <span className="truncate">
+                                            👤 {rc.name}{" "}
+                                            {rc.phone ? `(${rc.phone})` : ""}
+                                          </span>
+                                          <span className="text-[10px] font-extrabold text-indigo-600 shrink-0 ml-2">
+                                            Kayıtlı Müşteri (Cari Aç & İşle)
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                </>
+                              )}
                             </div>
                           )}
-                        </div>
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className={`text-sm font-black ${
-                              acc.balance > 0
-                                ? "text-amber-700"
-                                : "text-emerald-700"
-                            }`}
+
+                          <select
+                            required
+                            value={selectedCreditAccId}
+                            onChange={(e) =>
+                              setSelectedCreditAccId(e.target.value)
+                            }
+                            className="w-full px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
                           >
-                            {acc.balance.toFixed(2)} {settings?.currency}
-                          </span>
+                            <option value="">
+                              Müşteri Seçin ({filteredTxCreditAccounts.length} Cari
+                              {filteredTxRegistered.length > 0
+                                ? ` + ${filteredTxRegistered.length} Kayıtlı Müşteri`
+                                : ""}
+                              )...
+                            </option>
+                            {filteredTxCreditAccounts.length > 0 && (
+                              <optgroup label="🧾 Açık Cari / Veresiye Hesapları">
+                                {filteredTxCreditAccounts.map((acc) => (
+                                  <option key={acc.id} value={acc.id}>
+                                    {acc.customerName}
+                                    {acc.customerPhone
+                                      ? ` (${acc.customerPhone})`
+                                      : ""}{" "}
+                                    — Bakiye: {acc.balance.toFixed(2)}{" "}
+                                    {settings?.currency}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {filteredTxRegistered.length > 0 && (
+                              <optgroup label="👤 Kayıtlı Müşteriler (Seçildiğinde Otomatik Cari Açılır)">
+                                {filteredTxRegistered.map((rc, i) => (
+                                  <option
+                                    key={`reg-opt-${i}`}
+                                    value={`reg::${rc.name}::${rc.phone}`}
+                                  >
+                                    👤 {rc.name}{" "}
+                                    {rc.phone ? `(${rc.phone})` : ""} — [Yeni Cari]
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            value={creditTxType}
+                            onChange={(e) =>
+                              setCreditTxType(
+                                e.target.value as "debt" | "payment"
+                              )
+                            }
+                            className="px-2.5 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
+                          >
+                            <option value="payment">💵 Tahsilat Al (-)</option>
+                            <option value="debt">🧾 Borç Yaz (+)</option>
+                          </select>
+                          <input
+                            type="number"
+                            min={1}
+                            required
+                            value={creditTxAmount}
+                            onChange={(e) => setCreditTxAmount(e.target.value)}
+                            placeholder="Tutar (₺)"
+                            className="px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white"
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          value={creditTxNote}
+                          onChange={(e) => setCreditTxNote(e.target.value)}
+                          placeholder="Açıklama (Örn: Nakit tahsilat / Öğle yemeği)"
+                          className="w-full px-3 py-2 text-xs border border-amber-300 rounded-lg bg-white"
+                        />
+                        <button
+                          type="submit"
+                          className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold rounded-lg cursor-pointer"
+                        >
+                          İşlemi Kaydet
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Sağ: Cari Hesap Listesi (Arama ve Filtreli) */}
+                    <div className="lg:col-span-7 space-y-3">
+                      {/* Sağ Üst Arama ve Bakiye Filtre Çubuğu */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                        <input
+                          type="text"
+                          value={creditListSearch}
+                          onChange={(e) => setCreditListSearch(e.target.value)}
+                          placeholder="🔍 Cari hesaplarda isim veya telefon ile ara..."
+                          className="flex-1 px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-lg bg-white focus:border-amber-500 outline-none"
+                        />
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleSendCreditWhatsApp(acc)}
-                            className="px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1ebe57] text-slate-950 text-xs font-extrabold cursor-pointer"
+                            onClick={() => setCreditListFilter("all")}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold cursor-pointer ${
+                              creditListFilter === "all"
+                                ? "bg-slate-900 text-white"
+                                : "bg-white text-slate-600 border border-slate-200"
+                            }`}
                           >
-                            💬 WhatsApp Ekstre
+                            Tümü ({allCreditAccounts.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCreditListFilter("with_debt")}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold cursor-pointer ${
+                              creditListFilter === "with_debt"
+                                ? "bg-amber-600 text-white"
+                                : "bg-white text-amber-800 border border-amber-200"
+                            }`}
+                          >
+                            Borçlu (
+                            {
+                              allCreditAccounts.filter((a) => a.balance > 0)
+                                .length
+                            }
+                            )
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCreditListFilter("zero")}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold cursor-pointer ${
+                              creditListFilter === "zero"
+                                ? "bg-emerald-600 text-white"
+                                : "bg-white text-emerald-800 border border-emerald-200"
+                            }`}
+                          >
+                            Borcu Yok (
+                            {
+                              allCreditAccounts.filter((a) => a.balance <= 0)
+                                .length
+                            }
+                            )
                           </button>
                         </div>
                       </div>
-                    ))
-                  )}
+
+                      <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                        {filteredRightCreditAccounts.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-10 text-center">
+                            {allCreditAccounts.length === 0
+                              ? 'Henüz açılmış bir veresiye / cari müşteri hesabı bulunmuyor. Masa hesabı kapatırken "Cari / Veresiye" seçtiğinizde de otomatik oluşur.'
+                              : "Arama kriterine uygun cari hesap bulunamadı."}
+                          </p>
+                        ) : (
+                          filteredRightCreditAccounts.map((acc) => {
+                            const isSelected = selectedCreditAccId === acc.id;
+                            const isExpanded = expandedCreditAccId === acc.id;
+                            return (
+                              <div
+                                key={acc.id}
+                                className={`p-3.5 rounded-xl border transition space-y-2.5 ${
+                                  isSelected
+                                    ? "bg-amber-50/70 border-amber-400 shadow-xs"
+                                    : "bg-slate-50 border-slate-200"
+                                }`}
+                              >
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-extrabold text-sm text-slate-900">
+                                        {acc.customerName}
+                                      </span>
+                                      {acc.customerPhone && (
+                                        <span className="text-xs text-slate-500">
+                                          ({acc.customerPhone})
+                                        </span>
+                                      )}
+                                    </div>
+                                    {acc.transactions &&
+                                      acc.transactions.length > 0 && (
+                                        <div className="text-[11px] text-slate-500">
+                                          Son İşlem:{" "}
+                                          {acc.transactions[0].type === "debt"
+                                            ? "+"
+                                            : "-"}
+                                          {acc.transactions[0].amount.toFixed(
+                                            2
+                                          )}{" "}
+                                          {settings?.currency} —{" "}
+                                          {acc.transactions[0].description}
+                                        </div>
+                                      )}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span
+                                      className={`text-sm font-black ${
+                                        acc.balance > 0
+                                          ? "text-amber-700"
+                                          : "text-emerald-700"
+                                      }`}
+                                    >
+                                      {acc.balance.toFixed(2)}{" "}
+                                      {settings?.currency}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedCreditAccId(acc.id);
+                                        setCreditTxType(
+                                          acc.balance > 0 ? "payment" : "debt"
+                                        );
+                                      }}
+                                      className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer border ${
+                                        isSelected
+                                          ? "bg-amber-600 text-white border-amber-600"
+                                          : "bg-white hover:bg-amber-50 text-amber-800 border-amber-300"
+                                      }`}
+                                      title="Soldaki tahsilat/borç formunda bu müşteriyi seç"
+                                    >
+                                      💳 {isSelected ? "Seçili" : "İşlem Yap"}
+                                    </button>
+                                    {acc.transactions &&
+                                      acc.transactions.length > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setExpandedCreditAccId(
+                                              isExpanded ? null : acc.id
+                                            )
+                                          }
+                                          className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold cursor-pointer"
+                                        >
+                                          📋 {isExpanded ? "Gizle" : "Hareketler"}
+                                        </button>
+                                      )}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSendCreditWhatsApp(acc)
+                                      }
+                                      className="px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1ebe57] text-slate-950 text-xs font-extrabold cursor-pointer"
+                                    >
+                                      💬 WhatsApp Ekstre
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleDeleteCreditAccount(acc)
+                                      }
+                                      className="p-1.5 rounded-lg bg-white hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 cursor-pointer"
+                                      title="Cari Hesabı Sil"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {isExpanded &&
+                                  acc.transactions &&
+                                  acc.transactions.length > 0 && (
+                                    <div className="bg-white border border-slate-200 rounded-lg p-2.5 space-y-1 text-xs">
+                                      <div className="text-[10px] font-extrabold uppercase text-slate-400 pb-1 border-b border-slate-100">
+                                        Son Hesap Hareketleri ({acc.transactions.length})
+                                      </div>
+                                      <div className="max-h-36 overflow-y-auto space-y-1">
+                                        {acc.transactions
+                                          .slice(0, 15)
+                                          .map((tx) => (
+                                            <div
+                                              key={tx.id}
+                                              className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0 text-[11px]"
+                                            >
+                                              <div>
+                                                <span className="font-semibold text-slate-800">
+                                                  {tx.description}
+                                                </span>
+                                                <span className="ml-2 text-[10px] text-slate-400">
+                                                  {new Date(
+                                                    tx.createdAt
+                                                  ).toLocaleString("tr-TR", {
+                                                    day: "2-digit",
+                                                    month: "2-digit",
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                  })}
+                                                </span>
+                                              </div>
+                                              <span
+                                                className={`font-black ${
+                                                  tx.type === "debt"
+                                                    ? "text-amber-700"
+                                                    : "text-emerald-700"
+                                                }`}
+                                              >
+                                                {tx.type === "debt" ? "+" : "-"}
+                                                {tx.amount.toFixed(2)}{" "}
+                                                {settings?.currency}
+                                              </span>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    </div>
+                                  )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* 👨‍💼 4. GARSON & KURYE PERFORMANS RAPORU + 📅 5. MASA REZERVASYON TALEPLERİ */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -5955,6 +6527,200 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                 </div>
               </label>
             </div>
+
+            {/* 🛵🛍️🪑 SİTEDE AKTİF SİPARİŞ TÜRLERİ SEÇİMİ (TEK MASA, TEK PAKET, TEK GEL-AL, İKİLİ VEYA TÜMÜ) */}
+            {(() => {
+              const currentTypes = getEnabledOrderTypes(settings);
+              const applyOrderTypes = (
+                nextTypes: OrderType[],
+                toastLabel: string
+              ) => {
+                if (nextTypes.length === 0) {
+                  alert("En az 1 sipariş türü aktif olmalıdır!");
+                  return;
+                }
+                const nextSettings: RestaurantSettings = {
+                  ...settings,
+                  enabledOrderTypes: nextTypes,
+                };
+                setSettings(nextSettings);
+                persistSettings(
+                  nextSettings,
+                  `✅ Sipariş Türü Güncellendi: ${toastLabel}`
+                );
+              };
+
+              const toggleSingleType = (t: OrderType, label: string) => {
+                const exists = currentTypes.includes(t);
+                if (exists && currentTypes.length === 1) {
+                  alert("En az 1 sipariş türü seçili kalmalıdır!");
+                  return;
+                }
+                const next = exists
+                  ? currentTypes.filter((x) => x !== t)
+                  : [...currentTypes, t];
+                applyOrderTypes(next, label);
+              };
+
+              const isExactMatch = (arr: OrderType[]) =>
+                currentTypes.length === arr.length &&
+                arr.every((x) => currentTypes.includes(x));
+
+              const presets: Array<{
+                label: string;
+                types: OrderType[];
+                desc: string;
+              }> = [
+                {
+                  label: "🪑 Tek Masa (Sadece QR)",
+                  types: ["dine_in"],
+                  desc: "Sadece Masada Sipariş",
+                },
+                {
+                  label: "🛵 Tek Paket Servis",
+                  types: ["delivery"],
+                  desc: "Sadece Adrese Paket",
+                },
+                {
+                  label: "🛍️ Tek Gel-Al",
+                  types: ["pickup"],
+                  desc: "Sadece Gel-Al",
+                },
+                {
+                  label: "🪑🛍️ Masa + Gel-Al",
+                  types: ["dine_in", "pickup"],
+                  desc: "Masada ve Gel-Al",
+                },
+                {
+                  label: "🛵🛍️ Paket + Gel-Al",
+                  types: ["delivery", "pickup"],
+                  desc: "Paket ve Gel-Al",
+                },
+                {
+                  label: "🪑🛵 Masa + Paket",
+                  types: ["dine_in", "delivery"],
+                  desc: "Masada ve Paket",
+                },
+                {
+                  label: "✨ Tümü (Masa + Paket + Gel-Al)",
+                  types: ["delivery", "pickup", "dine_in"],
+                  desc: "3 Sipariş Türü Birden Aktif",
+                },
+              ];
+
+              return (
+                <div className="bg-orange-50/60 border-2 border-orange-200 rounded-2xl p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-200/70 pb-3">
+                    <div>
+                      <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                        <span>🛵🛍️🪑 Sitede Aktif Sipariş Türleri Seçimi</span>
+                        <span className="text-[10px] font-black uppercase bg-orange-600 text-white px-2.5 py-0.5 rounded-full">
+                          Anında Uygulanır
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Müşteri sipariş ekranında hangi sipariş türlerinin açık olacağını seçin (İster tek Masa, ister tek Paket, ister tek Gel-Al, ister ikili veya üçlü kombinasyon)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 1) Tek Tıkla Hazır Kombinasyon Butonları */}
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-extrabold uppercase text-orange-900">
+                      ⚡ Hızlı Kombinasyon Seçimi (Tek Tıkla Seç):
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                      {presets.map((p) => {
+                        const active = isExactMatch(p.types);
+                        return (
+                          <button
+                            key={p.label}
+                            type="button"
+                            onClick={() => applyOrderTypes(p.types, p.label)}
+                            className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                              active
+                                ? "bg-orange-600 border-orange-600 text-white shadow-sm"
+                                : "bg-white border-slate-200 hover:border-orange-400 text-slate-800"
+                            }`}
+                          >
+                            <div className="text-xs font-extrabold flex items-center justify-between gap-1">
+                              <span>{p.label}</span>
+                              {active && <span className="text-[10px]">✓</span>}
+                            </div>
+                            <div
+                              className={`text-[10px] mt-0.5 ${
+                                active ? "text-orange-100" : "text-slate-500"
+                              }`}
+                            >
+                              {p.desc}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 2) Tek Tek Aç / Kapat Kutuları */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] font-extrabold uppercase text-slate-600">
+                      🔧 Veya Sipariş Türlerini Tek Tek Açıp Kapatın:
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {[
+                        {
+                          id: "dine_in" as OrderType,
+                          icon: "🪑",
+                          title: "Masa (Masada QR Sipariş)",
+                          sub: "Müşteri masadan QR okutup veya masa seçip sipariş verir",
+                        },
+                        {
+                          id: "delivery" as OrderType,
+                          icon: "🛵",
+                          title: "Paket Servis (Adrese Teslim)",
+                          sub: "Müşteri mahalle ve açık adres seçerek eve/işe sipariş verir",
+                        },
+                        {
+                          id: "pickup" as OrderType,
+                          icon: "🛍️",
+                          title: "Gel-Al (Restorandan Teslim)",
+                          sub: "Müşteri siparişini verir, hazır olunca gelip teslim alır",
+                        },
+                      ].map((opt) => {
+                        const isChecked = currentTypes.includes(opt.id);
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => toggleSingleType(opt.id, opt.title)}
+                            className={`p-3 rounded-xl border-2 text-left transition cursor-pointer flex items-start gap-2.5 ${
+                              isChecked
+                                ? "bg-emerald-50/90 border-emerald-500 text-emerald-950 shadow-2xs"
+                                : "bg-white/80 border-slate-200 text-slate-400 hover:border-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              readOnly
+                              checked={isChecked}
+                              className="mt-0.5 w-4 h-4 accent-emerald-600 rounded pointer-events-none"
+                            />
+                            <div>
+                              <div className="text-xs font-extrabold flex items-center gap-1">
+                                <span>{opt.icon}</span>
+                                <span>{opt.title}</span>
+                              </div>
+                              <div className="text-[10px] opacity-80 mt-0.5 leading-snug">
+                                {opt.sub}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>

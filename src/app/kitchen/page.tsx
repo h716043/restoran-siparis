@@ -122,6 +122,18 @@ export default function KitchenTabletPage() {
   const [tableCreditAccountId, setTableCreditAccountId] = useState<string>("");
   const [tableCreditCustomerName, setTableCreditCustomerName] =
     useState<string>("");
+  const [tableCreditSearch, setTableCreditSearch] = useState<string>("");
+  const [posCustomerSearch, setPosCustomerSearch] = useState<string>("");
+  const [registeredCustomers, setRegisteredCustomers] = useState<
+    Array<{
+      id: string;
+      name: string;
+      phone: string;
+      address: string;
+      orderCount: number;
+      loyaltyPoints: number;
+    }>
+  >([]);
   const [tableActionLoading, setTableActionLoading] = useState(false);
   const [checkedModalItemKeys, setCheckedModalItemKeys] = useState<string[]>(
     []
@@ -142,6 +154,12 @@ export default function KitchenTabletPage() {
     } catch {
       // ignore
     }
+    fetch("/api/customers")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.customers)) setRegisteredCustomers(d.customers);
+      })
+      .catch(() => {});
     const clock = setInterval(() => setNowMs(Date.now()), 15000);
     return () => clearInterval(clock);
   }, []);
@@ -692,11 +710,19 @@ export default function KitchenTabletPage() {
     tableOrders: Order[],
     andPrint: boolean
   ) => {
-    const selectedAcc = (settings?.creditAccounts || []).find(
-      (a) => a.id === tableCreditAccountId
-    );
+    const isRegPick = tableCreditAccountId.startsWith("reg::");
+    const regParts = isRegPick ? tableCreditAccountId.slice(5).split("::") : [];
+    const selectedAcc = !isRegPick
+      ? (settings?.creditAccounts || []).find(
+          (a) => a.id === tableCreditAccountId
+        )
+      : undefined;
     const creditName =
-      selectedAcc?.customerName || tableCreditCustomerName.trim();
+      selectedAcc?.customerName ||
+      (isRegPick ? regParts[0] : "") ||
+      tableCreditCustomerName.trim();
+    const creditPhone =
+      selectedAcc?.customerPhone || (isRegPick ? regParts[1] : "") || undefined;
     if (tablePaymentMode === "credit" && !creditName) {
       alert("Lütfen veresiye/cari yazılacak müşteri adını seçin veya yazın.");
       return;
@@ -744,6 +770,7 @@ export default function KitchenTabletPage() {
             discountAmount: extraDisc,
             creditAccountId: selectedAcc?.id || undefined,
             creditAccountName: creditName || undefined,
+            creditAccountPhone: creditPhone,
           }),
         }),
         ...tableCalls
@@ -2804,18 +2831,33 @@ export default function KitchenTabletPage() {
                               <div className="text-xs font-extrabold text-amber-300">
                                 🧾 Cari / Veresiye Defterine Yazılacak Müşteri:
                               </div>
+                              <input
+                                type="text"
+                                value={tableCreditSearch}
+                                onChange={(e) =>
+                                  setTableCreditSearch(e.target.value)
+                                }
+                                placeholder="🔍 Çok müşteri içinden isim veya telefon ile ara..."
+                                className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-1.5 text-xs font-bold text-white"
+                              />
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                 <select
                                   value={tableCreditAccountId}
                                   onChange={(e) => {
-                                    setTableCreditAccountId(e.target.value);
-                                    const found = (
-                                      settings?.creditAccounts || []
-                                    ).find((a) => a.id === e.target.value);
-                                    if (found) {
-                                      setTableCreditCustomerName(
-                                        found.customerName
-                                      );
+                                    const val = e.target.value;
+                                    setTableCreditAccountId(val);
+                                    if (val.startsWith("reg::")) {
+                                      const [rName] = val.slice(5).split("::");
+                                      if (rName) setTableCreditCustomerName(rName);
+                                    } else {
+                                      const found = (
+                                        settings?.creditAccounts || []
+                                      ).find((a) => a.id === val);
+                                      if (found) {
+                                        setTableCreditCustomerName(
+                                          found.customerName
+                                        );
+                                      }
                                     }
                                   }}
                                   className="bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-white"
@@ -2823,15 +2865,57 @@ export default function KitchenTabletPage() {
                                   <option value="">
                                     + Yeni Müşteri Yaz veya Kayıtlı Seç...
                                   </option>
-                                  {(settings?.creditAccounts || []).map(
-                                    (acc) => (
-                                      <option key={acc.id} value={acc.id}>
-                                        {acc.customerName} (Bakiye:{" "}
-                                        {acc.balance.toFixed(0)}{" "}
-                                        {settings?.currency})
-                                      </option>
-                                    )
-                                  )}
+                                  <optgroup label="🧾 Açık Cari / Veresiye Hesapları">
+                                    {(settings?.creditAccounts || [])
+                                      .filter((acc) => {
+                                        const q = tableCreditSearch
+                                          .trim()
+                                          .toLocaleLowerCase("tr-TR");
+                                        if (!q) return true;
+                                        return (
+                                          acc.customerName
+                                            .toLocaleLowerCase("tr-TR")
+                                            .includes(q) ||
+                                          (acc.customerPhone || "")
+                                            .toLocaleLowerCase("tr-TR")
+                                            .includes(q)
+                                        );
+                                      })
+                                      .map((acc) => (
+                                        <option key={acc.id} value={acc.id}>
+                                          {acc.customerName} (Bakiye:{" "}
+                                          {acc.balance.toFixed(0)}{" "}
+                                          {settings?.currency})
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                  <optgroup label="👤 Sitedeki Kayıtlı Müşteriler">
+                                    {registeredCustomers
+                                      .filter((rc) => {
+                                        const q = tableCreditSearch
+                                          .trim()
+                                          .toLocaleLowerCase("tr-TR");
+                                        if (!q) return true;
+                                        return (
+                                          rc.name
+                                            .toLocaleLowerCase("tr-TR")
+                                            .includes(q) ||
+                                          (rc.phone || "")
+                                            .toLocaleLowerCase("tr-TR")
+                                            .includes(q)
+                                        );
+                                      })
+                                      .slice(0, 50)
+                                      .map((rc) => (
+                                        <option
+                                          key={`reg-${rc.id}`}
+                                          value={`reg::${rc.name}::${rc.phone || ""}`}
+                                        >
+                                          👤 {rc.name}{" "}
+                                          {rc.phone ? `(${rc.phone})` : ""}
+                                        </option>
+                                      ))}
+                                  </optgroup>
                                 </select>
                                 <input
                                   type="text"

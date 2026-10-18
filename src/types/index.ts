@@ -414,6 +414,8 @@ export interface RestaurantSettings {
   waiters?: string[]; // Garson listesi
   waiterPins?: Record<string, string>; // Her garsonun kendine özel giriş şifresi / PIN kodu
   defaultDailyStocks?: Record<string, number>; // Ürün bazlı sabah varsayılan günlük porsiyon stok şablonu
+  /** Müşteri vitrininde (sitede) aktif olan sipariş türleri: delivery (Paket), pickup (Gel-Al), dine_in (Masa) */
+  enabledOrderTypes?: OrderType[];
   tvDisplayOrderTypes?: OrderType[]; // TV Sıra Çağrı ekranında (/tv) hangi sipariş türlerinin gösterileceği (delivery, pickup, dine_in)
   tvTickerSpeed?: "slow" | "normal" | "fast"; // TV alt kayan yazı hızı
   tvCustomNote?: string; // TV alt bandında gösterilecek özel duyuru (Wi-Fi şifresi vb.)
@@ -421,6 +423,28 @@ export interface RestaurantSettings {
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;
   posIntegrationConfig?: PosIntegrationConfig;
+}
+
+/**
+ * Müşteri vitrininde izin verilen aktif sipariş türlerini döndürür.
+ * En az 1 tür her zaman aktiftir; tanımsızsa ["delivery", "pickup", "dine_in"] döner.
+ */
+export function getEnabledOrderTypes(
+  settings?: Partial<RestaurantSettings> | null
+): OrderType[] {
+  const valid: OrderType[] = ["delivery", "pickup", "dine_in"];
+  if (
+    settings?.enabledOrderTypes &&
+    Array.isArray(settings.enabledOrderTypes)
+  ) {
+    const filtered = settings.enabledOrderTypes.filter((t): t is OrderType =>
+      valid.includes(t)
+    );
+    if (filtered.length > 0) {
+      return Array.from(new Set(filtered));
+    }
+  }
+  return ["delivery", "pickup", "dine_in"];
 }
 
 /**

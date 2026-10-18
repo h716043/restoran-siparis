@@ -65,6 +65,7 @@ import {
   SelectedModifier,
   TableReservation,
   formatTableLabel,
+  getEnabledOrderTypes,
   getRestaurantTables,
   isSameTableName,
 } from "@/types";
@@ -304,15 +305,28 @@ function CustomerMenuContent() {
     }
   };
 
+  const enabledOrderTypes = getEnabledOrderTypes(settings);
+
   useEffect(() => {
-    if (tableParam) {
+    const allowed = getEnabledOrderTypes(settings);
+    if (tableParam && allowed.includes("dine_in")) {
       setOrderType("dine_in");
       const list = getRestaurantTables(settings);
       const matched = list.find((t) => isSameTableName(t, tableParam));
       setTableNumber(matched || tableParam);
       setPaymentMethod("pos_at_table");
+      return;
     }
-  }, [tableParam, settings]);
+    if (settings && !allowed.includes(orderType)) {
+      const fallbackType = allowed[0];
+      setOrderType(fallbackType);
+      if (fallbackType === "dine_in") {
+        setPaymentMethod("pos_at_table");
+      } else {
+        setPaymentMethod("card_at_door");
+      }
+    }
+  }, [tableParam, settings, orderType]);
 
   const fetchUserProfileAndOrders = useCallback(async (phone: string) => {
     if (!phone) return;
@@ -1579,57 +1593,75 @@ function CustomerMenuContent() {
                   {/* 1. Sipariş Tipi Seçici */}
                   <div className="space-y-1.5">
                     <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
-                      Sipariş Türü Seçin
+                      {enabledOrderTypes.length > 1
+                        ? "Sipariş Türü Seçin"
+                        : "Aktif Sipariş Türü"}
                     </div>
-                    <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOrderType("delivery");
-                          setHeaderMenuOpen(false);
-                        }}
-                        className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                          orderType === "delivery"
-                            ? "bg-white text-orange-600 shadow-xs"
-                            : "text-slate-600 hover:text-slate-900"
-                        }`}
-                      >
-                        <Truck className="w-4 h-4" />
-                        <span>Paket Servis</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOrderType("pickup");
-                          setHeaderMenuOpen(false);
-                        }}
-                        className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                          orderType === "pickup"
-                            ? "bg-white text-orange-600 shadow-xs"
-                            : "text-slate-600 hover:text-slate-900"
-                        }`}
-                      >
-                        <ShoppingBag className="w-4 h-4" />
-                        <span>Gel-Al</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOrderType("dine_in");
-                          setPaymentMethod("pos_at_table");
-                          setHeaderMenuOpen(false);
-                        }}
-                        className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                          orderType === "dine_in"
-                            ? "bg-white text-orange-600 shadow-xs"
-                            : "text-slate-600 hover:text-slate-900"
-                        }`}
-                      >
-                        <QrCode className="w-4 h-4" />
-                        <span>
-                          {tableNumber ? `Masa ${tableNumber}` : "Masada (QR)"}
-                        </span>
-                      </button>
+                    <div
+                      className={`grid gap-1 bg-slate-100 p-1 rounded-xl ${
+                        enabledOrderTypes.length === 1
+                          ? "grid-cols-1"
+                          : enabledOrderTypes.length === 2
+                          ? "grid-cols-2"
+                          : "grid-cols-3"
+                      }`}
+                    >
+                      {enabledOrderTypes.includes("delivery") && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOrderType("delivery");
+                            setHeaderMenuOpen(false);
+                          }}
+                          className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                            orderType === "delivery"
+                              ? "bg-white text-orange-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          <Truck className="w-4 h-4" />
+                          <span>Paket Servis</span>
+                        </button>
+                      )}
+                      {enabledOrderTypes.includes("pickup") && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOrderType("pickup");
+                            setHeaderMenuOpen(false);
+                          }}
+                          className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                            orderType === "pickup"
+                              ? "bg-white text-orange-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          <ShoppingBag className="w-4 h-4" />
+                          <span>Gel-Al</span>
+                        </button>
+                      )}
+                      {enabledOrderTypes.includes("dine_in") && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOrderType("dine_in");
+                            setPaymentMethod("pos_at_table");
+                            setHeaderMenuOpen(false);
+                          }}
+                          className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                            orderType === "dine_in"
+                              ? "bg-white text-orange-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          <QrCode className="w-4 h-4" />
+                          <span>
+                            {tableNumber
+                              ? formatTableLabel(tableNumber)
+                              : "Masada (QR)"}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1858,11 +1890,67 @@ function CustomerMenuContent() {
         </div>
       )}
 
-      {/* 📍 MOBİLDE EN ÜSTTE KOMPAKT "MAHALLE (BÖLGE) SEÇİMİ & TEK TIKLA KUPON BARI" */}
+      {/* 📍 MOBİLDE EN ÜSTTE KOMPAKT "SİPARİŞ TÜRÜ, MAHALLE (BÖLGE) SEÇİMİ & TEK TIKLA KUPON BARI" */}
       <div
         id="mobile-zone-coupons-bar"
         className="lg:hidden max-w-7xl mx-auto w-full px-4 mt-2.5 space-y-2"
       >
+        {enabledOrderTypes.length > 1 && (
+          <div
+            className={`grid gap-1 bg-white border border-slate-200 p-1 rounded-2xl shadow-2xs ${
+              enabledOrderTypes.length === 2 ? "grid-cols-2" : "grid-cols-3"
+            }`}
+          >
+            {enabledOrderTypes.includes("delivery") && (
+              <button
+                type="button"
+                onClick={() => setOrderType("delivery")}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                  orderType === "delivery"
+                    ? "bg-orange-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>Paket Servis</span>
+              </button>
+            )}
+            {enabledOrderTypes.includes("pickup") && (
+              <button
+                type="button"
+                onClick={() => setOrderType("pickup")}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                  orderType === "pickup"
+                    ? "bg-orange-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span>Gel-Al</span>
+              </button>
+            )}
+            {enabledOrderTypes.includes("dine_in") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOrderType("dine_in");
+                  setPaymentMethod("pos_at_table");
+                }}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                  orderType === "dine_in"
+                    ? "bg-orange-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>
+                  {tableNumber ? formatTableLabel(tableNumber) : "Masa (QR)"}
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+
         {orderType === "delivery" && activeZones.length > 0 && (
           <div className="bg-white border border-slate-200 rounded-2xl p-2.5 shadow-2xs flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-2">
@@ -2929,6 +3017,59 @@ function CustomerMenuContent() {
         <aside className="lg:col-span-4 space-y-4 lg:sticky lg:top-32">
           {/* Teslimat Bölgesi & Kampanya Kuponları Kartı */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+            {enabledOrderTypes.length > 1 && (
+              <div
+                className={`grid gap-1 bg-slate-100 p-1 rounded-xl ${
+                  enabledOrderTypes.length === 2 ? "grid-cols-2" : "grid-cols-3"
+                }`}
+              >
+                {enabledOrderTypes.includes("delivery") && (
+                  <button
+                    type="button"
+                    onClick={() => setOrderType("delivery")}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      orderType === "delivery"
+                        ? "bg-orange-600 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Paket</span>
+                  </button>
+                )}
+                {enabledOrderTypes.includes("pickup") && (
+                  <button
+                    type="button"
+                    onClick={() => setOrderType("pickup")}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      orderType === "pickup"
+                        ? "bg-orange-600 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>Gel-Al</span>
+                  </button>
+                )}
+                {enabledOrderTypes.includes("dine_in") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrderType("dine_in");
+                      setPaymentMethod("pos_at_table");
+                    }}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-extrabold transition cursor-pointer ${
+                      orderType === "dine_in"
+                        ? "bg-orange-600 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>Masa</span>
+                  </button>
+                )}
+              </div>
+            )}
             {orderType === "delivery" && activeZones.length > 0 ? (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">

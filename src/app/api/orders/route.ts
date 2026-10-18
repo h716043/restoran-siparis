@@ -20,7 +20,10 @@ import {
   syncActivityWithCloud,
 } from "@/lib/cloud-sync";
 import { isSameTableName } from "@/types";
-import { autoSyncOrdersWithPosIfNeeded } from "@/lib/sambapos";
+import {
+  autoSyncOrdersWithPosIfNeeded,
+  syncCustomerToSambaPos,
+} from "@/lib/sambapos";
 
 export async function GET(req: NextRequest) {
   try {
@@ -420,6 +423,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Siteden sipariş veren veya cari hesaba yazılan müşteriyi SambaPOS'a aktar
+    if (
+      (order.orderType !== "dine_in" && (order.customerName || order.customerPhone)) ||
+      body.paymentMethod === "credit"
+    ) {
+      await syncCustomerToSambaPos({
+        name: body.creditAccountName || order.customerName || "",
+        phone: order.customerPhone || "",
+        address: order.customerAddress || "",
+      });
+    }
+
     await autoSyncOrdersWithPosIfNeeded().catch(() => {});
     await syncActivityWithCloud();
     await pushCatalogToCloud();
@@ -493,10 +508,17 @@ export async function PATCH(req: NextRequest) {
               : undefined,
           creditAccountId: body.creditAccountId,
           creditAccountName: body.creditAccountName,
+          creditAccountPhone: body.creditAccountPhone,
         }
       );
       await syncActivityWithCloud();
       if (body.paymentMethod === "credit") {
+        if (body.creditAccountName || body.creditAccountPhone) {
+          await syncCustomerToSambaPos({
+            name: String(body.creditAccountName || ""),
+            phone: String(body.creditAccountPhone || ""),
+          });
+        }
         await pushCatalogToCloud();
       }
       return NextResponse.json({ orders });
@@ -509,14 +531,31 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (body.action === "credit_transaction") {
+      const txKind =
+        body.type === "payment" || body.txType === "payment"
+          ? "payment"
+          : "debt";
       const updatedSettings = recordCreditAccountTransaction({
         accountId: body.accountId,
         customerName: body.customerName,
         customerPhone: body.customerPhone,
-        type: body.type === "payment" ? "payment" : "debt",
+        type: txKind,
         amount: Number(body.amount || 0),
         description: String(body.description || "Cari İşlem"),
       });
+      const matchedAcc = (updatedSettings.creditAccounts || []).find(
+        (a) =>
+          (body.accountId && a.id === body.accountId) ||
+          (body.customerName &&
+            a.customerName.toLocaleLowerCase("tr-TR") ===
+              String(body.customerName).trim().toLocaleLowerCase("tr-TR"))
+      );
+      if (matchedAcc) {
+        await syncCustomerToSambaPos({
+          name: matchedAcc.customerName,
+          phone: matchedAcc.customerPhone,
+        });
+      }
       await pushCatalogToCloud();
       return NextResponse.json({ settings: updatedSettings });
     }

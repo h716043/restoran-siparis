@@ -846,6 +846,13 @@ export function getSettings(): RestaurantSettings {
     parsed.defaultDailyStocks = {};
     updated = true;
   }
+  if (
+    !Array.isArray(parsed.enabledOrderTypes) ||
+    parsed.enabledOrderTypes.length === 0
+  ) {
+    parsed.enabledOrderTypes = ["delivery", "pickup", "dine_in"];
+    updated = true;
+  }
   if (!Array.isArray(parsed.tvDisplayOrderTypes)) {
     parsed.tvDisplayOrderTypes = ["pickup", "dine_in", "delivery"];
     updated = true;
@@ -1909,7 +1916,7 @@ export function transferTableOrders(
   return getOrders();
 }
 
-/** Cari / Veresiye hesabına borç veya tahsilat işlemi kaydeder */
+/** Cari / Veresiye hesabına borç veya tahsilat işlemi kaydeder (0 tutarla çağrılırsa sadece yeni cari kart açar) */
 export function recordCreditAccountTransaction(params: {
   accountId?: string;
   customerName?: string;
@@ -1925,9 +1932,23 @@ export function recordCreditAccountTransaction(params: {
     : [];
   const now = new Date().toISOString();
   const amt = Math.max(0, Number(params.amount || 0));
-  if (amt <= 0) return settings;
 
-  let targetIdx = accounts.findIndex((a) => a.id === params.accountId);
+  let targetIdx = params.accountId
+    ? accounts.findIndex((a) => a.id === params.accountId)
+    : -1;
+
+  // Eğer accountId verilmediyse veya bulunamadıysa isim veya telefonla mevcut cari hesabı bul
+  if (targetIdx === -1 && params.customerName?.trim()) {
+    const cleanName = params.customerName.trim().toLocaleLowerCase("tr-TR");
+    const cleanPhone = normalizePhone(params.customerPhone || "");
+    targetIdx = accounts.findIndex((a) => {
+      if (cleanPhone && cleanPhone.length >= 10 && normalizePhone(a.customerPhone || "") === cleanPhone) {
+        return true;
+      }
+      return a.customerName.trim().toLocaleLowerCase("tr-TR") === cleanName;
+    });
+  }
+
   if (targetIdx === -1 && params.customerName?.trim()) {
     const newAcc = {
       id: `cari-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -1943,24 +1964,34 @@ export function recordCreditAccountTransaction(params: {
 
   if (targetIdx !== -1) {
     const acc = accounts[targetIdx];
-    const tx = {
-      id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-      type: params.type,
-      amount: amt,
-      description: params.description,
-      orderNumber: params.orderNumber,
-      createdAt: now,
-    };
-    const nextBalance =
-      params.type === "debt"
-        ? Number((acc.balance + amt).toFixed(2))
-        : Math.max(0, Number((acc.balance - amt).toFixed(2)));
-    accounts[targetIdx] = {
-      ...acc,
-      balance: nextBalance,
-      transactions: [tx, ...(acc.transactions || [])].slice(0, 100),
-      updatedAt: now,
-    };
+    const nextPhone = params.customerPhone?.trim() || acc.customerPhone || "";
+    if (amt > 0) {
+      const tx = {
+        id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        type: params.type,
+        amount: amt,
+        description: params.description,
+        orderNumber: params.orderNumber,
+        createdAt: now,
+      };
+      const nextBalance =
+        params.type === "debt"
+          ? Number((acc.balance + amt).toFixed(2))
+          : Math.max(0, Number((acc.balance - amt).toFixed(2)));
+      accounts[targetIdx] = {
+        ...acc,
+        customerPhone: nextPhone,
+        balance: nextBalance,
+        transactions: [tx, ...(acc.transactions || [])].slice(0, 100),
+        updatedAt: now,
+      };
+    } else {
+      accounts[targetIdx] = {
+        ...acc,
+        customerPhone: nextPhone,
+        updatedAt: now,
+      };
+    }
     settings.creditAccounts = accounts;
     updateSettings(settings);
   }
@@ -2007,6 +2038,7 @@ export function closeTableOrdersWithPayment(
     discountAmount?: number;
     creditAccountId?: string;
     creditAccountName?: string;
+    creditAccountPhone?: string;
   }
 ): Order[] {
   const db = getDb();
@@ -2065,6 +2097,7 @@ export function closeTableOrdersWithPayment(
     recordCreditAccountTransaction({
       accountId: paymentData.creditAccountId,
       customerName: paymentData.creditAccountName || `${formatTableLabel(cleanTable)} Müşterisi`,
+      customerPhone: paymentData.creditAccountPhone,
       type: "debt",
       amount: totalClosedAmount,
       description: `${formatTableLabel(cleanTable)} Adisyon Kapama (#${tableActive[0].orderNumber})`,
