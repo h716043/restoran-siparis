@@ -2391,9 +2391,13 @@ export default function AdminDashboardPage() {
                         type="button"
                         onClick={() => {
                           const daytimeQuiet = hourlyStats
-                            .filter((h) => h.hour >= 13 && h.hour <= 17)
+                            .map((h) => ({
+                              ...h,
+                              hourNum: parseInt(h.hourLabel.split(":")[0], 10) || 14,
+                            }))
+                            .filter((h) => h.hourNum >= 13 && h.hourNum <= 17)
                             .sort((a, b) => a.count - b.count)[0];
-                          const startH = daytimeQuiet ? daytimeQuiet.hour : 14;
+                          const startH = daytimeQuiet ? daytimeQuiet.hourNum : 14;
                           const endH = Math.min(23, startH + 3);
                           const startStr = `${String(startH).padStart(2, "0")}:00`;
                           const endStr = `${String(endH).padStart(2, "0")}:00`;
@@ -2463,7 +2467,7 @@ export default function AdminDashboardPage() {
                       </span>
                       <span className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-900 font-bold">
                         ⚠️ 15+ Gündür Sipariş Vermeyen:{" "}
-                        {crmCustomers.filter((c) => c.daysSinceLastOrder >= 15).length} Kişi
+                        {crmCustomers.filter((c) => (c.daysSinceLastOrder ?? 0) >= 15).length} Kişi
                       </span>
                     </div>
                     <button
