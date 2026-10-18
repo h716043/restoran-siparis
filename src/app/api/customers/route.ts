@@ -255,9 +255,9 @@ export async function POST(req: NextRequest) {
           const reasonNote = body.reason ? `\n📌 Not: _${String(body.reason).trim()}_` : "";
           const msg = `🎁 *${settings.name}*\n\nMerhaba *${updatedUser.name}*, cüzdanınıza *+${actualDiff.toFixed(
             2
-          )} ${settings.currency}* Hediye Para Puan tanımlandı! 🎉${reasonNote}\n💰 Güncel Cüzdan Bakiyeniz: *${updatedUser.loyaltyPoints.toFixed(
-            2
-          )} ${settings.currency}*\n\nKeyifli siparişler dileriz!`;
+          )} ${settings.currency}* Hediye Para Puan tanımlandı! 🎉${reasonNote}\n💰 Güncel Cüzdan Bakiyeniz: *${Number(
+            updatedUser.loyaltyPoints || 0
+          ).toFixed(2)} ${settings.currency}*\n\nKeyifli siparişler dileriz!`;
           await sendWhatsAppMessage(phone, msg, "campaign").catch(() => {});
         }
       }

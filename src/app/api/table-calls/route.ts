@@ -3,9 +3,9 @@ import {
   createTableCall,
   getAllTableCalls,
   getTableCalls,
-  isSameTableName,
   resolveTableCall,
 } from "@/lib/db";
+import { isSameTableName } from "@/types";
 import {
   pullActivityFromCloud,
   syncActivityWithCloud,
