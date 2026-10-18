@@ -792,22 +792,37 @@ export default function CourierPage() {
                       order.customerAddress || ""
                     )}`;
                 const waPhone = normalizeWhatsAppPhone(order.customerPhone);
-                const waLocationUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
-                  `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişiniz için kuryeniz yola çıktı 🛵 Adresinizi daha hızlı bulabilmem için bu mesaja WhatsApp üzerinden konum gönderebilir misiniz? 📍`
+                const waOnWayUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
+                  `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişinizle yola çıktım 🛵 Yaklaşık 10 dakika içinde adresinizdeyim.`
                 )}`;
+                const waAtDoorUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
+                  `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişinizle şu an binanızın önündeyim / kapıdayım 🏠`
+                )}`;
+                const waLocationUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
+                  `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişiniz için adresinizi daha hızlı bulabilmem adına bu mesaja WhatsApp üzerinden konum gönderebilir misiniz? 📍`
+                )}`;
+
+                const bracketTags = Array.from(
+                  (order.orderNote || "").matchAll(/\[([^\]]+)\]/g)
+                ).map((m) => m[1]);
+                const plainOrderNote = (order.orderNote || "")
+                  .replace(/\[[^\]]+\]/g, "")
+                  .trim();
 
                 return (
                   <div
                     key={order.id}
                     className={`rounded-2xl border p-4 space-y-3.5 ${
-                      order.status === "ready"
+                      elapsedMins >= 25
+                        ? "bg-slate-900 border-rose-500/80 shadow-lg shadow-rose-950/40"
+                        : order.status === "ready"
                         ? "bg-slate-900 border-orange-500/60 shadow-lg shadow-orange-950/30"
                         : "bg-slate-900/90 border-slate-800"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="bg-orange-600 text-white font-black text-sm px-2.5 py-0.5 rounded-lg">
                             #{order.orderNumber}
                           </span>
@@ -822,8 +837,19 @@ export default function CourierPage() {
                               ? "🛵 Yolda (Dağıtımda)"
                               : "👨‍🍳 Mutfakta Hazırlanıyor"}
                           </span>
-                          <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                            <Clock className="w-3 h-3" /> {elapsedMins} dk
+                          <span
+                            className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md ${
+                              elapsedMins >= 25
+                                ? "bg-rose-600 text-white animate-pulse"
+                                : elapsedMins >= 15
+                                ? "bg-amber-500/20 text-amber-300"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            <Clock className="w-3 h-3" />{" "}
+                            {elapsedMins >= 25
+                              ? `🚨 Gecikti (${elapsedMins} dk)`
+                              : `${elapsedMins} dk`}
                           </span>
                         </div>
                         <h3 className="font-extrabold text-base text-white mt-1.5">
@@ -909,8 +935,8 @@ export default function CourierPage() {
                       </div>
                     </div>
 
-                    {/* Açık Adres Kutusu */}
-                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                    {/* Açık Adres & Hızlı Teslimat Tercih Rozetleri Kutusu */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
                           <MapPin className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
@@ -924,18 +950,39 @@ export default function CourierPage() {
                           </span>
                         )}
                       </div>
-                      {order.orderNote && (
+
+                      {bracketTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {bracketTags.map((tag, idx) => (
+                            <span
+                              key={idx}
+                              className={`text-[11px] font-extrabold px-2 py-1 rounded-lg border ${
+                                tag.includes("Zile Basmayın") ||
+                                tag.includes("Kapıya Bırakın")
+                                  ? "bg-rose-950/90 text-rose-200 border-rose-600/80"
+                                  : tag.includes("Bahşiş")
+                                  ? "bg-emerald-950/90 text-emerald-200 border-emerald-600/80"
+                                  : "bg-amber-950/80 text-amber-200 border-amber-700/80"
+                              }`}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {plainOrderNote && (
                         <div className="text-xs text-amber-300 bg-amber-950/50 border border-amber-800/50 px-2.5 py-1.5 rounded-lg">
-                          📝 Not: {order.orderNote}
+                          📝 Not: {plainOrderNote}
                         </div>
                       )}
                     </div>
 
-                    {/* Hızlı Arama, Harita ve WhatsApp Konum İsteme Butonları */}
-                    <div className="grid grid-cols-3 gap-2">
+                    {/* Hızlı Arama ve Harita Navigasyon Butonları */}
+                    <div className="grid grid-cols-2 gap-2">
                       <a
                         href={`tel:${order.customerPhone}`}
-                        className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px] py-2.5 px-2 rounded-xl border border-slate-700 transition"
+                        className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 px-3 rounded-xl border border-slate-700 transition"
                       >
                         <Phone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         <span>Müşteriyi Ara</span>
@@ -944,7 +991,7 @@ export default function CourierPage() {
                         href={mapsUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className={`flex items-center justify-center gap-1.5 font-bold text-[11px] py-2.5 px-2 rounded-xl border transition ${
+                        className={`flex items-center justify-center gap-1.5 font-bold text-xs py-2.5 px-3 rounded-xl border transition ${
                           hasExactGps
                             ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border-emerald-600/80 shadow-sm"
                             : "bg-blue-950/80 hover:bg-blue-900 text-blue-200 border-blue-800"
@@ -955,17 +1002,42 @@ export default function CourierPage() {
                             hasExactGps ? "text-emerald-400" : "text-blue-400"
                           }`}
                         />
-                        <span>{hasExactGps ? "GPS Pin Rota" : "Yol Tarifi"}</span>
+                        <span>{hasExactGps ? "🎯 GPS Pin Rota" : "🗺️ Yol Tarifi"}</span>
                       </a>
-                      <a
-                        href={waLocationUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-center gap-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-200 font-bold text-[11px] py-2.5 px-2 rounded-xl border border-emerald-800 transition"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Konum İste</span>
-                      </a>
+                    </div>
+
+                    {/* Tek Tuşla Müşteriye Hazır WhatsApp Mesajları */}
+                    <div className="bg-slate-950/70 border border-slate-800/90 rounded-xl p-2 space-y-1.5">
+                      <div className="text-[10px] font-bold text-emerald-400 px-1 flex items-center gap-1">
+                        <MessageCircle className="w-3 h-3" />
+                        <span>Tek Tuşla Müşteriye Hazır WhatsApp Mesajı Gönder:</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <a
+                          href={waOnWayUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-200 font-bold text-[11px] py-2 px-1.5 rounded-lg border border-emerald-800/80 transition text-center"
+                        >
+                          <span>🛵 Yola Çıktım</span>
+                        </a>
+                        <a
+                          href={waAtDoorUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-1 bg-amber-950/80 hover:bg-amber-900 text-amber-200 font-bold text-[11px] py-2 px-1.5 rounded-lg border border-amber-800/80 transition text-center"
+                        >
+                          <span>🏠 Kapıdayım</span>
+                        </a>
+                        <a
+                          href={waLocationUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-1 bg-sky-950/80 hover:bg-sky-900 text-sky-200 font-bold text-[11px] py-2 px-1.5 rounded-lg border border-sky-800/80 transition text-center"
+                        >
+                          <span>📍 Konum İste</span>
+                        </a>
+                      </div>
                     </div>
 
                     {/* Sipariş İçeriği Özeti */}
@@ -979,7 +1051,7 @@ export default function CourierPage() {
                             {item.name}
                           </span>
                           <span className="text-slate-400">
-                            {item.totalPrice.toFixed(0)} ₺
+                            {item.totalPrice.toFixed(2)} ₺
                           </span>
                         </div>
                       ))}
@@ -1015,7 +1087,7 @@ export default function CourierPage() {
                       >
                         <CheckCircle2 className="w-5 h-5" />
                         <span>
-                          Teslim Edildi ({order.totalAmount.toFixed(0)} ₺{" "}
+                          Teslim Edildi ({order.totalAmount.toFixed(2)} ₺{" "}
                           {order.paymentMethod === "cash" ? "Nakit" : "POS"}{" "}
                           Tahsil Edildi)
                         </span>

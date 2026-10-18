@@ -2375,17 +2375,52 @@ export default function AdminDashboardPage() {
                   )}
                 </div>
 
-                {/* 📊 SAATLİK SİPARİŞ YOĞUNLUK ISI HARİTASI (08:00 - 23:00) */}
+                {/* 📊 SAATLİK SİPARİŞ YOĞUNLUK ISI HARİTASI & AKILLI HAPPY HOUR / RFM RADARI */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div>
                       <h3 className="font-bold text-base text-slate-900">
                         📊 Saatlik Sipariş Yoğunluk Isı Haritası (08:00 - 23:00)
                       </h3>
                       <p className="text-xs text-slate-500">
-                        Restoranın en yoğun olduğu saat aralıklarını ve saatlik ciro dağılımını izleyin
+                        Restoranın en yoğun ve en sakin saatlerini analiz edin, sakin saatlere tek tıkla Happy Hour tanımlayın
                       </p>
                     </div>
+                    {settings && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const daytimeQuiet = hourlyStats
+                            .filter((h) => h.hour >= 13 && h.hour <= 17)
+                            .sort((a, b) => a.count - b.count)[0];
+                          const startH = daytimeQuiet ? daytimeQuiet.hour : 14;
+                          const endH = Math.min(23, startH + 3);
+                          const startStr = `${String(startH).padStart(2, "0")}:00`;
+                          const endStr = `${String(endH).padStart(2, "0")}:00`;
+                          persistSettings(
+                            {
+                              ...settings,
+                              happyHourConfig: {
+                                enabled: true,
+                                title: "Happy Hour",
+                                startTime: startStr,
+                                endTime: endStr,
+                                discountPercent:
+                                  settings.happyHourConfig?.discountPercent ?? 15,
+                                mode:
+                                  settings.happyHourConfig?.mode ?? "discount",
+                                categoryIds:
+                                  settings.happyHourConfig?.categoryIds,
+                              },
+                            },
+                            `⚡ En sakin saat aralığı (${startStr} - ${endStr}) için Happy Hour otomatik tanımlandı!`
+                          );
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs transition cursor-pointer shadow-xs"
+                      >
+                        ⚡ En Sakin Saatlere Happy Hour Tanımla
+                      </button>
+                    )}
                   </div>
                   <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
                     {hourlyStats.map((h) => {
@@ -2410,11 +2445,40 @@ export default function AdminDashboardPage() {
                             {h.count} Sipariş
                           </div>
                           <div className="text-[10px] opacity-85 font-semibold">
-                            {h.revenue.toFixed(0)} {settings?.currency}
+                            {h.revenue.toFixed(2)} {settings?.currency}
                           </div>
                         </div>
                       );
                     })}
+                  </div>
+
+                  {/* 🎯 Müşteri Sadakat & Kayıp Riski (RFM) Radarı Özeti */}
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3.5 rounded-xl">
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <span className="font-extrabold text-slate-800">
+                        🎯 Müşteri RFM Radarı:
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 font-bold">
+                        🏆 VIP Müşteri: {crmCustomers.filter((c) => c.isVip).length} Kişi
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-900 font-bold">
+                        ⚠️ 15+ Gündür Sipariş Vermeyen:{" "}
+                        {crmCustomers.filter((c) => c.daysSinceLastOrder >= 15).length} Kişi
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCrmSegment("inactive");
+                        setCampaignMessage(
+                          "Merhaba {isim} 👋 Sizi özledik! Bugün vereceğiniz siparişte geçerli özel indirim kuponunuz: MERHABA50 🎁 Sıcak lezzetlerimiz için hemen sipariş verebilirsiniz!"
+                        );
+                        setActiveTab("crm");
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition cursor-pointer"
+                    >
+                      💌 Kayıp Müşterilere WhatsApp Kampanyası Başlat →
+                    </button>
                   </div>
                 </div>
               </div>

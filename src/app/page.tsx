@@ -213,6 +213,11 @@ function CustomerMenuContent() {
     useState(true);
   const [checkoutAddressTitle, setCheckoutAddressTitle] = useState("Evim");
   const [orderNote, setOrderNote] = useState("");
+  const [selectedQuickPrefs, setSelectedQuickPrefs] = useState<string[]>([]);
+  const [selectedTipPreset, setSelectedTipPreset] = useState<
+    "none" | "20" | "30" | "50" | "pct5" | "pct10"
+  >("none");
+  const [splitPeopleCount, setSplitPeopleCount] = useState<number>(1);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -1582,9 +1587,25 @@ function CustomerMenuContent() {
   const surchargeAmount =
     activePriceAdjustment.type === "surcharge" ? activePriceAdjustment.amount : 0;
 
+  const calculatedTipAmount = useMemo(() => {
+    if (cart.length === 0 || selectedTipPreset === "none") return 0;
+    if (selectedTipPreset === "20") return 20;
+    if (selectedTipPreset === "30") return 30;
+    if (selectedTipPreset === "50") return 50;
+    if (selectedTipPreset === "pct5") {
+      return Number(((subtotal * 5) / 100).toFixed(2));
+    }
+    if (selectedTipPreset === "pct10") {
+      return Number(((subtotal * 10) / 100).toFixed(2));
+    }
+    return 0;
+  }, [cart.length, selectedTipPreset, subtotal]);
+
   const baseTotalBeforeLoyalty = Number(
     (
-      Math.max(0, subtotal - discountAmount + surchargeAmount) + deliveryFee
+      Math.max(0, subtotal - discountAmount + surchargeAmount) +
+      deliveryFee +
+      calculatedTipAmount
     ).toFixed(2)
   );
 
@@ -1877,7 +1898,15 @@ function CustomerMenuContent() {
             deliveryTiming === "scheduled"
               ? `Bugün ${scheduledTimeSlot}`
               : undefined,
-          orderNote,
+          orderNote: [
+            ...selectedQuickPrefs.map((pref) => `[${pref}]`),
+            calculatedTipAmount > 0
+              ? `[💚 Bahşiş: +${calculatedTipAmount.toFixed(2)} ${settings?.currency || "₺"}]`
+              : "",
+            orderNote.trim(),
+          ]
+            .filter(Boolean)
+            .join(" "),
           paymentMethod,
           subtotal,
           discountAmount,
@@ -1901,6 +1930,10 @@ function CustomerMenuContent() {
         setCouponInput("");
         setCouponMessage(null);
         setUseLoyaltyPoints(false);
+        setSelectedQuickPrefs([]);
+        setSelectedTipPreset("none");
+        setSplitPeopleCount(1);
+        setOrderNote("");
         setDeliveryTiming("asap");
         setCheckoutBuildingNo("");
         setCheckoutFloor("");
@@ -6111,6 +6144,79 @@ function CustomerMenuContent() {
             </div>
           )}
 
+          {/* 💚 İsteğe Bağlı Kurye / Garson Bahşişi & 👥 Alman Usulü Hesap Bölücü */}
+          <div className="border-t border-slate-200 pt-2.5 space-y-2">
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-1">
+                <span>
+                  💚 {orderType === "dine_in" ? "Garson" : "Kurye"} Bahşişi (İsteğe Bağlı)
+                </span>
+                {calculatedTipAmount > 0 && (
+                  <span className="text-emerald-700 font-extrabold">
+                    +{calculatedTipAmount.toFixed(2)} {settings?.currency}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-6 gap-1">
+                {(
+                  [
+                    { id: "none", label: "Yok" },
+                    { id: "20", label: "+20₺" },
+                    { id: "30", label: "+30₺" },
+                    { id: "50", label: "+50₺" },
+                    { id: "pct5", label: "+%5" },
+                    { id: "pct10", label: "+%10" },
+                  ] as const
+                ).map((tp) => (
+                  <button
+                    key={tp.id}
+                    type="button"
+                    onClick={() => setSelectedTipPreset(tp.id)}
+                    className={`py-1 rounded-lg text-[10px] font-extrabold border transition cursor-pointer ${
+                      selectedTipPreset === tp.id
+                        ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                        : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    {tp.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-700">
+                  👥 Hesabı Böl (Alman Usulü):
+                </span>
+                <div className="flex items-center gap-1">
+                  {[1, 2, 3, 4, 5, 6].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setSplitPeopleCount(cnt)}
+                      className={`w-6 h-6 rounded-md text-[10px] font-extrabold border transition cursor-pointer ${
+                        splitPeopleCount === cnt
+                          ? "bg-indigo-600 text-white border-indigo-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {cnt === 1 ? "Tek" : `${cnt}K`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {splitPeopleCount > 1 && (
+                <div className="flex items-center justify-between text-xs font-extrabold text-indigo-800 bg-indigo-50/80 border border-indigo-200/70 rounded-lg px-2.5 py-1">
+                  <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
+                  <span>
+                    {(totalAmount / splitPeopleCount).toFixed(2)} {settings?.currency}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Tutar Özeti */}
           <div className="border-t border-slate-200 pt-3 space-y-1.5 text-sm">
             <div className="flex justify-between text-slate-600">
@@ -6132,6 +6238,16 @@ function CustomerMenuContent() {
                 <span>{activePriceAdjustment.label}</span>
                 <span>
                   +{surchargeAmount.toFixed(2)} {settings?.currency}
+                </span>
+              </div>
+            )}
+            {calculatedTipAmount > 0 && (
+              <div className="flex justify-between text-emerald-700 font-bold">
+                <span>
+                  💚 {orderType === "dine_in" ? "Garson" : "Kurye"} Bahşişi
+                </span>
+                <span>
+                  +{calculatedTipAmount.toFixed(2)} {settings?.currency}
                 </span>
               </div>
             )}
@@ -6565,17 +6681,91 @@ function CustomerMenuContent() {
           </select>
         </div>
 
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">
-            Sipariş Notu (İsteğe Bağlı)
+        <div className="space-y-2">
+          <label className="block text-xs font-bold text-slate-700">
+            Hızlı Teslimat & Servis Tercihleri (Tek Dokunuş)
           </label>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              ...(orderType === "delivery"
+                ? [
+                    "🔕 Zile Basmayın (Bebek Uyuyor)",
+                    "🚪 Kapıya Bırakın (Temassız)",
+                    "📞 Gelince Telefonla Arayın",
+                  ]
+                : []),
+              "🌿 Plastik Çatal/Servis İstemiyorum",
+              "🌶️ Turşu / Baharat Bol Olsun",
+            ].map((pref) => {
+              const isSelected = selectedQuickPrefs.includes(pref);
+              return (
+                <button
+                  key={pref}
+                  type="button"
+                  onClick={() =>
+                    setSelectedQuickPrefs((prev) =>
+                      prev.includes(pref)
+                        ? prev.filter((p) => p !== pref)
+                        : [...prev, pref]
+                    )
+                  }
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                    isSelected
+                      ? "bg-orange-600 text-white border-orange-600 shadow-xs"
+                      : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
+                  }`}
+                >
+                  {isSelected ? `✓ ${pref}` : pref}
+                </button>
+              );
+            })}
+          </div>
           <input
             type="text"
-            placeholder="Zile basmayın, peçete bol olsun vb."
+            placeholder="Ek Sipariş Notu (Örn: Soğansız olsun, 2. zili çalın vb.)"
             value={orderNote}
             onChange={(e) => setOrderNote(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl"
           />
+        </div>
+
+        {/* 💚 Kurye / Garson Bahşişi Seçimi */}
+        <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+            <span>
+              💚 {orderType === "dine_in" ? "Garson" : "Kurye"} Bahşişi (İsteğe Bağlı)
+            </span>
+            {calculatedTipAmount > 0 && (
+              <span className="text-emerald-700 font-extrabold">
+                +{calculatedTipAmount.toFixed(2)} {settings?.currency}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-6 gap-1">
+            {(
+              [
+                { id: "none", label: "Yok" },
+                { id: "20", label: "+20₺" },
+                { id: "30", label: "+30₺" },
+                { id: "50", label: "+50₺" },
+                { id: "pct5", label: "+%5" },
+                { id: "pct10", label: "+%10" },
+              ] as const
+            ).map((tp) => (
+              <button
+                key={tp.id}
+                type="button"
+                onClick={() => setSelectedTipPreset(tp.id)}
+                className={`py-1 rounded-lg text-[10px] font-extrabold border transition cursor-pointer ${
+                  selectedTipPreset === tp.id
+                    ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                {tp.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {canRedeemPoints && (
@@ -6597,6 +6787,32 @@ function CustomerMenuContent() {
         )}
 
         <div className="pt-2 border-t border-slate-100 space-y-1">
+          {discountAmount > 0 && (
+            <div className="flex items-center justify-between text-xs font-bold text-emerald-600">
+              <span>{activePriceAdjustment.label}:</span>
+              <span>
+                -{discountAmount.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          )}
+          {surchargeAmount > 0 && (
+            <div className="flex items-center justify-between text-xs font-bold text-rose-600">
+              <span>{activePriceAdjustment.label}:</span>
+              <span>
+                +{surchargeAmount.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          )}
+          {calculatedTipAmount > 0 && (
+            <div className="flex items-center justify-between text-xs font-bold text-emerald-700">
+              <span>
+                💚 {orderType === "dine_in" ? "Garson" : "Kurye"} Bahşişi:
+              </span>
+              <span>
+                +{calculatedTipAmount.toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          )}
           {loyaltyPointsToUse > 0 && (
             <div className="flex items-center justify-between text-xs font-bold text-amber-700">
               <span>Kullanılan Para Puan:</span>
@@ -6611,6 +6827,14 @@ function CustomerMenuContent() {
               {totalAmount.toFixed(2)} {settings?.currency}
             </span>
           </div>
+          {splitPeopleCount > 1 && (
+            <div className="flex items-center justify-between text-xs font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1">
+              <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
+              <span>
+                {(totalAmount / splitPeopleCount).toFixed(2)} {settings?.currency}
+              </span>
+            </div>
+          )}
           {isLoyaltyEnabled && estimatedPointsToEarn > 0 && (
             <div className="text-[11px] font-bold text-emerald-700 text-right">
               🎁 Bu siparişten +{estimatedPointsToEarn.toFixed(2)}{" "}

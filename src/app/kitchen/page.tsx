@@ -1317,16 +1317,40 @@ export default function KitchenTabletPage() {
     });
   };
 
+  const getOrderElapsedMins = (ord: Order) =>
+    Math.max(
+      0,
+      Math.floor((nowMs - new Date(ord.createdAt).getTime()) / 60000)
+    );
+
+  const overdueOrdersCount = orders.filter(
+    (o) =>
+      (o.status === "pending" || o.status === "accepted") &&
+      getOrderElapsedMins(o) >= 20
+  ).length;
+
+  const sortByPriorityAndSla = (a: Order, b: Order) => {
+    const prioDiff = Number(Boolean(b.isPriority)) - Number(Boolean(a.isPriority));
+    if (prioDiff !== 0) return prioDiff;
+    const aElapsed = getOrderElapsedMins(a);
+    const bElapsed = getOrderElapsedMins(b);
+    const aOverdue = aElapsed >= 20 ? 1 : 0;
+    const bOverdue = bElapsed >= 20 ? 1 : 0;
+    if (bOverdue !== aOverdue) return bOverdue - aOverdue;
+    if (aOverdue && bOverdue) return bElapsed - aElapsed;
+    return 0;
+  };
+
   const pendingOrders = orders
     .filter((o) => o.status === "pending" && matchesStationFilter(o))
-    .sort((a, b) => Number(Boolean(b.isPriority)) - Number(Boolean(a.isPriority)));
+    .sort(sortByPriorityAndSla);
   const preparingOrders = orders
     .filter(
       (o) =>
         (o.status === "accepted" || o.status === "ready") &&
         matchesStationFilter(o)
     )
-    .sort((a, b) => Number(Boolean(b.isPriority)) - Number(Boolean(a.isPriority)));
+    .sort(sortByPriorityAndSla);
   const completedOrders = orders.filter((o) => o.status === "completed");
   const rejectedOrders = orders.filter((o) => o.status === "rejected");
   const pendingTableCalls = tableCalls.filter((c) => c.status === "pending");
@@ -1935,7 +1959,13 @@ export default function KitchenTabletPage() {
                   { id: "grill", label: "🍖 Ana Yemek / Izgara / Fırın" },
                   { id: "cold", label: "🥗 Başlangıç / Salata / Çorba" },
                   { id: "drink_dessert", label: "🥤 İçecek & Tatlı" },
-                  { id: "late", label: "🚨 Gecikenler (20+ dk)" },
+                  {
+                    id: "late",
+                    label:
+                      overdueOrdersCount > 0
+                        ? `🚨 Gecikenler (${overdueOrdersCount} ACİL)`
+                        : "🚨 Gecikenler (20+ dk)",
+                  },
                 ].map((st) => (
                   <button
                     key={st.id}
@@ -1948,6 +1978,8 @@ export default function KitchenTabletPage() {
                         ? st.id === "late"
                           ? "bg-red-600 text-white shadow"
                           : "bg-orange-600 text-white shadow"
+                        : st.id === "late" && overdueOrdersCount > 0
+                        ? "bg-red-950/90 text-red-200 border border-red-500 animate-pulse"
                         : "bg-slate-800 text-slate-300 hover:bg-slate-700"
                     }`}
                   >
@@ -1958,9 +1990,9 @@ export default function KitchenTabletPage() {
               <div className="flex items-center gap-2 text-[11px] font-bold text-slate-400">
                 <span className="text-emerald-400">🟢 0-15 dk Normal</span>
                 <span>•</span>
-                <span className="text-amber-300">🟡 15-25 dk Uyarı</span>
+                <span className="text-amber-300">🟡 15-20 dk Uyarı</span>
                 <span>•</span>
-                <span className="text-red-400">🔴 25+ dk Gecikme Alarmı</span>
+                <span className="text-red-400">🔴 20+ dk SLA Gecikme Alarmı (En Üste Sabitlenir)</span>
               </div>
             </div>
 
@@ -2639,6 +2671,28 @@ export default function KitchenTabletPage() {
                             </div>
                           );
                         })}
+                        {order.orderNote && (
+                          <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                            <div className="flex flex-wrap gap-1.5">
+                              {Array.from(
+                                order.orderNote.matchAll(/\[([^\]]+)\]/g)
+                              ).map((m, idx) => (
+                                <span
+                                  key={idx}
+                                  className="text-[11px] font-extrabold px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-500/40"
+                                >
+                                  {m[1]}
+                                </span>
+                              ))}
+                            </div>
+                            {order.orderNote.replace(/\[[^\]]+\]/g, "").trim() && (
+                              <div className="text-xs text-amber-300 font-semibold">
+                                📌 Sipariş Notu:{" "}
+                                {order.orderNote.replace(/\[[^\]]+\]/g, "").trim()}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Paket Servis İçin Kurye Atama Seçicisi */}
