@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Restoran POS, Mutfak, Garson, Kurye & Admin Paneli — Detaylı Günlük Kullanım Kılavuzu</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #e2e8f0;
+      --primary: #ea580c;
+      --primary-dark: #c2410c;
+      --teal: #0d9488;
+      --indigo: #4f46e5;
+      --emerald: #059669;
+      --rose: #e11d48;
+      --amber: #d97706;
+      --dark: #0f172a;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    /* Üst Hero */
+    .hero {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #9a3412 100%);
+      color: #ffffff;
+      padding: 3.25rem 1.5rem;
+      border-bottom: 5px solid var(--primary);
+    }
+
+    .hero-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(234, 88, 12, 0.28);
+      border: 1px solid rgba(251, 146, 60, 0.6);
+      color: #fed7aa;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.38rem 0.95rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+
+    .hero h1 {
+      font-size: 2.3rem;
+      font-weight: 900;
+      margin-bottom: 0.85rem;
+      line-height: 1.22;
+    }
+
+    .hero p {
+      color: #e2e8f0;
+      font-size: 1.05rem;
+      max-width: 960px;
+    }
+
+    .role-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.75rem;
+    }
+
+    .role-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      text-decoration: none;
+      padding: 0.65rem 1.15rem;
+      border-radius: 0.8rem;
+      font-size: 0.86rem;
+      font-weight: 700;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.2s;
+    }
+
+    .role-link:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+      transform: translateY(-1px);
+    }
+
+    /* Ana Düzen */
+    .layout {
+      max-width: 1280px;
+      margin: 2rem auto;
+      padding: 0 1.25rem;
+      display: grid;
+      grid-template-columns: 310px 1fr;
+      gap: 2rem;
+      align-items: start;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: static !important;
+        max-height: none !important;
+      }
+    }
+
+    /* Sol Menü */
+    .sidebar {
+      position: sticky;
+      top: 1.25rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.1rem;
+      padding: 1.25rem;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+      max-height: calc(100vh - 2.5rem);
+      overflow-y: auto;
+    }
+
+    .sidebar h3 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .nav-list a {
+      display: block;
+      text-decoration: none;
+      color: var(--text);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.6rem;
+      transition: all 0.15s;
+    }
+
+    .nav-list a:hover {
+      background: #fff7ed;
+      color: var(--primary);
+    }
+
+    /* İçerik Kartları */
+    .content {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .section-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.25rem;
+      padding: 2.15rem;
+      box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+      scroll-margin-top: 1.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      margin-bottom: 1.35rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #f1f5f9;
+    }
+
+    .step-num {
+      width: 2.6rem;
+      height: 2.6rem;
+      border-radius: 0.8rem;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 900;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .section-header h2 {
+      font-size: 1.45rem;
+      font-weight: 800;
+      color: var(--dark);
+    }
+
+    h3 {
+      font-size: 1.14rem;
+      font-weight: 800;
+      margin: 1.65rem 0 0.65rem 0;
+      color: #1e293b;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    h4 {
+      font-size: 1rem;
+      font-weight: 800;
+      margin: 0.9rem 0 0.4rem 0;
+      color: #0f172a;
+    }
+
+    p {
+      color: #334155;
+      margin-bottom: 0.85rem;
+      font-size: 0.95rem;
+    }
+
+    ul, ol {
+      margin: 0.5rem 0 1.25rem 1.4rem;
+      color: #334155;
+      font-size: 0.95rem;
+    }
+
+    li {
+      margin-bottom: 0.55rem;
+    }
+
+    /* Kutu Grid */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.1rem;
+      margin: 1.1rem 0;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin: 1.1rem 0;
+    }
+
+    @media (max-width: 820px) {
+      .grid-2, .grid-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .feature-box {
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      background: #f8fafc;
+    }
+
+    .feature-box.orange {
+      border-left: 5px solid var(--primary);
+      background: #fff7ed;
+    }
+
+    .feature-box.teal {
+      border-left: 5px solid var(--teal);
+      background: #f0fdfa;
+    }
+
+    .feature-box.indigo {
+      border-left: 5px solid var(--indigo);
+      background: #eef2ff;
+    }
+
+    .feature-box.rose {
+      border-left: 5px solid var(--rose);
+      background: #fff1f2;
+    }
+
+    .feature-box h4 {
+      margin-top: 0;
+      margin-bottom: 0.45rem;
+      font-size: 1.02rem;
+    }
+
+    .feature-box p {
+      margin-bottom: 0;
+      font-size: 0.9rem;
+    }
+
+    /* Uyarı Kutuları */
+    .alert {
+      border-radius: 0.9rem;
+      padding: 1.05rem 1.25rem;
+      margin: 1.1rem 0;
+      font-size: 0.92rem;
+      border-left: 5px solid;
+    }
+
+    .alert-info {
+      background: #f0fdfa;
+      border-color: #0d9488;
+      color: #115e59;
+    }
+
+    .alert-warn {
+      background: #fffbeb;
+      border-color: #f59e0b;
+      color: #92400e;
+    }
+
+    .alert-success {
+      background: #ecfdf5;
+      border-color: #10b981;
+      color: #065f46;
+    }
+
+    code.inline {
+      background: #f1f5f9;
+      color: #be123c;
+      padding: 0.15rem 0.45rem;
+      border-radius: 0.35rem;
+      font-family: "Consolas", monospace;
+      font-size: 0.86em;
+      font-weight: 700;
+    }
+
+    /* Rozetler (Pills) */
+    .pill {
+      display: inline-block;
+      padding: 0.18rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 800;
+    }
+    .pill-orange { background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; }
+    .pill-maroon { background: #ffe4e6; color: #9f1239; border: 1px solid #fda4af; }
+    .pill-green { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+    .pill-purple { background: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; }
+    .pill-blue { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+
+    /* Tablolar */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.78rem 1rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5f9;
+      font-weight: 800;
+      color: var(--dark);
+    }
+
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+      margin-top: 1rem;
+    }
+
+    .step-item {
+      border: 1px solid var(--border);
+      border-radius: 0.95rem;
+      padding: 1.25rem 1.35rem;
+      background: #fafafa;
+    }
+
+    .step-item strong.title {
+      display: block;
+      font-size: 1.04rem;
+      color: var(--primary-dark);
+      margin-bottom: 0.45rem;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      margin-top: 3rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ÜST HERO ALANI -->
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="badge">📖 PERSONEL, KASİYER, GARSON, KURYE &amp; YÖNETİCİ EĞİTİM REHBERİ</div>
+      <h1>Restoran Sipariş, Mutfak POS &amp; SambaPOS V5 — Günlük Kullanım Kılavuzu</h1>
+      <p>
+        Sabah dükkan açılışından akşam Z raporu alınmasına kadar; <strong>Kasiyer / Mutfak Personeli</strong>,
+        <strong>Garsonlar</strong>, <strong>Paket Kuryeleri</strong> ve <strong>İşletme Yöneticisinin</strong>
+        gün içinde ekranları nasıl kullanacağını adım adım anlatan pratik kullanım kılavuzu.
+      </p>
+      <div class="role-badges">
+        <a href="#sabah-acilis" class="role-link">☀️ Sabah Açılış Rutini</a>
+        <a href="#mutfak-kasa" class="role-link">👨‍🍳 Mutfak &amp; Kasa POS (/kitchen)</a>
+        <a href="#masa-tahsilat" class="role-link">🪑 Canlı Masalar &amp; Hesap Kapatma</a>
+        <a href="#garson-ekrani" class="role-link">📱 Garson Cep Terminali (/waiter)</a>
+        <a href="#kurye-ekrani" class="role-link">🛵 Kurye Ekranı (/courier)</a>
+        <a href="#admin-paneli" class="role-link">⚙️ Yönetici Paneli (/admin)</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ANA DÜZEN -->
+  <div class="layout">
+
+    <!-- SOL MENÜ -->
+    <aside class="sidebar">
+      <h3>Kullanım Bölümleri</h3>
+      <ul class="nav-list">
+        <li><a href="#sabah-acilis">1. Sabah Dükkan Açılışı &amp; Başlatma</a></li>
+        <li><a href="#mutfak-kasa">2. Mutfak &amp; Kasa POS Ekranı (/kitchen)</a></li>
+        <li><a href="#telefon-kasa-pos">3. Telefon &amp; Kasa Siparişi Girme</a></li>
+        <li><a href="#masa-tahsilat">4. Canlı Masalar, POS Durumu &amp; Ödeme</a></li>
+        <li><a href="#garson-ekrani">5. Garson Cep Terminali (/waiter)</a></li>
+        <li><a href="#kurye-ekrani">6. Kurye Teslimat Ekranı (/courier)</a></li>
+        <li><a href="#admin-paneli">7. Admin Paneli: Sipariş Türü &amp; Masalar</a></li>
+        <li><a href="#musteri-cari-pos">8. Müşteri Arama, Cari &amp; POS Aktarımı</a></li>
+        <li><a href="#menu-kampanya-stok">9. Menü, Porsiyon, Kampanya &amp; Stok</a></li>
+        <li><a href="#z-raporu-kapanis">10. Akşam Kapanış, Kurye Hesabı &amp; Z Raporu</a></li>
+      </ul>
+    </aside>
+
+    <!-- SAĞ İÇERİK -->
+    <main class="content">
+
+      <!-- 1. SABAH DÜKKAN AÇILIŞI -->
+      <section id="sabah-acilis" class="section-card">
+        <div class="section-header">
+          <div class="step-num">1</div>
+          <h2>Sabah Dükkan Açılışı &amp; Günlük Başlangıç Kontrolü (1 Dakika)</h2>
+        </div>
+        <p>
+          Sabah dükkanı açtığınızda kasiyerin veya sorumlu personelin yapması gereken işlemler şunlardır:
+        </p>
+
+        <div class="step-list">
+          <div class="step-item">
+            <strong class="title">1. Adım: Sistemi Başlatın (Otomatik Açılmadıysa)</strong>
+            <p>
+              Masaüstündeki <strong>"Restoran POS ve WhatsApp Başlat"</strong> kısayoluna (veya klasördeki <code class="inline">2-SISTEMI-BASLAT.bat</code> / <code class="inline">BASLAT.bat</code> dosyasına) çift tıklayın.
+              <em>(Eğer <code class="inline">3-OTOMATIK-BASLATMA-KUR.bat</code> kurulduysa bilgisayar açıldığında zaten kendiliğinden başlamış olacaktır).</em>
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">2. Adım: Siyah Pencereyi Kapatmayın (Simge Durumuna Küçültün)</strong>
+            <p>
+              Açılan siyah komut penceresi hem <strong>WhatsApp QR Mesaj Köprüsünü (Port 3001)</strong> hem de <strong>Sipariş Sunucusunu (Port 5439)</strong> çalıştırır.
+              Bu pencereyi <strong style="color:#dc2626;">çarpıdan kapatmayın</strong>; sağ üstteki <strong>"_" (Simge durumuna küçült)</strong> tuşuyla görev çubuğuna indirin.
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">3. Adım: Mutfak &amp; Kasa POS Ekranını Açın (http://localhost:5439/kitchen)</strong>
+            <p>
+              Tarayıcıda <code class="inline">http://localhost:5439/kitchen</code> adresini açın (Varsayılan Şifre: <code class="inline">1234</code>).
+              Üst bardaki <strong>🔊 Ses Açık</strong> ve <strong>🔒 Ekran Uyku Kilidi Aktif</strong> rozetlerinin yeşil olduğunu kontrol edin.
+              Tarayıcının ses çalmasına izin vermesi için sayfa açıldığında ekranda herhangi bir yere bir kez tıklayın.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. MUTFAK VE KASA POS EKRANI -->
+      <section id="mutfak-kasa" class="section-card">
+        <div class="section-header">
+          <div class="step-num">2</div>
+          <h2>Mutfak &amp; Kasa POS Ekranı Kullanımı (<code class="inline">/kitchen</code>)</h2>
+        </div>
+        <p>
+          Mutfak ve Kasa ekranı iki ana sütundan oluşur: <strong>Sol Sütun (Onay Bekleyen Yeni Siparişler)</strong> ve <strong>Sağ Sütun (Hazırlanan &amp; Yoldaki Siparişler)</strong>.
+        </p>
+
+        <h3>🔔 2.1. Yeni Sipariş Geldiğinde Ne Yapılır? (Sol Sütun)</h3>
+        <ol>
+          <li>
+            İnternetten (Netlify), Masadaki QR koddan veya Garson el terminalinden yeni bir sipariş geldiğinde <strong>sesli zil çalar</strong> ve üstte kırmızı/turuncu uyarı bandı yanıp söner.
+          </li>
+          <li>
+            Sipariş kartının üzerinde şunları görürsünüz:
+            <ul>
+              <li>Sipariş numarası (<code class="inline">#105</code>) ve türü (<span class="pill pill-orange">🛵 Paket Servis</span>, <span class="pill pill-purple">🪑 Masa B10 (4 Kişi)</span> veya <span class="pill pill-blue">🛍️ Gel-Al</span>).</li>
+              <li>Müşteri adı, telefonu, teslimat adresi, bölge adı ve ödeme yöntemi (<em>Nakit, Kapıda Kredi Kartı, Online Ödeme</em>).</li>
+              <li>Varsa <strong>⏰ İLERİ SAAT</strong> bilgisi (müşteri ileri bir saat seçtiyse mavi rozetle görünür).</li>
+              <li>Sipariş kalemleri, porsiyonları (<em>1.5 Porsiyon</em> vb.), seçmeli menü alt ürünleri (<em>📦 1. Ürün Seçimi, 📦 2. Ürün Seçimi</em>), ekstraları ve müşteri notu.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Tahmini Hazırlama Süresi Seçimi:</strong> Kartın altındaki <code class="inline">15 dk</code>, <code class="inline">25 dk</code>, <code class="inline">35 dk</code>, <code class="inline">45 dk</code>, <code class="inline">60 dk</code> butonlarından uygun olanı seçin.
+          </li>
+          <li>
+            <strong>Yeşil "SİPARİŞİ KABUL ET" Butonuna Basın:</strong>
+            <ul>
+              <li>Butona bastığınız anda buton <code class="inline">⏳ ONAYLANIYOR...</code> olarak kilitlenir (<strong>Çift tıklama koruması</strong> sayesinde yanlışlıkla iki kez basılsa bile çift fiş veya çift POS kaydı oluşmaz).</li>
+              <li>Sipariş anında sağ sütuna (<em>Hazırlananlar</em>) geçer.</li>
+              <li>Müşteriye otomatik olarak <em>"Siparişiniz onaylandı, yaklaşık 25 dk içinde hazırlanacaktır"</em> WhatsApp mesajı gider.</li>
+              <li><strong>Otomatik Fiş Yazdır</strong> açıksa 80mm termal yazıcıdan adisyon fişi otomatik çıkar.</li>
+              <li><strong>SambaPOS Modülü Açıksa:</strong> Sipariş otomatik olarak SambaPOS veritabanına adisyon olarak düşer (Kart üzerinde yeşil <code class="inline">🔌 POS #...</code> rozeti belirir).</li>
+            </ul>
+          </li>
+        </ol>
+
+        <h3>👨‍🍳 2.2. Hazırlanan Siparişler, İstasyon Filtresi ve Teslimat (Sağ Sütun)</h3>
+        <ul>
+          <li>
+            <strong>İstasyon Filtresi (KDS):</strong> Üstteki filtre butonlarıyla ekranda sadece <code class="inline">🍖 Ana Yemek / Izgara / Fırın</code>, <code class="inline">🥗 Başlangıç / Salata / Çorba</code>, <code class="inline">🥤 İçecek &amp; Tatlı</code> veya <code class="inline">🚨 Gecikenler (20+ dk)</code> kalemlerini süzebilirsiniz.
+          </li>
+          <li>
+            <strong>Kalem Bazlı Hazır İşaretleme (✓):</strong> Siparişin içindeki her yemeğin üzerine tıklayarak mutfaktan çıkan tabakları yeşil <code class="inline">✓</code> ile işaretleyebilirsiniz.
+          </li>
+          <li>
+            <strong>🚨 Acil Sabitle:</strong> Öncelikli/VIP siparişleri <code class="inline">🚨 Acil Sabitle</code> butonuyla listenin en üstüne sabitleyebilirsiniz.
+          </li>
+          <li>
+            <strong>Sipariş Hazır Olduğunda:</strong>
+            <ul>
+              <li><strong>Paket Sipariş İse:</strong> Açılır kutudan paketi götürecek <strong>Kuryeyi</strong> seçip mavi <strong>"Kuryeye Ver / Yola Çıkar"</strong> butonuna basın. Müşteriye <em>"Siparişiniz kuryeye verildi, yola çıktı!"</em> WhatsApp mesajı gider ve paket kuryenin cep telefonuna (<code class="inline">/courier</code>) düşer.</li>
+              <li><strong>Masa Siparişi İse:</strong> Turuncu <strong>"🔔 Garsonu Tezgaha Çağır"</strong> butonuna basarak garsonların telefonuna bildirim gönderebilir veya <strong>"Masaya Servis Edildi"</strong> diyebilirsiniz.</li>
+              <li><strong>Gel-Al Siparişi İse:</strong> <strong>"Teslime Hazır"</strong> butonuna basın; hem müşteriye WhatsApp mesajı gider hem de <code class="inline">/tv</code> ekranında sıra numarası anons edilir.</li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+
+      <!-- 3. TELEFON VE KASA SİPARİŞİ GİRME -->
+      <section id="telefon-kasa-pos" class="section-card">
+        <div class="section-header">
+          <div class="step-num">3</div>
+          <h2>Kasa POS &amp; Telefonla Arayan Müşteri Siparişi Girme</h2>
+        </div>
+        <p>
+          Telefonla arayan veya kasaya gelip sipariş veren müşteriler için Mutfak ekranının sağ üstündeki
+          <strong>"⚡ Hızlı İşlemler &amp; Menü &rarr; ➕ Kasa / Telefon Siparişi"</strong> butonuna tıklayın:
+        </p>
+
+        <ol>
+          <li>
+            <strong>Sipariş Tipini Seçin:</strong> Sağ taraftan <code class="inline">🛵 Paket</code>, <code class="inline">🪑 Masada</code> veya <code class="inline">🛍️ Gel-Al</code> seçin.
+          </li>
+          <li>
+            <strong>Müşteri Seçimi (2 Pratik Yöntem):</strong>
+            <ul>
+              <li><strong>Yöntem A (Kayıtlı Müşteri Arama Kutusu):</strong> <em>"🔍 Kayıtlı Müşteri Ara (İsim, Tel veya Adres)..."</em> kutusuna müşterinin adını, telefonunun birkaç rakamını veya mahallesini yazın. Açılan listeden müşteriye tıkladığınızda Ad Soyad, Telefon, Adres ve geçmiş sipariş/puan bilgisi anında dolar!</li>
+              <li><strong>Yöntem B (Telefon Numarası Yazma):</strong> Telefon kutusuna <code class="inline">0532...</code> yazdığınızda sistem kayıtlı müşteriyi otomatik tanır ve adresini getirir. Yeni müşteriyse adını ve adresini yazmanız yeterlidir; sipariş kaydedildiğinde müşteri otomatik olarak rehbere ve (POS açıksa) SambaPOS'a kaydedilir.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Ürün, Porsiyon ve Ekstra Seçimi:</strong> Sol taraftaki kategori sekmelerinden ürüne tıklayın. Ürünün porsiyon veya seçmeli alt ürünleri varsa açılan pencereden porsiyonu ve ekstraları seçip adisyona ekleyin.
+          </li>
+          <li>
+            <strong>Siparişi Tamamlama:</strong> Alttaki <strong>"✓ Kaydet"</strong> veya <strong>"🖨️ Kaydet &amp; Fiş Yazdır"</strong> butonuna basın. (Eğer seçilen masada zaten açık bir adisyon varsa yeni adisyon açmaz, doğrudan mevcut masa adisyonuna ekler).
+          </li>
+        </ol>
+      </section>
+
+      <!-- 4. CANLI MASALAR, POS DURUMU VE ÖDEME -->
+      <section id="masa-tahsilat" class="section-card">
+        <div class="section-header">
+          <div class="step-num">4</div>
+          <h2>Canlı Salon Masa Haritası, SambaPOS Durumları &amp; Hesap Kapatma</h2>
+        </div>
+        <p>
+          Mutfak ekranındaki <strong>"🪑 Canlı Masalar"</strong> sekmesi, restorandaki tüm masaların anlık durumunu ve açık adisyonlarını yönettiğiniz kasa merkezidir.
+        </p>
+
+        <div class="alert alert-info">
+          <strong>🔌 POS Modülü Açıkken vs. Kapalıyken Masa Durumları Nasıl Çalışır?</strong><br/>
+          • <strong>POS Modülü Açıksa (<code class="inline">🔌 POS Modülü Canlı Masa Durumu Aktif</code>):</strong> Masa durumları ve açık adisyonlar doğrudan <strong>SambaPOS V5</strong> veritabanından canlı çekilir:<br/>
+          &nbsp;&nbsp;&bull; <span class="pill pill-green">🟢 Hazır</span> : SambaPOS'ta boş olan masalar.<br/>
+          &nbsp;&nbsp;&bull; <span class="pill pill-orange">🟠 Yeni Siparişler</span> : SambaPOS'ta açık adisyonu olan dolu masalar (İçindeki tüm yemekler ve toplam tutar kartta görünür).<br/>
+          &nbsp;&nbsp;&bull; <span class="pill pill-maroon">🧾 Adisyon İstendi</span> : SambaPOS'ta adisyonu yazdırılmış / hesap istenmiş masalar bordo renkle vurgulanır.<br/>
+          • <strong>POS Modülü Kapalıysa (<code class="inline">🌐 Standart Site Masa Durumu Aktif</code>):</strong> Sitenin kendi standart masa siparişleri üzerinden Dolu/Boş takibi yapılır.
+        </div>
+
+        <h3>💳 Masa Detay, Masa Taşıma ve 5 Farklı Tahsilat Yöntemi</h3>
+        <p>
+          Dolu bir masanın altındaki <strong>"🔄 Masa Taşı / Böl"</strong> veya <strong>"💳 Hesabı Kapat"</strong> butonuna bastığınızda açılan pencerede şu işlemleri yapabilirsiniz:
+        </p>
+
+        <div class="grid-2">
+          <div class="feature-box orange">
+            <h4>1. 🙋‍♂️ Erken Kalkanın Ürünlerini Ödeyip Düşme (Alman Usulü)</h4>
+            <p>
+              Masadaki 4 kişiden 1'i erken kalkıp kendi yediklerini ödemek istediğinde:
+              Üstteki listeden sadece o kişinin yediği ürünlerin yanındaki kutucukları (☑️) işaretleyin ve <strong>"💵 Seçilenleri Nakit Al &amp; Düş"</strong> veya <strong>"💳 Seçilenleri Kartla Al &amp; Düş"</strong> butonuna basın.
+              Seçilen ürünler ödenmiş olarak adisyondan düşer, masa kalan ürünlerle açık kalmaya devam eder!
+            </p>
+          </div>
+
+          <div class="feature-box teal">
+            <h4>2. 🎁 Müessese İkramı (0 ₺ Yapma)</h4>
+            <p>
+              Masadaki bir çayı, tatlıyı veya herhangi bir ürünü ikram etmek istediğinizde, ürün satırının sağındaki <strong>"🎁 İkram Yap"</strong> butonuna tıklayın.
+              Ürünün fiyatı anında <strong>0.00 ₺</strong> olur ve masa toplamından düşer (İsterseniz tekrar tıklayarak ikramı geri alabilirsiniz).
+            </p>
+          </div>
+
+          <div class="feature-box indigo">
+            <h4>3. 🔄 Masa Taşıma veya Birleştirme</h4>
+            <p>
+              Müşteri <code class="inline">B10</code> masasından <code class="inline">M14</code> masasına geçtiyse, <em>"Masayı Başka Masaya Taşı / Birleştir"</em> kutusundan hedef masayı seçip <strong>"Masayı Aktar"</strong> butonuna basın.
+              (POS modülü açıksa SambaPOS'taki açık adisyon da otomatik olarak yeni masaya taşınır).
+            </p>
+          </div>
+
+          <div class="feature-box rose">
+            <h4>4. 💵 Nakit, 💳 Kart, ➗ Parçalı veya 📒 Veresiye (Cari) Kapatma</h4>
+            <p>
+              • <strong>Tamamı Nakit / Tamamı Kart:</strong> Tek tıkla tüm hesabı kapatır.<br/>
+              • <strong>Parçalı (Nakit + Kart):</strong> Örn. 1000 ₺ hesabın 400 ₺'sini Nakit, 600 ₺'sini Kart olarak kaydeder.<br/>
+              • <strong>📒 Veresiye / Cariye Yaz:</strong> Kayıtlı müşterilerden veya cari hesaplardan arama yaparak hesabı müşterinin veresiye defterine borç kaydeder.<br/>
+              • İsterseniz kapatmadan önce <strong>Ekstra Masa İndirimi (₺)</strong> girebilirsiniz.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. GARSON CEP TERMİNALİ -->
+      <section id="garson-ekrani" class="section-card">
+        <div class="section-header">
+          <div class="step-num">5</div>
+          <h2>Garson Cep Terminali Kullanımı (<code class="inline">/waiter</code>)</h2>
+        </div>
+        <p>
+          Garsonlar kendi cep telefonlarından restoranın Wi-Fi ağına bağlanıp tarayıcıdan <code class="inline">http://KASA-IP-ADRESI:5439/waiter</code> (Örn: <code class="inline">http://192.168.1.50:5439/waiter</code>) adresine girerler.
+        </p>
+
+        <div class="grid-2">
+          <div class="step-item">
+            <strong class="title">1. Garson PIN Girişi</strong>
+            <p>
+              Garson listeden kendi adını seçer (veya doğrudan kendine ait 4 haneli PIN kodunu tuşlar). Böylece açtığı her adisyona otomatik olarak o garsonun adı yazılır.
+            </p>
+          </div>
+          <div class="step-item">
+            <strong class="title">2. Salon Masaları Sekmesi</strong>
+            <p>
+              Masaları <strong>Tümü, Dolu, Boş, Hazır Tepsi, Çağrı Var</strong> olarak filtreleyebilir.
+              SambaPOS açıksa masaların <span class="pill pill-orange">Yeni Siparişler</span>, <span class="pill pill-maroon">Adisyon İstendi</span> ve <span class="pill pill-green">Hazır</span> durumlarını ve açık bakiye tutarlarını canlı görür.
+            </p>
+          </div>
+          <div class="step-item">
+            <strong class="title">3. Masaya Sipariş Girme (POS Sekmesi)</strong>
+            <p>
+              Boş veya dolu bir masaya tıklayıp ürünleri seçer; porsiyon, ekstra ve hızlı mutfak notu (<em>Az Pişmiş, Soğansız, Acılı, Paket Yapılacak</em>) ekleyip <strong>"Mutfağa Gönder"</strong> butonuna basar. Dolu masaysa mevcut adisyona eklenir.
+            </p>
+          </div>
+          <div class="step-item">
+            <strong class="title">4. Çağrılar &amp; Mutfaktan Hazır Tepsi Bildirimi</strong>
+            <p>
+              Mutfak bir siparişi hazırladığında veya müşteri masadaki QR koddan <strong>"🔔 Garson Çağır / 💳 Hesap İste"</strong> yaptığında garsonun telefonu sesli ve titreşimli uyarı verir.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. KURYE TESLİMAT EKRANI -->
+      <section id="kurye-ekrani" class="section-card">
+        <div class="section-header">
+          <div class="step-num">6</div>
+          <h2>Kurye Cep Terminali Kullanımı (<code class="inline">/courier</code>)</h2>
+        </div>
+        <p>
+          Paket kuryeleri cep telefonlarından <code class="inline">http://KASA-IP-ADRESI:5439/courier</code> adresine kendi Kurye PIN kodlarıyla giriş yaparlar:
+        </p>
+        <ul>
+          <li><strong>Üzerimdeki Paketler:</strong> Kurye sadece kendi üzerine atanan aktif paket siparişlerini görür.</li>
+          <li><strong>📞 Tek Tıkla Müşteriyi Ara:</strong> Adres tarifine ihtiyaç duyduğunda tek dokunuşla müşteriyi telefonla arar.</li>
+          <li><strong>🗺️ Yol Tarifi Aç (Google Haritalar):</strong> Müşterinin açık adresini veya GPS konumunu tek tıkla Google Maps navigasyonunda açar.</li>
+          <li><strong>💵 Tahsilat Bilgisi &amp; Teslim Onayı:</strong> Kapıda <em>Nakit</em> mi yoksa <em>POS Cihazı (Kredi Kartı)</em> mı alınacağını net olarak görür; paketi teslim ettiğinde <strong>"✓ Teslim Edildi Olarak İşaretle"</strong> butonuna basar.</li>
+          <li><strong>Gün Sonu Kurye Özeti:</strong> Kurye gün içinde kaç paket attığını, üzerinde ne kadar Nakit ve ne kadar POS slibi biriktiğini ekranın üst kısmından anlık takip eder.</li>
+        </ul>
+      </section>
+
+      <!-- 7. ADMİN PANELİ: SİPARİŞ TÜRÜ VE MASALAR -->
+      <section id="admin-paneli" class="section-card">
+        <div class="section-header">
+          <div class="step-num">7</div>
+          <h2>Admin Paneli: Sipariş Türü Seçimi &amp; Masa İsimleri Yönetimi (<code class="inline">/admin</code>)</h2>
+        </div>
+
+        <h3>🛵🪑🛍️ 7.1. Sipariş Türü (Kanal) Seçimi Nasıl Değiştirilir?</h3>
+        <p>
+          İşletmeniz sadece masaya servis yapıyor olabilir, sadece paket servis çalışıyor olabilir veya ikili/üçlü kombinasyon kullanıyor olabilir.
+          <strong>Admin Paneli &rarr; Dükkan Saatleri &amp; Genel Ayarlar</strong> sekmesindeki <strong>"Aktif Sipariş Türleri (Kanal Seçimi)"</strong> bölümünden hazır kombinasyon butonlarından birine tıklamanız yeterlidir:
+        </p>
+        <ul>
+          <li><strong>🪑 Sadece Tek Masa (QR Menü)</strong></li>
+          <li><strong>🛵 Sadece Tek Paket Servis</strong></li>
+          <li><strong>🛍️ Sadece Tek Gel-Al (Şubeden Teslim)</strong></li>
+          <li><strong>🪑+🛍️ Masa + Gel-Al</strong> &nbsp;|&nbsp; <strong>🛵+🛍️ Paket + Gel-Al</strong> &nbsp;|&nbsp; <strong>🪑+🛵 Masa + Paket</strong></li>
+          <li><strong>✅ Tümü Açık (Masa + Paket + Gel-Al)</strong></li>
+        </ul>
+        <p>
+          <strong>"Ayarları Kaydet"</strong> dediğiniz anda hem yerel sitede hem de Netlify müşteri sitesinde yalnızca seçtiğiniz sipariş türleri aktif olur!
+        </p>
+
+        <h3>🪑 7.2. Masa İsimlerini Siteden Ekleme, Düzenleme, Silme &amp; QR Kod Basma</h3>
+        <p>
+          <strong>Admin Paneli &rarr; Masa QR Kodları</strong> (veya <em>Dükkan Saatleri &amp; Genel Ayarlar</em>) sekmesinden salon/bahçe masalarınızı kolayca yönetebilirsiniz:
+        </p>
+        <ol>
+          <li>
+            <strong>Yeni Masa veya Toplu Aralık Ekleme:</strong> Ekleme kutusuna tek bir masa adı (<code class="inline">Teras 1</code>) yazabileceğiniz gibi, tire işaretiyle aralık da yazabilirsiniz (Örn: <code class="inline">B10-B31, M10-M31</code> yazdığınızda B10'dan B31'e ve M10'dan M31'e kadar tüm masaları tek tıkla oluşturur!).
+          </li>
+          <li>
+            <strong>Masa İsmini Düzenleme (✏️):</strong> Herhangi bir masanın üzerindeki <strong>✏️ (Kalem)</strong> ikonuna tıklayıp yeni adını yazın ve <code class="inline">✓</code> butonuna basın. O masadaki açık siparişler, rezervasyonlar ve SambaPOS masa kaydı otomatik olarak yeni isme güncellenir.
+          </li>
+          <li>
+            <strong>Masa Silme (🗑️):</strong> Silmek istediğiniz masanın üzerindeki <strong>🗑️ (Çöp Kutusu)</strong> ikonuna tıklayın.
+          </li>
+          <li>
+            <strong>SambaPOS'a Otomatik Aktarım:</strong> Masaları kaydettiğinizde (veya <em>🔌 POS</em> sekmesindeki <strong>"🪑 Sitedeki Masaları POS'a Gönder"</strong> butonuna bastığınızda) sitedeki masa listesi SambaPOS'a birebir aktarılır ve silinen masalar POS'tan kaldırılır.
+          </li>
+          <li>
+            <strong>Masa QR Kodlarını Yazdırma:</strong> <em>Masa QR Kodları</em> sekmesinde <strong>"🖨️ Tüm Masa QR Kodlarını Yazdır"</strong> butonuyla her masanın kendi özel QR kodunu çıkartıp masalara yapıştırabilirsiniz. Müşteri kamerasıyla okuttuğunda doğrudan o masa seçili olarak menü açılır.
+          </li>
+        </ol>
+      </section>
+
+      <!-- 8. MÜŞTERİ ARAMA, CARİ VE POS AKTARIMI -->
+      <section id="musteri-cari-pos" class="section-card">
+        <div class="section-header">
+          <div class="step-num">8</div>
+          <h2>Kayıtlı Müşteri Arama, Cari (Veresiye) Defteri &amp; SambaPOS'a Müşteri Aktarımı</h2>
+        </div>
+
+        <div class="step-list">
+          <div class="step-item">
+            <strong class="title">1. Kayıtlı Müşteri Rehberi &amp; Hızlı Arama (WhatsApp OTP &amp; Üyeler Sekmesi)</strong>
+            <p>
+              Çok sayıda müşteriniz olduğunda <strong>Admin Paneli &rarr; WhatsApp OTP &amp; Üyeler</strong> sekmesindeki arama kutusuna müşterinin <strong>Adını, Telefonunu veya Adresini</strong> yazarak anında filtreleyebilirsiniz.
+              Ayrıca aynı ekrandaki <em>"➕ Yeni Müşteri Ekle / Güncelle"</em> formuyla manuel müşteri ekleyebilir veya müşterilerin kazanılmış <strong>Para Puan (Sadakat Puanı)</strong> bakiyelerini düzenleyebilirsiniz.
+            </p>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">2. Sitedeki Müşterileri SambaPOS'a Aktarma (Siteden POS'a Tek Yönlü Push)</strong>
+            <p>
+              Müşteri senkronizasyonu <strong>Siteden &rarr; SambaPOS'a</strong> doğru çalışır (SambaPOS'tan siteye müşteri çekilmez):
+            </p>
+            <ul>
+              <li>Siteden veya Kasa POS ekranından yeni bir müşteri sipariş verdiğinde/kayıt olduğunda, bilgileri (Ad Soyad, Telefon, Adres) <strong>otomatik olarak SambaPOS Müşteriler tablosuna</strong> kaydedilir.</li>
+              <li>Mevcut tüm kayıtlı müşterilerinizi topluca göndermek için <strong>Admin Paneli &rarr; 🔌 POS &amp; Yemeksepeti/Getir</strong> sekmesindeki <strong>"📤 Sitedeki Kayıtlı Müşterileri SambaPOS'a Aktar"</strong> (veya <em>WhatsApp OTP &amp; Üyeler</em> sekmesindeki aynı buton) üzerine tıklamanız yeterlidir.</li>
+            </ul>
+          </div>
+
+          <div class="step-item">
+            <strong class="title">3. Cari (Veresiye) Müşteri Defteri Kullanımı (📒 Cari Hesaplar Sekmesi)</strong>
+            <p>
+              Düzenli veresiye/açık hesap çalışan esnaf veya kurumsal müşterileriniz için:
+            </p>
+            <ul>
+              <li>Yeni cari hesap açarken <strong>"🔍 Kayıtlı Müşterilerden Ara ve Seç"</strong> kutusuna müşterinin adını veya telefonunu yazarak listeden tek tıkla seçebilirsiniz.</li>
+              <li>Mutfak/Kasa ekranında masa hesabı kapatırken <strong>"📒 Veresiye / Cariye Yaz"</strong> seçeneğini seçip yine kayıtlı müşterilerden arayarak hesabı tek tıkla o müşterinin cari bakiyesine ekleyebilirsiniz.</li>
+              <li>Müşteri ödeme yaptığında Cari Defterden <strong>"💵 Nakit Tahsilat Düş"</strong> veya <strong>"💳 Kart Tahsilat Düş"</strong> yapabilir, tek tıkla <strong>WhatsApp üzerinden güncel bakiye/ekstre mesajı</strong> gönderebilirsiniz.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9. MENÜ, PORSİYON, KAMPANYA VE STOK -->
+      <section id="menu-kampanya-stok" class="section-card">
+        <div class="section-header">
+          <div class="step-num">9</div>
+          <h2>Menü, Porsiyon, Kampanya Barı, Bölgeler ve Hızlı Stok Yönetimi</h2>
+        </div>
+
+        <div class="grid-2">
+          <div class="feature-box">
+            <h4>🍔 Menü &amp; Çoklu Porsiyon / Seçmeli Menü</h4>
+            <p>
+              • <strong>Menü &amp; Ürünler</strong> sekmesinden yeni ürün ekleyebilir, fotoğraf yükleyebilir veya porsiyon/ekstra seçenekleri tanımlayabilirsiniz.<br/>
+              • <strong>SambaPOS Açıksa:</strong> <em>"📥 POS'tan Menüyü Şimdi Çek"</em> butonuyla SambaPOS'taki kategorileri, porsiyonları ve seçmeli menü alt kalemlerini otomatik çekebilirsiniz.<br/>
+              • <strong>Excel/CSV Toplu Fiyat Güncelleme:</strong> Tüm menüyü CSV olarak indirip fiyatları düzenleyerek tek tıkla geri yükleyebilirsiniz.
+            </p>
+          </div>
+
+          <div class="feature-box">
+            <h4>🍲 Hızlı Stok &amp; "Tükendi" İşaretleme</h4>
+            <p>
+              Gün içinde bir yemek bittiğinde Admin paneline bile girmenize gerek yoktur:
+              <strong>Mutfak Ekranı (<code class="inline">/kitchen</code>) &rarr; 🍲 Hızlı Stok / Tükendi</strong> sekmesinden ilgili yemeğin yanındaki butona basarak anında <strong>"Tükendi"</strong> yapabilir veya kalan porsiyon adedini (<code class="inline">10 Porsiyon Kaldı</code>) girebilirsiniz.
+            </p>
+          </div>
+
+          <div class="feature-box">
+            <h4>🎉 Üst Kampanya Barı &amp; Happy Hour</h4>
+            <p>
+              • <strong>Üst Bar, Bölgeler &amp; Kuponlar</strong> sekmesinden sitenin en üstündeki duyuru bandını ve tek tıkla sepette uygulanan indirim kuponunu (Örn: <code class="inline">HOSGELDIN10</code>) ayarlayabilirsiniz.<br/>
+              • Belirli saatler arasında (Örn: <code class="inline">14:00 - 17:00</code>) otomatik <strong>Happy Hour % İndirimi</strong> başlatabilirsiniz.
+            </p>
+          </div>
+
+          <div class="feature-box">
+            <h4>🗺️ Mahalle / Bölge Bazlı Minimum Paket</h4>
+            <p>
+              Yakın mahallelere düşük minimum paket tutarı (Örn: 250 ₺), uzak mahallelere farklı minimum paket tutarı (Örn: 450 ₺) ve teslimat ücreti tanımlayabilirsiniz. Müşteri sipariş verirken mahallesini seçtiğinde sepet limiti otomatik kontrol edilir.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10. AKŞAM KAPANIŞ VE Z RAPORU -->
+      <section id="z-raporu-kapanis" class="section-card">
+        <div class="section-header">
+          <div class="step-num">10</div>
+          <h2>Akşam Kapanış, Kurye Mutabakatı &amp; Gün Sonu (Z) Raporu</h2>
+        </div>
+        <p>
+          Akşam servis bittiğinde kasayı ve günü kapatmak için şu 3 adım uygulanır:
+        </p>
+
+        <ol>
+          <li>
+            <strong>Açık Masaları Kontrol Edin:</strong>
+            Mutfak ekranında (<code class="inline">/kitchen &rarr; 🪑 Canlı Masalar</code>) açık kalan masa varsa tahsilatını yapıp kapatın.
+          </li>
+          <li>
+            <strong>Kurye Tahsilat Mutabakatını Alın:</strong>
+            <strong>Admin Paneli &rarr; Sipariş Geçmişi &amp; Ciro Raporu</strong> sekmesindeki <em>"🛵 Kurye Tahsilat &amp; Vardiya Mutabakatı"</em> tablosundan her kuryenin getirmesi gereken <strong>Nakit</strong> ve <strong>POS Kart</strong> toplamını kontrol edip parayı teslim aldıktan sonra <strong>"💰 Hesabı Teslim Al (Sıfırla)"</strong> butonuna basın.
+          </li>
+          <li>
+            <strong>Günlük Giderleri Girin &amp; 80mm Z Raporu Fişi Yazdırın:</strong>
+            Gün içinde kasadan yapılan nakit harcamaları (<em> Pazar/Hal Alımı, Kurye Yakıt, Yevmiye</em> vb.) gider kutusundan kaydedin.
+            Ardından <strong>"🖨️ 80mm Gün Sonu (Z) Raporu Yazdır"</strong> butonuna tıklayarak; Brüt Ciro, Nakit/Kart/Online Dağılımı, İptaller, Giderler ve <strong>Net Kasa Nakit</strong> özetini içeren termal Z Raporu fişinizi alın!
+          </li>
+          <li>
+            <strong>Dükkanı Online Siparişe Kapatın:</strong>
+            Mesai saati bittiğinde sistem otomatik olarak <em>"Şu An Mesai Saatleri Dışındayız"</em> moduna geçer veya Admin panelinin sağ üstündeki <strong>"🟢 Dükkan Açık"</strong> butonuna tıklayarak tek tıkla <strong>"🔴 Dükkan Kapalı"</strong> durumuna getirebilirsiniz.
+          </li>
+        </ol>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="footer">
+    Restoran POS, Mutfak, Garson, Kurye &amp; SambaPOS V5 Günlük Kullanım Kılavuzu • Yerel Sunucu Portu: <strong>5439</strong> • WhatsApp QR Portu: <strong>3001</strong>
+  </footer>
+
+</body>
+</html>
