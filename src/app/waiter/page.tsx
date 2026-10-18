@@ -8,6 +8,7 @@ import {
   ModifierOption,
   Order,
   OrderItem,
+  PosTableLiveState,
   RestaurantSettings,
   SelectedModifier,
   TableCall,
@@ -45,6 +46,11 @@ export default function WaiterTerminalPage() {
   const [pinError, setPinError] = useState("");
 
   const [orders, setOrders] = useState<Order[]>([]);
+  const [posLiveTablesEnabled, setPosLiveTablesEnabled] =
+    useState<boolean>(false);
+  const [posTableStates, setPosTableStates] = useState<
+    Record<string, PosTableLiveState>
+  >({});
   const [categories, setCategories] = useState<Category[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [tableRequests, setTableRequests] = useState<TableCall[]>([]);
@@ -330,6 +336,8 @@ export default function WaiterTerminalPage() {
       if (ordersRes.ok) {
         const oData = await ordersRes.json();
         setOrders(oData.orders || []);
+        setPosLiveTablesEnabled(Boolean(oData.posLiveTablesEnabled));
+        setPosTableStates(oData.posTableStates || {});
         if (Array.isArray(oData.waiters) && oData.waiters.length > 0) {
           setWaiterList(oData.waiters);
         }
@@ -375,16 +383,73 @@ export default function WaiterTerminalPage() {
     }
   }, [tableList, selectedTable]);
 
-  const activeDineInOrders = useMemo(
-    () =>
-      orders.filter(
-        (o) =>
-          o.orderType === "dine_in" &&
-          o.status !== "completed" &&
-          o.status !== "rejected"
-      ),
-    [orders]
+  const getPosStateForTable = useCallback(
+    (tName: string): PosTableLiveState | undefined => {
+      if (!posLiveTablesEnabled || !posTableStates) return undefined;
+      if (posTableStates[tName]) return posTableStates[tName];
+      const key = Object.keys(posTableStates).find((k) =>
+        isSameTableName(k, tName)
+      );
+      return key ? posTableStates[key] : undefined;
+    },
+    [posLiveTablesEnabled, posTableStates]
   );
+
+  const activeDineInOrders = useMemo(() => {
+    const siteOpenOrders = orders.filter(
+      (o) =>
+        o.orderType === "dine_in" &&
+        o.status !== "completed" &&
+        o.status !== "rejected"
+    );
+
+    if (!posLiveTablesEnabled || Object.keys(posTableStates).length === 0) {
+      return siteOpenOrders;
+    }
+
+    // POS modülü açıksa masa durumlarını ve açık adisyonları POS modülünden çek
+    const posSyntheticOrders: Order[] = [];
+    for (const posState of Object.values(posTableStates)) {
+      if (!posState.isOccupied) continue;
+      posSyntheticOrders.push({
+        id: `pos-tkt-${posState.ticketId || posState.tableName}`,
+        orderNumber: Number(posState.ticketNumber || posState.ticketId || 1),
+        orderType: "dine_in",
+        tableNumber: posState.tableName,
+        customerName: formatTableLabel(posState.tableName),
+        customerPhone: "-",
+        paymentMethod: "pos_at_table",
+        subtotal: posState.totalAmount,
+        discountAmount: 0,
+        deliveryFee: 0,
+        totalAmount: posState.totalAmount,
+        status: "accepted",
+        createdAt:
+          posState.createdAt || posState.updatedAt || new Date().toISOString(),
+        updatedAt:
+          posState.updatedAt || posState.createdAt || new Date().toISOString(),
+        items: posState.items.map((it) => ({
+          id: it.id,
+          menuItemId: it.id,
+          name: it.name,
+          quantity: it.quantity,
+          basePrice: it.unitPrice,
+          unitPrice: it.unitPrice,
+          totalPrice: it.totalPrice,
+          selectedModifiers: [],
+          isComplimentary: it.isComplimentary,
+          prepared: it.prepared ?? true,
+        })),
+      });
+    }
+
+    // Siteden yeni girilmiş ve henüz POS'a aktarılmamış (pending) sipariş varsa onları da koru
+    const unsyncedSiteOrders = siteOpenOrders.filter(
+      (o) => o.posSyncInfo?.status !== "synced" && o.status === "pending"
+    );
+
+    return [...posSyntheticOrders, ...unsyncedSiteOrders];
+  }, [orders, posLiveTablesEnabled, posTableStates]);
 
   const readyTableOrders = useMemo(
     () => activeDineInOrders.filter((o) => o.status === "ready"),
@@ -603,10 +668,12 @@ export default function WaiterTerminalPage() {
         .filter(Boolean)
         .join(" | ");
 
-      // Eğer masada zaten açık bir sipariş varsa ona ekle (append_items)
-      if (selectedTableOrders.length > 0) {
-        const primaryOrder = selectedTableOrders[0];
-        const res = await fetch(`/api/orders/${primaryOrder.id}`, {
+      // Eğer masada siteden açılmış gerçek bir sipariş varsa ona ekle (append_items)
+      const editableSiteOrder = selectedTableOrders.find(
+        (o) => !o.id.startsWith("pos-tkt-")
+      );
+      if (editableSiteOrder) {
+        const res = await fetch(`/api/orders/${editableSiteOrder.id}`, {
           method: "PATCH",
           headers: getWaiterHeaders(true),
           body: JSON.stringify({
@@ -1315,14 +1382,23 @@ export default function WaiterTerminalPage() {
                       )
                   );
 
+                  const posState = getPosStateForTable(tNum);
+                  const isPosBillRequested = Boolean(
+                    posLiveTablesEnabled && posState?.isBillRequested
+                  );
+
                   return (
                     <div
                       key={tNum}
                       className={`rounded-2xl p-3 border transition flex flex-col justify-between min-h-[136px] ${
                         activeCall
                           ? "bg-red-950/60 border-red-500 shadow-lg shadow-red-950/50"
+                          : isPosBillRequested
+                          ? "bg-[#631816]/85 border-[#c93b37] shadow-lg shadow-[#631816]/40"
                           : hasReady
                           ? "bg-emerald-950/60 border-emerald-500 shadow-lg shadow-emerald-950/40"
+                          : isOccupied && posLiveTablesEnabled
+                          ? "bg-[#CA6919]/30 border-[#CA6919] shadow-lg shadow-[#CA6919]/20"
                           : isOccupied
                           ? "bg-amber-950/35 border-amber-500/60"
                           : activeReservation
@@ -1345,9 +1421,17 @@ export default function WaiterTerminalPage() {
                                 ? "KART HESAP"
                                 : "ÇAĞRI"}
                             </span>
+                          ) : isPosBillRequested ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#8b2220] border border-red-400/50 text-white font-black">
+                              🧾 {posState?.stateName || "Adisyon İstendi"}
+                            </span>
                           ) : hasReady ? (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500 text-stone-950 font-black">
                               🍽️ HAZIR
+                            </span>
+                          ) : isOccupied && posLiveTablesEnabled ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#CA6919] text-white font-black">
+                              🟠 {posState?.stateName || "Yeni Siparişler"}
                             </span>
                           ) : isPreparing ? (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
@@ -1359,7 +1443,9 @@ export default function WaiterTerminalPage() {
                             </span>
                           ) : (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 text-stone-400 font-bold">
-                              Boş
+                              {posLiveTablesEnabled
+                                ? posState?.stateName || "Boş"
+                                : "Boş"}
                             </span>
                           )}
                         </div>
@@ -1377,18 +1463,18 @@ export default function WaiterTerminalPage() {
                             <div className="text-sm font-black text-amber-300">
                               {formatCurrency(totalBill)}
                             </div>
-                            <div className="text-[11px] text-stone-300 flex items-center justify-between">
+                            <div className="text-[11px] text-stone-200 flex items-center justify-between">
                               <span>
                                 {totalItemCount} ürün
                                 {tableOrders[0]?.guestCount
                                   ? ` • 👥 ${tableOrders[0].guestCount} Kişi`
                                   : ""}
                               </span>
-                              <span className="text-stone-400">
+                              <span className="text-stone-300">
                                 ⏱️ {elapsedMins} dk
                               </span>
                             </div>
-                            {idleMins >= 20 && !activeCall && (
+                            {idleMins >= 20 && !activeCall && !posLiveTablesEnabled && (
                               <div className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[10px] font-extrabold text-amber-200">
                                 ☕ {idleMins} dk işlem yok • Çay/Tatlı Sor
                               </div>

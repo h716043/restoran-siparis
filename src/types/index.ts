@@ -504,6 +504,33 @@ export function isSameTableName(
   return na === nb || String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
 }
 
+export interface PosTableLiveItem {
+  id: string;
+  name: string;
+  portionName?: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  isComplimentary?: boolean;
+  prepared?: boolean;
+}
+
+export interface PosTableLiveState {
+  tableName: string;
+  stateName: string; // örn: "Yeni Siparişler", "Adisyon İstendi", "Hazır", "Boş"
+  isOccupied: boolean;
+  isBillRequested: boolean;
+  colorHex: string; // örn: "#CA6919" (Turuncu), "#631816" (Bordo), "#333333" (Gri)
+  ticketId?: number;
+  ticketNumber?: string;
+  totalAmount: number;
+  remainingAmount: number;
+  createdAt?: string;
+  updatedAt?: string;
+  items: PosTableLiveItem[];
+}
+
+
 
 
 

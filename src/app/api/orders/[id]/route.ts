@@ -178,6 +178,23 @@ export async function PATCH(
       return NextResponse.json({ order: updatedOrder });
     }
 
+    const existingOrder = getOrderById(id);
+    if (!existingOrder) {
+      return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
+    }
+
+    // Aynı durum için mükerrer tıklama veya çift istek gelirse tekrar bildirim/POS tetikleme
+    if (
+      existingOrder.status === body.status &&
+      (!body.courierName || existingOrder.courierName === body.courierName) &&
+      (!body.paymentMethod || existingOrder.paymentMethod === body.paymentMethod)
+    ) {
+      return NextResponse.json({
+        order: existingOrder,
+        alreadyUpdated: true,
+      });
+    }
+
     const updated = updateOrderStatus(
       id,
       body.status,
@@ -190,52 +207,72 @@ export async function PATCH(
       return NextResponse.json({ error: "Sipariş bulunamadı" }, { status: 404 });
     }
 
-    // Müşteriye otomatik WhatsApp sipariş durumu bildirimi gönder
-    const digits = (updated.customerPhone || "").replace(/\D/g, "");
-    if (
-      settings.whatsappConfig?.sendOrderUpdates !== false &&
-      digits.length >= 10
-    ) {
-      if (updated.status === "accepted") {
-        const mins = updated.estimatedMinutes || settings.estimatedPrepMinutes;
-        const msg = `✅ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz onaylandı ve hazırlanmaya başlandı!\n\n⏱️ Tahmini Süre: *${mins} dakika*`;
-        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
-      } else if (updated.status === "ready") {
-        const payLabel =
-          updated.paymentMethod === "cash"
-            ? "Kapıda Nakit"
-            : updated.paymentMethod === "card_at_door"
-            ? "Kapıda Kredi Kartı (POS)"
-            : "Masada Ödeme";
-        const courierLine = updated.courierName
-          ? `\n🛵 Kurye: *${updated.courierName}*`
-          : "";
-        const msg =
-          updated.orderType === "delivery"
-            ? `🛵 *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazırlandı ve kuryemize teslim edilerek adresinize doğru yola çıktı!${courierLine}\n💰 Tutar: *${updated.totalAmount.toFixed(
-                2
-              )} ${settings.currency}* (${payLabel})\n\nAfiyet olsun!`
-            : `🍽️ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazır! Afiyet olsun.`;
-        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
-      } else if (updated.status === "rejected") {
-        const msg = `⚠️ *${settings.name}*\n\nÜzgünüz *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz iptal edildi.\nSebep: ${
-          updated.rejectReason || "Yoğunluk"
-        }`;
-        await sendWhatsAppMessage(updated.customerPhone, msg, "order_status");
+    // Dış servisleri (WhatsApp, SambaPOS SQL, Bulut Senkronizasyonu) arka planda çalıştırarak
+    // mutfak ekranının anında yanıt almasını sağla
+    void (async () => {
+      try {
+        const digits = (updated.customerPhone || "").replace(/\D/g, "");
+        if (
+          settings.whatsappConfig?.sendOrderUpdates !== false &&
+          digits.length >= 10
+        ) {
+          if (updated.status === "accepted") {
+            const mins =
+              updated.estimatedMinutes || settings.estimatedPrepMinutes;
+            const msg = `✅ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz onaylandı ve hazırlanmaya başlandı!\n\n⏱️ Tahmini Süre: *${mins} dakika*`;
+            await sendWhatsAppMessage(
+              updated.customerPhone,
+              msg,
+              "order_status"
+            );
+          } else if (updated.status === "ready") {
+            const payLabel =
+              updated.paymentMethod === "cash"
+                ? "Kapıda Nakit"
+                : updated.paymentMethod === "card_at_door"
+                ? "Kapıda Kredi Kartı (POS)"
+                : "Masada Ödeme";
+            const courierLine = updated.courierName
+              ? `\n🛵 Kurye: *${updated.courierName}*`
+              : "";
+            const msg =
+              updated.orderType === "delivery"
+                ? `🛵 *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazırlandı ve kuryemize teslim edilerek adresinize doğru yola çıktı!${courierLine}\n💰 Tutar: *${updated.totalAmount.toFixed(
+                    2
+                  )} ${settings.currency}* (${payLabel})\n\nAfiyet olsun!`
+                : `🍽️ *${settings.name}*\n\nMerhaba *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz hazır! Afiyet olsun.`;
+            await sendWhatsAppMessage(
+              updated.customerPhone,
+              msg,
+              "order_status"
+            );
+          } else if (updated.status === "rejected") {
+            const msg = `⚠️ *${settings.name}*\n\nÜzgünüz *${updated.customerName}*, *#${updated.orderNumber}* numaralı siparişiniz iptal edildi.\nSebep: ${
+              updated.rejectReason || "Yoğunluk"
+            }`;
+            await sendWhatsAppMessage(
+              updated.customerPhone,
+              msg,
+              "order_status"
+            );
+          }
+        }
+
+        if (updated.status === "accepted") {
+          await autoSyncOrdersWithPosIfNeeded().catch(() => {});
+        } else if (
+          updated.status === "ready" ||
+          updated.status === "completed" ||
+          Boolean(body.courierName)
+        ) {
+          await syncSiteOrderUpdateToSambaPos(updated).catch(() => {});
+        }
+
+        await syncActivityWithCloud();
+      } catch (bgErr) {
+        console.error("PATCH /api/orders/[id] background sync error:", bgErr);
       }
-    }
-
-    if (updated.status === "accepted") {
-      await autoSyncOrdersWithPosIfNeeded().catch(() => {});
-    } else if (
-      updated.status === "ready" ||
-      updated.status === "completed" ||
-      Boolean(body.courierName)
-    ) {
-      await syncSiteOrderUpdateToSambaPos(updated).catch(() => {});
-    }
-
-    await syncActivityWithCloud();
+    })();
 
     return NextResponse.json({ order: updated });
   } catch (error) {

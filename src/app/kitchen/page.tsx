@@ -40,6 +40,7 @@ import {
   OrderItem,
   OrderType,
   PaymentMethod,
+  PosTableLiveState,
   RestaurantSettings,
   SelectedModifier,
   TableCall,
@@ -57,6 +58,8 @@ import {
 
 export default function KitchenTabletPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [posLiveTablesEnabled, setPosLiveTablesEnabled] = useState(false);
+  const [posTableStates, setPosTableStates] = useState<PosTableLiveState[]>([]);
   const [tableCalls, setTableCalls] = useState<TableCall[]>([]);
   const [reservations, setReservations] = useState<TableReservation[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -182,6 +185,14 @@ export default function KitchenTabletPage() {
       const resvs: TableReservation[] = resvData.reservations || [];
 
       setOrders(list);
+      setPosLiveTablesEnabled(Boolean(ordData.posLiveTablesEnabled));
+      setPosTableStates(
+        Array.isArray(ordData.posTableStates)
+          ? ordData.posTableStates
+          : ordData.posTableStates && typeof ordData.posTableStates === "object"
+          ? (Object.values(ordData.posTableStates) as PosTableLiveState[])
+          : []
+      );
       if (menuData.settings) setSettings(menuData.settings);
       if (menuData.items) setMenuItems(menuData.items);
       if (menuData.categories) setCategories(menuData.categories);
@@ -204,6 +215,73 @@ export default function KitchenTabletPage() {
     } catch (e) {
       console.error("Siparişler alınamadı:", e);
     }
+  };
+
+  // POS modülü aktifken belirli bir masanın SambaPOS canlı durumunu döndürür
+  const getPosStateForTable = (tableNum: string): PosTableLiveState | undefined => {
+    if (!posLiveTablesEnabled) return undefined;
+    return posTableStates.find((st) => isSameTableName(st.tableName, tableNum));
+  };
+
+  // POS modülü aktifse masadaki açık POS adisyonunu + henüz onaylanmamış pending web siparişlerini birleştirir;
+  // POS modülü kapalıysa standart site siparişlerini döndürür
+  const getEffectiveTableOrders = (tableNum: string): Order[] => {
+    if (!posLiveTablesEnabled) {
+      return orders.filter(
+        (o) =>
+          o.orderType === "dine_in" &&
+          isSameTableName(o.tableNumber, tableNum) &&
+          ["pending", "accepted", "ready"].includes(o.status)
+      );
+    }
+
+    const posState = getPosStateForTable(tableNum);
+    const pendingSiteOrders = orders.filter(
+      (o) =>
+        o.orderType === "dine_in" &&
+        isSameTableName(o.tableNumber, tableNum) &&
+        o.status === "pending"
+    );
+
+    const result: Order[] = [];
+    if (posState && posState.isOccupied && posState.items.length > 0) {
+      const posOrder: Order = {
+        id: `pos-ticket-${posState.ticketId || tableNum}`,
+        orderNumber: Number(posState.ticketNumber || posState.ticketId || 100),
+        orderType: "dine_in",
+        tableNumber: tableNum,
+        customerName: `${formatTableLabel(tableNum)} (POS #${posState.ticketNumber || posState.ticketId || "-"})`,
+        customerPhone: "SambaPOS Adisyonu",
+        paymentMethod: "pos_at_table",
+        status: "accepted",
+        subtotal: posState.totalAmount,
+        discountAmount: 0,
+        deliveryFee: 0,
+        totalAmount: posState.totalAmount,
+        createdAt:
+          posState.updatedAt || posState.createdAt || new Date().toISOString(),
+        updatedAt:
+          posState.updatedAt || posState.createdAt || new Date().toISOString(),
+        items: posState.items.map((it) => ({
+          id: it.id,
+          menuItemId: it.id,
+          name:
+            it.portionName && it.portionName !== "Normal"
+              ? `${it.name} (${it.portionName})`
+              : it.name,
+          quantity: it.quantity,
+          basePrice: it.unitPrice,
+          unitPrice: it.unitPrice,
+          selectedModifiers: [],
+          totalPrice: it.totalPrice,
+          prepared: it.prepared ?? true,
+          isComplimentary: it.isComplimentary,
+        })),
+      };
+      result.push(posOrder);
+    }
+
+    return [...result, ...pendingSiteOrders];
   };
 
   useEffect(() => {
@@ -317,6 +395,11 @@ export default function KitchenTabletPage() {
     }, 150);
   };
 
+  const [updatingOrderStatus, setUpdatingOrderStatus] = useState<
+    Record<string, Order["status"] | undefined>
+  >({});
+  const updatingOrderIdsRef = useRef<Set<string>>(new Set());
+
   const handleStatusChange = async (
     orderId: string,
     status: Order["status"],
@@ -325,6 +408,11 @@ export default function KitchenTabletPage() {
     courierName?: string,
     orderToAutoPrint?: Order
   ) => {
+    if (updatingOrderIdsRef.current.has(orderId)) {
+      return;
+    }
+    updatingOrderIdsRef.current.add(orderId);
+    setUpdatingOrderStatus((prev) => ({ ...prev, [orderId]: status }));
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PATCH",
@@ -338,13 +426,25 @@ export default function KitchenTabletPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        await fetchOrders();
-        if (status === "accepted" && autoPrintOnAccept) {
+        if (data.order) {
+          setOrders((prev) =>
+            prev.map((o) => (o.id === orderId ? data.order : o))
+          );
+        }
+        if (status === "accepted" && autoPrintOnAccept && !data.alreadyUpdated) {
           handlePrint(data.order || orderToAutoPrint);
         }
+        await fetchOrders();
       }
     } catch (e) {
       console.error("Durum güncellenemedi:", e);
+    } finally {
+      updatingOrderIdsRef.current.delete(orderId);
+      setUpdatingOrderStatus((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
     }
   };
 
@@ -1429,7 +1529,17 @@ export default function KitchenTabletPage() {
             }`}
           >
             <QrCode className="w-4 h-4" />
-            <span>🪑 Canlı Masalar (Dolu / Boş)</span>
+            <span>🪑 Canlı Masalar</span>
+            <span className="bg-orange-500/20 text-orange-300 border border-orange-500/30 text-xs font-black px-2 py-0.5 rounded-full">
+              {
+                getRestaurantTables(settings).filter(
+                  (t) =>
+                    getEffectiveTableOrders(t).length > 0 ||
+                    Boolean(getPosStateForTable(t)?.isOccupied)
+                ).length
+              }{" "}
+              Dolu
+            </span>
           </button>
           <button
             onClick={() => setActiveTab("stock")}
@@ -1851,6 +1961,8 @@ export default function KitchenTabletPage() {
                       {/* Onayla, Fiş Yazdır veya Reddet Butonları */}
                       <div className="flex items-center gap-2.5 pt-1">
                         <button
+                          type="button"
+                          disabled={Boolean(updatingOrderStatus[order.id])}
                           onClick={() =>
                             handleStatusChange(
                               order.id,
@@ -1861,12 +1973,15 @@ export default function KitchenTabletPage() {
                               order
                             )
                           }
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition cursor-pointer"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition cursor-pointer"
                         >
                           <CheckCircle2 className="w-5 h-5" />
                           <span>
-                            SİPARİŞİ KABUL ET ({chosenMins} dk)
-                            {autoPrintOnAccept ? " + FİŞ" : ""}
+                            {updatingOrderStatus[order.id] === "accepted"
+                              ? "⏳ ONAYLANIYOR..."
+                              : `SİPARİŞİ KABUL ET (${chosenMins} dk)${
+                                  autoPrintOnAccept ? " + FİŞ" : ""
+                                }`}
                           </span>
                         </button>
                         <button
@@ -1878,7 +1993,10 @@ export default function KitchenTabletPage() {
                           <Printer className="w-5 h-5" />
                         </button>
                         <button
+                          type="button"
+                          disabled={Boolean(updatingOrderStatus[order.id])}
                           onClick={() => {
+                            if (updatingOrderIdsRef.current.has(order.id)) return;
                             const reason =
                               prompt(
                                 "Reddetme sebebi (Müşteriye gösterilecek):",
@@ -1891,10 +2009,14 @@ export default function KitchenTabletPage() {
                               reason
                             );
                           }}
-                          className="bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 font-bold py-3.5 px-4 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                          className="bg-red-600/20 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-red-400 hover:text-white border border-red-500/30 font-bold py-3.5 px-4 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
                         >
                           <XCircle className="w-5 h-5" />
-                          <span>Reddet</span>
+                          <span>
+                            {updatingOrderStatus[order.id] === "rejected"
+                              ? "⏳..."
+                              : "Reddet"}
+                          </span>
                         </button>
                       </div>
                     </div>
@@ -2203,6 +2325,8 @@ export default function KitchenTabletPage() {
                         <div className="flex items-center gap-2">
                           {order.status === "accepted" && (
                             <button
+                              type="button"
+                              disabled={Boolean(updatingOrderStatus[order.id])}
                               onClick={() =>
                                 handleStatusChange(
                                   order.id,
@@ -2214,9 +2338,11 @@ export default function KitchenTabletPage() {
                                     : undefined
                                 )
                               }
-                              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-md"
+                              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-md"
                             >
-                              {order.orderType === "delivery"
+                              {updatingOrderStatus[order.id] === "ready"
+                                ? "⏳ İşleniyor..."
+                                : order.orderType === "delivery"
                                 ? `🛵 Kuryeye Ver & WhatsApp Gönder`
                                 : order.orderType === "dine_in"
                                 ? "🍽️ Masaya Servis Edildi"
@@ -2224,12 +2350,16 @@ export default function KitchenTabletPage() {
                             </button>
                           )}
                           <button
+                            type="button"
+                            disabled={Boolean(updatingOrderStatus[order.id])}
                             onClick={() =>
                               handleStatusChange(order.id, "completed")
                             }
-                            className="bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 transition cursor-pointer"
+                            className="bg-slate-800 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-slate-200 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 transition cursor-pointer"
                           >
-                            Tamamlandı ✓
+                            {updatingOrderStatus[order.id] === "completed"
+                              ? "⏳..."
+                              : "Tamamlandı ✓"}
                           </button>
                         </div>
                       </div>
@@ -2247,20 +2377,38 @@ export default function KitchenTabletPage() {
           <div className="space-y-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-extrabold text-white">
-                  🪑 Canlı Salon Masa Haritası, Açık Adisyon & Parçalı Ödeme
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Dolu masaların tüm siparişlerini tek adisyonda görün, açık adisyona yeni ürün ekleyin, masa taşıyın/birleştirin veya Nakit / Kart / Parçalı (Alman Usulü) hesap kapatın.
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-extrabold text-white">
+                    🪑 Canlı Salon Masa Haritası, Açık Adisyon & Parçalı Ödeme
+                  </h2>
+                  {posLiveTablesEnabled ? (
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full text-[11px] font-black">
+                      🔌 POS Modülü Canlı Masa Durumu Aktif
+                    </span>
+                  ) : (
+                    <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                      🌐 Standart Site Masa Durumu Aktif
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {posLiveTablesEnabled
+                    ? "POS modülü açık olduğu için masa durumları (Hazır / Yeni Siparişler / Adisyon İstendi) ve açık masa adisyonları doğrudan SambaPOS'tan canlı çekilmektedir."
+                    : "Dolu masaların tüm siparişlerini tek adisyonda görün, açık adisyona yeni ürün ekleyin, masa taşıyın/birleştirin veya Nakit / Kart / Parçalı (Alman Usulü) hesap kapatın."}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
                 <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-xl">
-                  🟢 Boş Masa
+                  🟢 {posLiveTablesEnabled ? "Hazır (Boş)" : "Boş Masa"}
                 </span>
                 <span className="bg-orange-500/20 text-orange-300 border border-orange-500/30 px-3 py-1.5 rounded-xl">
-                  🟠 Dolu / Açık Adisyon
+                  🟠 {posLiveTablesEnabled ? "Yeni Siparişler (Dolu)" : "Dolu / Açık Adisyon"}
                 </span>
+                {posLiveTablesEnabled && (
+                  <span className="bg-rose-950/80 text-rose-200 border border-rose-500/50 px-3 py-1.5 rounded-xl">
+                    🧾 Adisyon İstendi
+                  </span>
+                )}
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 px-3 py-1.5 rounded-xl">
                   🟣 Garson / Hesap Çağrısı
                 </span>
@@ -2272,12 +2420,8 @@ export default function KitchenTabletPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {getRestaurantTables(settings).map((tableNum) => {
-                const tableActiveOrders = orders.filter(
-                  (o) =>
-                    o.orderType === "dine_in" &&
-                    isSameTableName(o.tableNumber, tableNum) &&
-                    ["pending", "accepted", "ready"].includes(o.status)
-                );
+                const posState = getPosStateForTable(tableNum);
+                const tableActiveOrders = getEffectiveTableOrders(tableNum);
                 const activeCall = pendingTableCalls.find((c) =>
                   isSameTableName(c.tableNumber, tableNum)
                 );
@@ -2290,7 +2434,12 @@ export default function KitchenTabletPage() {
                   (s, o) => s + o.totalAmount,
                   0
                 );
-                const isOccupied = tableActiveOrders.length > 0;
+                const isOccupied = posLiveTablesEnabled
+                  ? Boolean(posState?.isOccupied) || tableActiveOrders.length > 0
+                  : tableActiveOrders.length > 0;
+                const isBillRequested = Boolean(
+                  posLiveTablesEnabled && posState?.isBillRequested
+                );
                 const latestTableOrderMs = tableActiveOrders.reduce(
                   (max, o) => Math.max(max, new Date(o.createdAt).getTime()),
                   0
@@ -2307,6 +2456,8 @@ export default function KitchenTabletPage() {
                     className={`rounded-2xl border-2 p-4 flex flex-col justify-between gap-3 transition ${
                       activeCall
                         ? "bg-purple-950/40 border-purple-400 shadow-lg shadow-purple-950/40 animate-pulse"
+                        : isBillRequested
+                        ? "bg-rose-950/40 border-rose-500 shadow-lg shadow-rose-950/30"
                         : isOccupied
                         ? "bg-slate-900 border-orange-500 shadow-lg"
                         : activeResv
@@ -2315,20 +2466,37 @@ export default function KitchenTabletPage() {
                     }`}
                   >
                     <div className="space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`font-black text-base px-3 py-1 rounded-xl ${
-                            activeCall
-                              ? "bg-purple-600 text-white"
-                              : isOccupied
-                              ? "bg-orange-600 text-white"
-                              : activeResv
-                              ? "bg-blue-600 text-white"
-                              : "bg-emerald-600/20 text-emerald-300"
-                          }`}
-                        >
-                          {formatTableLabel(tableNum).toLocaleUpperCase("tr-TR")}
-                        </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-black text-base px-3 py-1 rounded-xl ${
+                              activeCall
+                                ? "bg-purple-600 text-white"
+                                : isBillRequested
+                                ? "bg-rose-800 text-white"
+                                : isOccupied
+                                ? "bg-orange-600 text-white"
+                                : activeResv
+                                ? "bg-blue-600 text-white"
+                                : "bg-emerald-600/20 text-emerald-300"
+                            }`}
+                          >
+                            {formatTableLabel(tableNum).toLocaleUpperCase("tr-TR")}
+                          </span>
+                          {posLiveTablesEnabled && isOccupied && (
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${
+                                isBillRequested
+                                  ? "bg-rose-900/80 text-rose-200 border-rose-400/50"
+                                  : "bg-orange-500/20 text-orange-300 border-orange-500/40"
+                              }`}
+                            >
+                              {isBillRequested
+                                ? "🧾 Adisyon İstendi"
+                                : posState?.stateName || "Yeni Siparişler"}
+                            </span>
+                          )}
+                        </div>
                         {isOccupied ? (
                           <span className="text-lg font-black text-emerald-400">
                             {totalTableBill.toFixed(2)} {settings?.currency}
@@ -2339,7 +2507,7 @@ export default function KitchenTabletPage() {
                           </span>
                         ) : (
                           <span className="text-xs font-bold text-emerald-400">
-                            🟢 Boş
+                            🟢 {posLiveTablesEnabled ? posState?.stateName || "Hazır" : "Boş"}
                           </span>
                         )}
                       </div>
@@ -2489,12 +2657,8 @@ export default function KitchenTabletPage() {
             {/* MASA DETAY, MASA TAŞIMA/BİRLEŞTİRME & PARÇALI ÖDEME (ALMAN USULÜ) MODALI */}
             {selectedTableModal &&
               (() => {
-                const modalTableOrders = orders.filter(
-                  (o) =>
-                    o.orderType === "dine_in" &&
-                    isSameTableName(o.tableNumber, selectedTableModal) &&
-                    ["pending", "accepted", "ready"].includes(o.status)
-                );
+                const modalTableOrders =
+                  getEffectiveTableOrders(selectedTableModal);
                 const rawTableTotal = modalTableOrders.reduce(
                   (s, o) => s + o.totalAmount,
                   0

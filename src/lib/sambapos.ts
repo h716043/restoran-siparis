@@ -20,6 +20,8 @@ import {
   OrderItem,
   PosIntegrationConfig,
   PosOrderSyncInfo,
+  PosTableLiveItem,
+  PosTableLiveState,
   SambaPosConfig,
 } from "@/types";
 import {
@@ -1503,6 +1505,7 @@ export async function sendOrderToSambaPos(
       syncedAt: new Date().toISOString(),
     };
     const updated = updateOrderPosSyncInfo(order.id, syncInfo);
+    invalidatePosTableStatesCache();
 
     return {
       ok: true,
@@ -3108,7 +3111,7 @@ export async function syncSiteTablesToSambaPos(options: {
           SET @entId = SCOPE_IDENTITY();
 
           INSERT INTO EntityStateValues (EntityId, EntityStates)
-          VALUES (@entId, N'[{"D":"${sambaDateJson}","S":"Boş","SN":"Status"}]');
+          VALUES (@entId, N'[{"D":"${sambaDateJson}","S":"Hazır","SN":"Status"}]');
         END
 
         IF @screenId IS NOT NULL AND @entId IS NOT NULL BEGIN
@@ -3347,3 +3350,451 @@ export async function syncCustomerToSambaPos(customer: {
     // ignore background sync errors
   }
 }
+
+let cachedPosTableStates: Record<string, PosTableLiveState> | null = null;
+let cachedPosTableStatesAtMs = 0;
+
+export function invalidatePosTableStatesCache(): void {
+  cachedPosTableStates = null;
+  cachedPosTableStatesAtMs = 0;
+}
+
+/**
+ * POS Modülü (SambaPOS) aktif olduğunda, SambaPOS V5 veritabanındaki:
+ * 1) `States` tablosundaki renkleri (`Yeni Siparişler` -> `#CA6919`, `Adisyon İstendi` -> `#631816`, `Hazır` -> `#333333`)
+ * 2) `Entities` + `EntityStateValues` tablosundaki canlı masa durumlarını (`Yeni Siparişler`, `Adisyon İstendi`, `Hazır`)
+ * 3) `Tickets` + `TicketEntities` + `Orders` tablosundaki açık masa adisyonlarını ve içindeki kalemleri
+ * tek seferde çekip Garson Terminali (`/waiter`) ve Mutfak Masa Haritası (`/kitchen`) için döndürür.
+ * POS modülü kapalıysa `{ enabled: false, tables: {} }` döner ve standart site masa mantığı çalışır.
+ */
+export async function fetchPosLiveTableStates(options?: {
+  force?: boolean;
+}): Promise<{
+  enabled: boolean;
+  tables: Record<string, PosTableLiveState>;
+}> {
+  if (
+    process.env.NETLIFY === "true" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true"
+  ) {
+    return { enabled: false, tables: {} };
+  }
+
+  const posCfg = getResolvedPosConfig();
+  if (!posCfg.sambaPos?.enabled) {
+    return { enabled: false, tables: {} };
+  }
+
+  const now = Date.now();
+  if (
+    !options?.force &&
+    cachedPosTableStates &&
+    now - cachedPosTableStatesAtMs < 1500
+  ) {
+    return { enabled: true, tables: cachedPosTableStates };
+  }
+
+  try {
+    const out = runLocalSambaSqlQuery(`
+      SET NOCOUNT ON;
+      SELECT N'STATE', ISNULL(Name, N''), ISNULL(Color, N'') FROM States;
+      SELECT
+        N'ENT',
+        e.Id,
+        REPLACE(ISNULL(e.Name, N''), N'|', N'/'),
+        REPLACE(ISNULL(esv.EntityStates, N'[]'), N'|', N'§')
+      FROM Entities e
+      LEFT JOIN EntityStateValues esv ON esv.EntityId = e.Id
+      WHERE e.EntityTypeId = 2;
+      SELECT
+        N'TKT',
+        t.Id,
+        ISNULL(t.TicketNumber, N''),
+        CAST(ISNULL(t.IsClosed, 0) AS INT),
+        ISNULL(t.RemainingAmount, 0),
+        ISNULL(t.TotalAmount, 0),
+        CONVERT(NVARCHAR(30), t.Date, 126),
+        CONVERT(NVARCHAR(30), t.LastUpdateTime, 126),
+        REPLACE(ISNULL(t.TicketStates, N'[]'), N'|', N'§'),
+        REPLACE(ISNULL(te.EntityName, N''), N'|', N'/')
+      FROM Tickets t
+      INNER JOIN TicketEntities te ON te.Ticket_Id = t.Id
+      WHERE te.EntityTypeId = 2 AND t.IsClosed = 0
+      ORDER BY t.Id ASC;
+      SELECT
+        N'ORD',
+        o.Id,
+        o.TicketId,
+        REPLACE(ISNULL(o.MenuItemName, N''), N'|', N'/'),
+        REPLACE(ISNULL(o.PortionName, N'Normal'), N'|', N'/'),
+        ISNULL(o.Price, 0),
+        ISNULL(o.Quantity, 1),
+        CAST(ISNULL(o.CalculatePrice, 1) AS INT)
+      FROM Orders o
+      INNER JOIN Tickets t ON t.Id = o.TicketId
+      INNER JOIN TicketEntities te ON te.Ticket_Id = t.Id
+      WHERE te.EntityTypeId = 2 AND t.IsClosed = 0
+      ORDER BY o.TicketId ASC, o.Id ASC;
+    `);
+
+    const stateColors = new Map<string, string>();
+    const rawEntities: Array<{
+      id: number;
+      name: string;
+      stateName: string;
+      stateUpdatedIso?: string;
+    }> = [];
+    const ticketById = new Map<
+      number,
+      {
+        ticketId: number;
+        ticketNumber: string;
+        isClosed: boolean;
+        remainingAmount: number;
+        totalAmount: number;
+        createdAt: string;
+        updatedAt: string;
+        isLocked: boolean;
+        tableName: string;
+        items: PosTableLiveItem[];
+      }
+    >();
+
+    const normalizeHexColor = (rawColor: string): string => {
+      const c = rawColor.trim();
+      if (/^#[0-9a-fA-F]{8}$/.test(c)) {
+        return `#${c.slice(3)}`;
+      }
+      if (/^#[0-9a-fA-F]{6}$/.test(c)) {
+        return c;
+      }
+      return "";
+    };
+
+    for (const rawLine of out.split(/\r?\n/)) {
+      const line = rawLine.replace(/^\uFEFF/, "").trim();
+      if (!line || !line.includes("|")) continue;
+      const parts = line.split("|");
+      const tag = parts[0];
+
+      if (tag === "STATE" && parts.length >= 3) {
+        const sName = (parts[1] || "").trim().toLowerCase();
+        const hex = normalizeHexColor(parts[2] || "");
+        if (sName && hex) {
+          stateColors.set(sName, hex);
+        }
+      } else if (tag === "ENT" && parts.length >= 4) {
+        const id = Number(parts[1] || 0);
+        const name = (parts[2] || "").trim();
+        const rawJson = (parts[3] || "[]").replace(/§/g, "|").trim();
+        let stateName = "Hazır";
+        let stateUpdatedIso: string | undefined;
+        try {
+          const parsed = JSON.parse(rawJson) as Array<{
+            SN?: string;
+            S?: string;
+            D?: string;
+          }>;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const st =
+              parsed.find((x) => (x.SN || "").toLowerCase() === "status") ||
+              parsed[0];
+            if (st?.S) stateName = String(st.S).trim();
+            if (st?.D) {
+              const m = String(st.D).match(/Date\((\d+)/);
+              if (m?.[1]) {
+                stateUpdatedIso = new Date(Number(m[1])).toISOString();
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+        if (name) {
+          rawEntities.push({ id, name, stateName, stateUpdatedIso });
+        }
+      } else if (tag === "TKT" && parts.length >= 10) {
+        const ticketId = Number(parts[1] || 0);
+        const ticketNumber = (parts[2] || "").trim();
+        const isClosed = Number(parts[3] || 0) === 1;
+        const remainingAmount = Number(parts[4] || 0);
+        const totalAmount = Number(parts[5] || 0);
+        const createdAt = (parts[6] || "").trim() || new Date().toISOString();
+        const updatedAt = (parts[7] || "").trim() || createdAt;
+        const rawTStates = (parts[8] || "[]").replace(/§/g, "|").trim();
+        const tableName = (parts[9] || "").trim();
+        let isLocked = false;
+        try {
+          const parsed = JSON.parse(rawTStates) as Array<{
+            SN?: string;
+            S?: string;
+          }>;
+          if (Array.isArray(parsed)) {
+            isLocked = parsed.some((x) =>
+              String(x.S || "")
+                .toLowerCase()
+                .includes("kilit")
+            );
+          }
+        } catch {
+          // ignore
+        }
+        if (ticketId > 0 && tableName) {
+          ticketById.set(ticketId, {
+            ticketId,
+            ticketNumber,
+            isClosed,
+            remainingAmount,
+            totalAmount,
+            createdAt,
+            updatedAt,
+            isLocked,
+            tableName,
+            items: [],
+          });
+        }
+      } else if (tag === "ORD" && parts.length >= 8) {
+        const orderRowId = Number(parts[1] || 0);
+        const ticketId = Number(parts[2] || 0);
+        const menuItemName = (parts[3] || "").trim();
+        const portionName = (parts[4] || "Normal").trim();
+        const price = Number(parts[5] || 0);
+        const quantity = Number(parts[6] || 1);
+        const calcPrice = Number(parts[7] ?? 1) === 1;
+        const parentTkt = ticketById.get(ticketId);
+        if (parentTkt && menuItemName) {
+          const unitPrice = calcPrice ? price : 0;
+          parentTkt.items.push({
+            id: `pos-item-${orderRowId}`,
+            name:
+              portionName && portionName.toLowerCase() !== "normal"
+                ? `${menuItemName} (${portionName})`
+                : menuItemName,
+            portionName,
+            quantity,
+            unitPrice,
+            totalPrice: Number((unitPrice * quantity).toFixed(2)),
+            isComplimentary: !calcPrice,
+            prepared: true,
+          });
+        }
+      }
+    }
+
+    const tablesMap: Record<string, PosTableLiveState> = {};
+
+    // Önce tüm masa varlıklarını yerleştir
+    for (const ent of rawEntities) {
+      const sLower = ent.stateName.toLowerCase();
+      const isEmptyState =
+        sLower === "hazır" ||
+        sLower === "hazir" ||
+        sLower === "boş" ||
+        sLower === "bos" ||
+        sLower === "available";
+      const isBillRequested =
+        sLower.includes("adisyon") ||
+        sLower.includes("hesap") ||
+        sLower.includes("kilit");
+      const colorHex =
+        stateColors.get(sLower) ||
+        (isBillRequested
+          ? "#631816"
+          : !isEmptyState
+          ? "#CA6919"
+          : "#333333");
+
+      tablesMap[ent.name] = {
+        tableName: ent.name,
+        stateName: ent.stateName,
+        isOccupied: !isEmptyState,
+        isBillRequested,
+        colorHex,
+        totalAmount: 0,
+        remainingAmount: 0,
+        updatedAt: ent.stateUpdatedIso,
+        items: [],
+      };
+    }
+
+    // Açık adisyonları ilgili masalara bağla
+    for (const tkt of ticketById.values()) {
+      const existingKey =
+        Object.keys(tablesMap).find(
+          (k) => k.toLowerCase() === tkt.tableName.toLowerCase()
+        ) || tkt.tableName;
+
+      const cur = tablesMap[existingKey] || {
+        tableName: tkt.tableName,
+        stateName: tkt.isLocked ? "Adisyon İstendi" : "Yeni Siparişler",
+        isOccupied: true,
+        isBillRequested: tkt.isLocked,
+        colorHex: tkt.isLocked ? "#631816" : "#CA6919",
+        totalAmount: 0,
+        remainingAmount: 0,
+        items: [],
+      };
+
+      const nextBillReq = cur.isBillRequested || tkt.isLocked;
+      const nextStateName =
+        cur.stateName.toLowerCase() === "hazır" ||
+        cur.stateName.toLowerCase() === "boş"
+          ? nextBillReq
+            ? "Adisyon İstendi"
+            : "Yeni Siparişler"
+          : cur.stateName;
+
+      tablesMap[existingKey] = {
+        ...cur,
+        stateName: nextStateName,
+        isOccupied: true,
+        isBillRequested: nextBillReq,
+        colorHex: nextBillReq
+          ? stateColors.get("adisyon istendi") || "#631816"
+          : stateColors.get(nextStateName.toLowerCase()) || "#CA6919",
+        ticketId: tkt.ticketId,
+        ticketNumber: tkt.ticketNumber,
+        totalAmount: Number((cur.totalAmount + tkt.totalAmount).toFixed(2)),
+        remainingAmount: Number(
+          (cur.remainingAmount + tkt.remainingAmount).toFixed(2)
+        ),
+        createdAt: cur.createdAt || tkt.createdAt,
+        updatedAt: tkt.updatedAt || cur.updatedAt,
+        items: [...cur.items, ...tkt.items],
+      };
+    }
+
+    cachedPosTableStates = tablesMap;
+    cachedPosTableStatesAtMs = Date.now();
+
+    return {
+      enabled: true,
+      tables: tablesMap,
+    };
+  } catch {
+    return {
+      enabled: false,
+      tables: {},
+    };
+  }
+}
+
+/**
+ * Siteden (/waiter veya /kitchen) bir masanın hesabı kapatıldığında,
+ * POS modülü açıksa SambaPOS'taki ilgili açık masa adisyonunu da kapatır ve masa durumunu "Hazır" yapar.
+ */
+export async function closeTableTicketInSambaPos(
+  tableNumber: string
+): Promise<void> {
+  const posCfg = getResolvedPosConfig();
+  if (!posCfg.sambaPos?.enabled) return;
+
+  try {
+    const escSql = (s: string) => String(s ?? "").replace(/'/g, "''");
+    const rawTbl = String(tableNumber || "").trim();
+    if (!rawTbl) return;
+    const paddedTbl = /^\d+$/.test(rawTbl) ? rawTbl.padStart(2, "0") : rawTbl;
+    const nowMs = Date.now();
+    const sambaDateJson = `\\/Date(${nowMs}+0300)\\/`;
+
+    runLocalSambaSqlQuery(`
+      SET NOCOUNT ON;
+      DECLARE @now DATETIME = GETDATE();
+      DECLARE @tblEntId INT = (
+        SELECT TOP 1 Id FROM Entities
+        WHERE EntityTypeId = 2 AND (
+          Name = N'${escSql(rawTbl)}' OR
+          Name = N'Masa ${escSql(rawTbl)}' OR
+          Name = N'Masa ${escSql(paddedTbl)}' OR
+          Name = N'M${escSql(paddedTbl)}'
+        )
+      );
+      IF @tblEntId IS NOT NULL BEGIN
+        UPDATE Tickets
+        SET IsClosed = 1,
+            IsLocked = 0,
+            RemainingAmount = 0,
+            LastPaymentDate = @now,
+            LastUpdateTime = @now,
+            TicketStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Ödendi","SN":"Durum","SV":""}]'
+        WHERE IsClosed = 0
+          AND Id IN (SELECT Ticket_Id FROM TicketEntities WHERE EntityTypeId = 2 AND EntityId = @tblEntId);
+
+        UPDATE EntityStateValues
+        SET EntityStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Hazır","SN":"Status"}]'
+        WHERE EntityId = @tblEntId;
+      END
+    `);
+
+    invalidatePosTableStatesCache();
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Siteden (/waiter veya /kitchen) bir masa başka bir masaya taşındığında veya birleştirildiğinde,
+ * POS modülü açıksa SambaPOS'taki açık masa adisyonunu ve masa renklerini de taşır.
+ */
+export async function transferTableTicketInSambaPos(
+  fromTable: string,
+  toTable: string
+): Promise<void> {
+  const posCfg = getResolvedPosConfig();
+  if (!posCfg.sambaPos?.enabled) return;
+
+  try {
+    const escSql = (s: string) => String(s ?? "").replace(/'/g, "''");
+    const rawFrom = String(fromTable || "").trim();
+    const rawTo = String(toTable || "").trim();
+    if (!rawFrom || !rawTo) return;
+    const padFrom = /^\d+$/.test(rawFrom) ? rawFrom.padStart(2, "0") : rawFrom;
+    const padTo = /^\d+$/.test(rawTo) ? rawTo.padStart(2, "0") : rawTo;
+    const nowMs = Date.now();
+    const sambaDateJson = `\\/Date(${nowMs}+0300)\\/`;
+
+    runLocalSambaSqlQuery(`
+      SET NOCOUNT ON;
+      DECLARE @fromEntId INT = (
+        SELECT TOP 1 Id FROM Entities
+        WHERE EntityTypeId = 2 AND (
+          Name = N'${escSql(rawFrom)}' OR
+          Name = N'Masa ${escSql(rawFrom)}' OR
+          Name = N'Masa ${escSql(padFrom)}'
+        )
+      );
+      DECLARE @toEntId INT = (
+        SELECT TOP 1 Id FROM Entities
+        WHERE EntityTypeId = 2 AND (
+          Name = N'${escSql(rawTo)}' OR
+          Name = N'Masa ${escSql(rawTo)}' OR
+          Name = N'Masa ${escSql(padTo)}'
+        )
+      );
+      DECLARE @toEntName NVARCHAR(200) = (SELECT TOP 1 Name FROM Entities WHERE Id = @toEntId);
+
+      IF @fromEntId IS NOT NULL AND @toEntId IS NOT NULL BEGIN
+        UPDATE TicketEntities
+        SET EntityId = @toEntId,
+            EntityName = @toEntName
+        WHERE EntityTypeId = 2
+          AND EntityId = @fromEntId
+          AND Ticket_Id IN (SELECT Id FROM Tickets WHERE IsClosed = 0);
+
+        UPDATE EntityStateValues
+        SET EntityStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Hazır","SN":"Status"}]'
+        WHERE EntityId = @fromEntId;
+
+        UPDATE EntityStateValues
+        SET EntityStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Yeni Siparişler","SN":"Status"}]'
+        WHERE EntityId = @toEntId;
+      END
+    `);
+
+    invalidatePosTableStatesCache();
+  } catch {
+    // ignore
+  }
+}
+

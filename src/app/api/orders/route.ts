@@ -22,7 +22,10 @@ import {
 import { isSameTableName } from "@/types";
 import {
   autoSyncOrdersWithPosIfNeeded,
+  closeTableTicketInSambaPos,
+  fetchPosLiveTableStates,
   syncCustomerToSambaPos,
+  transferTableTicketInSambaPos,
 } from "@/lib/sambapos";
 
 export async function GET(req: NextRequest) {
@@ -83,6 +86,58 @@ export async function GET(req: NextRequest) {
     const publicTable = req.nextUrl.searchParams.get("publicTable");
     if (publicTable) {
       const cleanT = String(publicTable).trim();
+      const posLive = await fetchPosLiveTableStates();
+      if (posLive.enabled) {
+        const posEntry = Object.values(posLive.tables).find((st) =>
+          isSameTableName(st.tableName, cleanT)
+        );
+        const pendingSiteOrders = getOrders()
+          .filter(
+            (o) =>
+              o.orderType === "dine_in" &&
+              isSameTableName(o.tableNumber, cleanT) &&
+              o.status === "pending"
+          )
+          .map((o) => ({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            tableNumber: o.tableNumber,
+            status: o.status,
+            items: o.items,
+            subtotal: o.subtotal,
+            discountAmount: o.discountAmount,
+            totalAmount: o.totalAmount,
+            createdAt: o.createdAt,
+          }));
+        const combined = [...pendingSiteOrders];
+        if (posEntry && posEntry.isOccupied && posEntry.items.length > 0) {
+          combined.unshift({
+            id: `pos-tkt-${posEntry.ticketId || cleanT}`,
+            orderNumber: Number(posEntry.ticketNumber || posEntry.ticketId || 100),
+            tableNumber: cleanT,
+            status: "accepted" as const,
+            items: posEntry.items.map((it) => ({
+              id: it.id,
+              menuItemId: it.id,
+              name: it.name,
+              quantity: it.quantity,
+              basePrice: it.unitPrice,
+              unitPrice: it.unitPrice,
+              totalPrice: it.totalPrice,
+              selectedModifiers: [],
+              isComplimentary: it.isComplimentary,
+              prepared: it.prepared ?? true,
+            })),
+            subtotal: posEntry.totalAmount,
+            discountAmount: 0,
+            totalAmount: posEntry.totalAmount,
+            createdAt:
+              posEntry.updatedAt || posEntry.createdAt || new Date().toISOString(),
+          });
+        }
+        return NextResponse.json({ orders: combined });
+      }
+
       const tableOrders = getOrders()
         .filter(
           (o) =>
@@ -186,8 +241,12 @@ export async function GET(req: NextRequest) {
     }
 
     const orders = getOrders();
+    const posLiveTables = await fetchPosLiveTableStates();
+
     return NextResponse.json({
       orders,
+      posLiveTablesEnabled: posLiveTables.enabled,
+      posTableStates: posLiveTables.tables,
       couriers: courierList,
       waiters: waiterList,
       authenticatedCourier: matchedCourier,
@@ -475,12 +534,17 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
 
     if (body.action === "transfer_table") {
-      const orders = transferTableOrders(
-        String(body.fromTable || ""),
-        String(body.toTable || "")
-      );
+      const fromT = String(body.fromTable || "");
+      const toT = String(body.toTable || "");
+      const orders = transferTableOrders(fromT, toT);
+      await transferTableTicketInSambaPos(fromT, toT);
       await syncActivityWithCloud();
-      return NextResponse.json({ orders });
+      const posLiveTables = await fetchPosLiveTableStates({ force: true });
+      return NextResponse.json({
+        orders,
+        posLiveTablesEnabled: posLiveTables.enabled,
+        posTableStates: posLiveTables.tables,
+      });
     }
 
     if (body.action === "partial_table_payment") {
@@ -494,8 +558,9 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (body.action === "close_table_payment") {
+      const tblNum = String(body.tableNumber || "");
       const orders = closeTableOrdersWithPayment(
-        String(body.tableNumber || ""),
+        tblNum,
         {
           paymentMethod: body.paymentMethod || "cash",
           cashAmount:
@@ -511,6 +576,7 @@ export async function PATCH(req: NextRequest) {
           creditAccountPhone: body.creditAccountPhone,
         }
       );
+      await closeTableTicketInSambaPos(tblNum);
       await syncActivityWithCloud();
       if (body.paymentMethod === "credit") {
         if (body.creditAccountName || body.creditAccountPhone) {
@@ -521,7 +587,12 @@ export async function PATCH(req: NextRequest) {
         }
         await pushCatalogToCloud();
       }
-      return NextResponse.json({ orders });
+      const posLiveTables = await fetchPosLiveTableStates({ force: true });
+      return NextResponse.json({
+        orders,
+        posLiveTablesEnabled: posLiveTables.enabled,
+        posTableStates: posLiveTables.tables,
+      });
     }
 
     if (body.action === "settle_courier") {
