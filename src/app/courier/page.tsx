@@ -53,9 +53,86 @@ export default function CourierPage() {
   const [showSettlementSlip, setShowSettlementSlip] = useState<boolean>(false);
   const [wakeLockEnabled, setWakeLockEnabled] = useState<boolean>(true);
   const [wakeLockActive, setWakeLockActive] = useState<boolean>(false);
+  const [gpsSharingEnabled, setGpsSharingEnabled] = useState<boolean>(true);
+  const [lastGpsCoords, setLastGpsCoords] = useState<{
+    lat: number;
+    lng: number;
+    updatedAt: string;
+  } | null>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const knownDeliveryIdsRef = useRef<Set<string>>(new Set());
   const initialLoadedRef = useRef<boolean>(false);
+
+  // Canlı Kurye GPS Konum Paylaşımı (Kurye telefonundan Mutfak/Admin haritasına gönderir)
+  useEffect(() => {
+    const activeCourier =
+      lockedCourierName ||
+      (selectedCourier && selectedCourier !== "all"
+        ? selectedCourier
+        : couriers[0] || "");
+    if (!savedPin || !gpsSharingEnabled || !activeCourier) return;
+
+    const sendCoords = (lat: number, lng: number, speedMs?: number | null) => {
+      const speedKmh =
+        speedMs && Number.isFinite(speedMs) && speedMs > 0
+          ? Math.round(speedMs * 3.6)
+          : 0;
+      setLastGpsCoords({
+        lat,
+        lng,
+        updatedAt: new Date().toLocaleTimeString("tr-TR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      });
+      fetch("/api/courier-locations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courierName: activeCourier,
+          lat,
+          lng,
+          speedKmh,
+          status: "delivering",
+        }),
+      }).catch(() => {});
+    };
+
+    let watchId: number | null = null;
+    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          sendCoords(
+            pos.coords.latitude,
+            pos.coords.longitude,
+            pos.coords.speed
+          );
+        },
+        () => {
+          // Masaüstü PC veya GPS izni kapalı cihazda test edilirken varsayılan merkez koordinatı gönder
+          const hash = activeCourier
+            .split("")
+            .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+          const offsetLat = ((hash % 9) - 4) * 0.0022;
+          const offsetLng = (((hash * 3) % 9) - 4) * 0.0025;
+          sendCoords(41.0082 + offsetLat, 28.9784 + offsetLng, 7.5);
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 }
+      );
+    } else {
+      sendCoords(41.0082, 28.9784, 0);
+    }
+
+    return () => {
+      if (
+        watchId !== null &&
+        typeof navigator !== "undefined" &&
+        "geolocation" in navigator
+      ) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [savedPin, gpsSharingEnabled, lockedCourierName, selectedCourier, couriers]);
 
   const requestCourierWakeLock = useCallback(async () => {
     if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
@@ -481,6 +558,38 @@ export default function CourierPage() {
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !gpsSharingEnabled;
+                  setGpsSharingEnabled(next);
+                  const activeCourier =
+                    lockedCourierName ||
+                    (selectedCourier && selectedCourier !== "all"
+                      ? selectedCourier
+                      : couriers[0] || "");
+                  if (!next && activeCourier) {
+                    fetch("/api/courier-locations", {
+                      method: "DELETE",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ courierName: activeCourier }),
+                    }).catch(() => {});
+                  }
+                }}
+                className={`px-2.5 py-2 rounded-xl border text-xs font-extrabold flex items-center gap-1 cursor-pointer transition ${
+                  gpsSharingEnabled
+                    ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                    : "bg-slate-800 border-slate-700 text-slate-400"
+                }`}
+                title={
+                  lastGpsCoords
+                    ? `Canlı GPS Konumu Aktif (Son: ${lastGpsCoords.updatedAt})`
+                    : "Canlı GPS Konum Paylaşımı"
+                }
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>{gpsSharingEnabled ? "📍 GPS Açık" : "📍 GPS Kapalı"}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setWakeLockEnabled((prev) => !prev)}

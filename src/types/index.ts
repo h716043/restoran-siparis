@@ -420,6 +420,8 @@ export interface RestaurantSettings {
   tvTickerSpeed?: "slow" | "normal" | "fast"; // TV alt kayan yazı hızı
   tvCustomNote?: string; // TV alt bandında gösterilecek özel duyuru (Wi-Fi şifresi vb.)
   whatsappConfig?: WhatsAppConfig;
+  ownerReportPhone?: string; // Gün sonu (Z) raporunun gönderileceği işletme sahibi WhatsApp numarası
+  autoSendDailyReportOnClose?: boolean; // Dükkan kapatıldığında otomatik WhatsApp Z raporu gönderilsin mi?
   securityConfig?: SecurityConfig;
   cloudSyncConfig?: CloudSyncConfig;
   posIntegrationConfig?: PosIntegrationConfig;
@@ -528,6 +530,38 @@ export interface PosTableLiveState {
   createdAt?: string;
   updatedAt?: string;
   items: PosTableLiveItem[];
+}
+
+export interface CallerIdIncomingEvent {
+  id: string;
+  phone: string;
+  line?: string;
+  timestamp: string;
+  dismissed?: boolean;
+  isRegistered?: boolean;
+  isRegisteredCustomer: boolean;
+  customerName?: string;
+  customerAddress?: string;
+  orderCount?: number;
+  loyaltyPoints?: number;
+  lastOrder?: {
+    id: string;
+    orderNumber: number;
+    createdAt: string;
+    totalAmount: number;
+    items: OrderItem[];
+  };
+}
+
+export interface CourierLiveLocation {
+  courierName: string;
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  speedKmh?: number;
+  activeOrderCount?: number;
+  status?: "delivering" | "on_delivery" | "idle" | "returning";
+  updatedAt: string;
 }
 
 

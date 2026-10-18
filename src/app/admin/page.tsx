@@ -2118,6 +2118,38 @@ export default function AdminDashboardPage() {
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/api/reports/whatsapp-z-report", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          targetPhone:
+                            settings?.ownerReportPhone || settings?.phone,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (data.ok) {
+                        showToast(
+                          `✅ Gün Sonu (Z) Raporu WhatsApp ile (${data.targetPhone}) numarasına gönderildi!`
+                        );
+                      } else {
+                        alert(
+                          `⚠️ Z Raporu Gönderilemedi:\n${
+                            data.error || "Bilinmeyen hata"
+                          }`
+                        );
+                      }
+                    } catch {
+                      alert("WhatsApp Z Raporu gönderilirken hata oluştu.");
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  <span>📲 Patrona WhatsApp Z Raporu Gönder</span>
+                </button>
+                <button
+                  type="button"
                   onClick={handlePrintZReport}
                   className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-xs"
                 >
@@ -6436,7 +6468,33 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSettings({ ...settings, isOpen: false })}
+                    onClick={async () => {
+                      const nextSettings = { ...settings, isOpen: false };
+                      setSettings(nextSettings);
+                      await persistSettings(
+                        nextSettings,
+                        "🔴 Dükkan KAPALI olarak ayarlandı."
+                      );
+                      if (settings.autoSendDailyReportOnClose) {
+                        fetch("/api/reports/whatsapp-z-report", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            targetPhone:
+                              settings.ownerReportPhone || settings.phone,
+                          }),
+                        })
+                          .then((r) => r.json())
+                          .then((d) => {
+                            if (d.ok) {
+                              showToast(
+                                `📲 Dükkan kapandı — Gün Sonu (Z) Raporu otomatik olarak (${d.targetPhone}) numarasına gönderildi!`
+                              );
+                            }
+                          })
+                          .catch(() => {});
+                      }
+                    }}
                     className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer ${
                       !settings.isOpen
                         ? "bg-red-600 text-white shadow-xs"
@@ -6526,6 +6584,48 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
                   </span>
                 </div>
               </label>
+
+              {/* 📲 Otomatik WhatsApp Patron Gün Sonu (Z) Raporu Ayarı */}
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-extrabold text-emerald-950">
+                      📲 WhatsApp Patron Gün Sonu (Z) Raporu Numarası & Otomatik Gönderim
+                    </div>
+                    <p className="text-[11px] text-emerald-800">
+                      Akşam dükkanı kapattığınızda veya tek tıkla Z Raporu gönderdiğinizde günlük net ciro, Nakit/Kart/Veresiye kırılımı ve en çok satan 5 ürün bu numaraya WhatsApp mesajı olarak iletilir.
+                    </p>
+                  </div>
+                  <input
+                    type="tel"
+                    placeholder="Örn: 0532 123 45 67"
+                    value={settings.ownerReportPhone || ""}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        ownerReportPhone: e.target.value,
+                      })
+                    }
+                    className="sm:w-52 px-3 py-2 text-xs font-bold bg-white border border-emerald-300 rounded-xl text-slate-900"
+                  />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-emerald-900">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.autoSendDailyReportOnClose)}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        autoSendDailyReportOnClose: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 accent-emerald-600 rounded"
+                  />
+                  <span>
+                    Akşam &ldquo;🔴 Dükkan KAPALI&rdquo; butonuna basıldığında Gün Sonu (Z) Raporunu patrona otomatik WhatsApp&apos;tan gönder
+                  </span>
+                </label>
+              </div>
             </div>
 
             {/* 🛵🛍️🪑 SİTEDE AKTİF SİPARİŞ TÜRLERİ SEÇİMİ (TEK MASA, TEK PAKET, TEK GEL-AL, İKİLİ VEYA TÜMÜ) */}

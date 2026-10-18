@@ -34,7 +34,9 @@ import {
   Utensils,
 } from "lucide-react";
 import {
+  CallerIdIncomingEvent,
   Category,
+  CourierLiveLocation,
   MenuItem,
   Order,
   OrderItem,
@@ -62,6 +64,22 @@ export default function KitchenTabletPage() {
   const [posTableStates, setPosTableStates] = useState<PosTableLiveState[]>([]);
   const [tableCalls, setTableCalls] = useState<TableCall[]>([]);
   const [reservations, setReservations] = useState<TableReservation[]>([]);
+  const [callerEvents, setCallerEvents] = useState<CallerIdIncomingEvent[]>([]);
+  const [courierLocations, setCourierLocations] = useState<
+    Array<
+      CourierLiveLocation & {
+        assignedOrders?: Array<{
+          id: string;
+          orderNumber: number;
+          customerName: string;
+          customerAddress?: string;
+          deliveryZoneName?: string;
+          status: string;
+          totalAmount: number;
+        }>;
+      }
+    >
+  >([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [settings, setSettings] = useState<RestaurantSettings | null>(null);
@@ -70,8 +88,18 @@ export default function KitchenTabletPage() {
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [selectedOrderForPrint, setSelectedOrderForPrint] =
     useState<Order | null>(null);
+  const [printTicketMode, setPrintTicketMode] = useState<
+    "full" | "kitchen_only" | "bar_only"
+  >("full");
+  const [sendingZReport, setSendingZReport] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "active" | "tables" | "stock" | "reservations" | "completed" | "rejected"
+    | "active"
+    | "tables"
+    | "couriers_map"
+    | "stock"
+    | "reservations"
+    | "completed"
+    | "rejected"
   >("active");
   const [prepMinutesChoice, setPrepMinutesChoice] = useState<
     Record<string, number>
@@ -147,6 +175,7 @@ export default function KitchenTabletPage() {
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   const knownPendingIds = useRef<Set<string>>(new Set());
+  const knownCallerEventIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     try {
@@ -169,22 +198,32 @@ export default function KitchenTabletPage() {
 
   const fetchOrders = async () => {
     try {
-      const [ordRes, menuRes, callRes, resvRes] = await Promise.all([
-        fetch("/api/orders"),
-        fetch("/api/menu"),
-        fetch("/api/table-calls"),
-        fetch("/api/reservations"),
-      ]);
+      const [ordRes, menuRes, callRes, resvRes, cidRes, courRes] =
+        await Promise.all([
+          fetch("/api/orders"),
+          fetch("/api/menu"),
+          fetch("/api/table-calls"),
+          fetch("/api/reservations"),
+          fetch("/api/caller-id"),
+          fetch("/api/courier-locations"),
+        ]);
       const ordData = await ordRes.json();
       const menuData = await menuRes.json();
       const callData = await callRes.json();
       const resvData = await resvRes.json();
+      const cidData = cidRes.ok ? await cidRes.json() : { activeCalls: [] };
+      const courData = courRes.ok ? await courRes.json() : { locations: [] };
 
       const list: Order[] = ordData.orders || [];
       const calls: TableCall[] = callData.calls || [];
       const resvs: TableReservation[] = resvData.reservations || [];
+      const activeCid: CallerIdIncomingEvent[] = cidData.activeCalls || [];
 
       setOrders(list);
+      setCallerEvents(activeCid);
+      if (Array.isArray(courData.locations)) {
+        setCourierLocations(courData.locations);
+      }
       setPosLiveTablesEnabled(Boolean(ordData.posLiveTablesEnabled));
       setPosTableStates(
         Array.isArray(ordData.posTableStates)
@@ -199,19 +238,27 @@ export default function KitchenTabletPage() {
       setTableCalls(calls);
       setReservations(resvs);
 
-      // Yeni bekleyen sipariş, masa çağrısı veya rezervasyon varsa zil çal
+      // Yeni bekleyen sipariş, masa çağrısı, rezervasyon veya gelen telefon araması varsa zil çal
       const pendingOrders = list.filter((o) => o.status === "pending");
       const pendingCalls = calls.filter((c) => c.status === "pending");
       const pendingResvs = resvs.filter((r) => r.status === "pending");
+      const hasNewCallerId = activeCid.some(
+        (c) => !knownCallerEventIds.current.has(c.id)
+      );
 
       if (soundEnabled) {
         if (pendingOrders.length > 0) {
           soundAlert.playOrderRing();
-        } else if (pendingCalls.length > 0 || pendingResvs.length > 0) {
+        } else if (
+          pendingCalls.length > 0 ||
+          pendingResvs.length > 0 ||
+          hasNewCallerId
+        ) {
           soundAlert.playTableCallRing();
         }
       }
       knownPendingIds.current = new Set(pendingOrders.map((o) => o.id));
+      knownCallerEventIds.current = new Set(activeCid.map((c) => c.id));
     } catch (e) {
       console.error("Siparişler alınamadı:", e);
     }
@@ -388,11 +435,145 @@ export default function KitchenTabletPage() {
     );
   };
 
-  const handlePrint = (order: Order) => {
+  const isBarItem = (it: OrderItem) => {
+    const mItem = menuItems.find((m) => m.id === it.menuItemId);
+    const catId = mItem?.categoryId || "";
+    const catName = (
+      categories.find((c) => c.id === catId)?.name ||
+      it.name ||
+      ""
+    ).toLowerCase();
+    return (
+      catId === "cat-5" ||
+      catId === "cat-6" ||
+      catName.includes("tatlı") ||
+      catName.includes("içecek") ||
+      catName.includes("ayran") ||
+      catName.includes("kola") ||
+      catName.includes("şalgam") ||
+      catName.includes("su") ||
+      catName.includes("künefe") ||
+      catName.includes("baklava") ||
+      catName.includes("sütlaç")
+    );
+  };
+
+  const handlePrint = (
+    order: Order,
+    mode: "full" | "kitchen_only" | "bar_only" = "full"
+  ) => {
+    setPrintTicketMode(mode);
     setSelectedOrderForPrint(order);
     setTimeout(() => {
       window.print();
     }, 150);
+  };
+
+  const handleDismissCallerEvent = async (callId: string | "all") => {
+    try {
+      await fetch("/api/caller-id", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          callId === "all" ? { dismissAll: true } : { id: callId }
+        ),
+      });
+      fetchOrders();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleOpenPosFromCallerId = (
+    call: CallerIdIncomingEvent,
+    loadLastOrder: boolean
+  ) => {
+    setPosOrderType("delivery");
+    setPosPhone(call.phone || "");
+    setPosName(call.customerName || "");
+    setPosAddress(call.customerAddress || "");
+    if (call.isRegistered) {
+      setPosCustomerInfo({
+        orderCount: call.orderCount || 0,
+        loyaltyPoints: call.loyaltyPoints || 0,
+      });
+    } else {
+      setPosCustomerInfo(null);
+    }
+
+    if (loadLastOrder && call.lastOrder?.items?.length) {
+      const clonedItems: OrderItem[] = call.lastOrder.items.map((it, idx) => ({
+        ...it,
+        id: `pos-repeat-${Date.now()}-${idx}`,
+        prepared: false,
+      }));
+      setPosCart(clonedItems);
+    }
+
+    setPosModalOpen(true);
+    handleDismissCallerEvent(call.id);
+  };
+
+  const handleSimulateCallerId = async () => {
+    try {
+      await fetch("/api/caller-id", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          simulateRandomRegistered: true,
+          line: "Hat 1 (USB Caller ID)",
+        }),
+      });
+      fetchOrders();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSendWhatsAppZReport = async () => {
+    setSendingZReport(true);
+    try {
+      const res = await fetch("/api/reports/whatsapp-z-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(
+          `✅ Gün Sonu (Z) Raporu WhatsApp ile (${data.targetPhone}) numarasına gönderildi!\n\nToplam Ciro: ${Number(data.summary?.totalRevenue || 0).toFixed(2)} TL (${data.summary?.orderCount || 0} Sipariş)`
+        );
+      } else {
+        alert(`⚠️ Z Raporu Gönderilemedi:\n${data.error || "Bilinmeyen hata"}`);
+      }
+    } catch {
+      alert("WhatsApp Z Raporu gönderilirken bağlantı hatası oluştu.");
+    } finally {
+      setSendingZReport(false);
+    }
+  };
+
+  const handleSimulateCourierGps = async () => {
+    const courierList = settings?.couriers?.length
+      ? settings.couriers
+      : ["Kurye 1 (Motorlu)", "Kurye 2 (Motorlu)"];
+    const baseLat = 41.0082;
+    const baseLng = 28.9784;
+    for (let i = 0; i < courierList.length; i++) {
+      await fetch("/api/courier-locations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courierName: courierList[i],
+          lat: baseLat + (Math.random() - 0.5) * 0.015,
+          lng: baseLng + (Math.random() - 0.5) * 0.015,
+          speedKmh: Math.floor(Math.random() * 35) + 18,
+          accuracyMeters: 10,
+          status: "on_delivery",
+        }),
+      });
+    }
+    fetchOrders();
   };
 
   const [updatingOrderStatus, setUpdatingOrderStatus] = useState<
@@ -1333,12 +1514,38 @@ export default function KitchenTabletPage() {
                   </div>
                 </div>
 
-                {/* 4. Test & Simülasyon Araçları */}
+                {/* 4. Gün Sonu Raporu & Hızlı Test Araçları */}
                 <div className="space-y-1.5 border-t border-slate-800 pt-2.5">
                   <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-1">
-                    Hızlı Test & Simülasyon
+                    Raporlama, Caller ID & Test Araçları
                   </div>
                   <div className="grid grid-cols-1 gap-1.5">
+                    <button
+                      type="button"
+                      disabled={sendingZReport}
+                      onClick={() => {
+                        setHeaderMenuOpen(false);
+                        handleSendWhatsAppZReport();
+                      }}
+                      className="flex items-center justify-center gap-1.5 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-3 py-2.5 rounded-xl shadow transition cursor-pointer"
+                    >
+                      <span>
+                        {sendingZReport
+                          ? "⏳ Z Raporu Gönderiliyor..."
+                          : "📲 Patrona Gün Sonu (Z) Raporu Gönder"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHeaderMenuOpen(false);
+                        handleSimulateCallerId();
+                      }}
+                      className="flex items-center justify-center gap-1.5 text-xs font-bold bg-cyan-600/25 hover:bg-cyan-600 text-cyan-200 hover:text-white border border-cyan-500/40 px-3 py-2 rounded-xl transition cursor-pointer"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      📞 Test: Caller ID Gelen Arama Simüle Et
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -1396,6 +1603,110 @@ export default function KitchenTabletPage() {
           )}
         </div>
       </header>
+
+      {/* 📞 CANLI CALLER ID (GELEN TELEFON ARAMASI) OTOMATİK POPUP PANELİ */}
+      {callerEvents.length > 0 && (
+        <div className="bg-gradient-to-r from-cyan-950 via-slate-900 to-emerald-950 border-b-2 border-cyan-400 px-4 py-3.5 shadow-xl">
+          <div className="max-w-7xl mx-auto space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-cyan-300 font-black text-xs sm:text-sm uppercase tracking-wider">
+                <Phone className="w-5 h-5 text-cyan-400 animate-bounce" />
+                <span>
+                  📞 CANLI CALLER ID — GELEN TELEFON ÇAĞRISI ({callerEvents.length})
+                </span>
+              </div>
+              {callerEvents.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => handleDismissCallerEvent("all")}
+                  className="text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 cursor-pointer"
+                >
+                  Tüm Çağrıları Kapat ✕
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-2.5">
+              {callerEvents.map((call) => (
+                <div
+                  key={call.id}
+                  className="bg-slate-950/90 border-2 border-cyan-500/60 rounded-2xl p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-lg"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="bg-cyan-500 text-slate-950 text-xs font-black px-2.5 py-0.5 rounded-lg">
+                        📞 {call.phone}
+                      </span>
+                      {call.line && (
+                        <span className="text-[11px] font-bold bg-slate-800 text-cyan-300 px-2 py-0.5 rounded border border-slate-700">
+                          {call.line}
+                        </span>
+                      )}
+                      {call.isRegistered ? (
+                        <span className="text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full">
+                          ✅ Kayıtlı Müşteri ({call.orderCount || 0}. Sipariş • ⭐{" "}
+                          {call.loyaltyPoints || 0} Puan)
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full">
+                          🆕 Yeni Numara (İlk Siparişte Kaydedilir)
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-black text-base text-white">
+                      {call.customerName || "İsimsiz Arayan Müşteri"}
+                    </div>
+                    {call.customerAddress && (
+                      <div className="text-xs text-slate-300 flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                        <span>{call.customerAddress}</span>
+                      </div>
+                    )}
+                    {call.lastOrder && (
+                      <div className="text-xs bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-amber-200 mt-1">
+                        <strong className="text-amber-400">
+                          🕒 Son Siparişi (#{call.lastOrder.orderNumber} •{" "}
+                          {call.lastOrder.totalAmount.toFixed(0)}{" "}
+                          {settings?.currency}):
+                        </strong>{" "}
+                        {call.lastOrder.items
+                          .map((i) => `${i.quantity}x ${i.name}`)
+                          .join(", ")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPosFromCallerId(call, false)}
+                      className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs px-3.5 py-2.5 rounded-xl transition shadow cursor-pointer"
+                    >
+                      ➕ Sipariş Ekranını Aç (Bilgileri Doldur)
+                    </button>
+                    {call.lastOrder && call.lastOrder.items.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPosFromCallerId(call, true)}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs px-3.5 py-2.5 rounded-xl transition shadow cursor-pointer"
+                      >
+                        🔄 Son Siparişini Tek Tıkla Sepete Yükle
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDismissCallerEvent(call.id)}
+                      className="bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white font-bold text-xs px-3 py-2.5 rounded-xl border border-slate-700 transition cursor-pointer"
+                    >
+                      ✕ Kapat
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CANLI MASA ÇAĞRILARI (GARSON ÇAĞIR / HESAP İSTE) PANELİ */}
       {pendingTableCalls.length > 0 && (
@@ -1539,6 +1850,20 @@ export default function KitchenTabletPage() {
                 ).length
               }{" "}
               Dolu
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("couriers_map")}
+            className={`px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 whitespace-nowrap flex items-center gap-2 transition ${
+              activeTab === "couriers_map"
+                ? "border-cyan-500 text-cyan-300 bg-slate-900"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Truck className="w-4 h-4" />
+            <span>🛵 Canlı Kurye Haritası</span>
+            <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-black px-2 py-0.5 rounded-full">
+              {courierLocations.length} GPS
             </span>
           </button>
           <button
@@ -1986,11 +2311,28 @@ export default function KitchenTabletPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handlePrint(order)}
-                          className="bg-slate-800 hover:bg-slate-700 text-orange-400 border border-slate-700 font-bold py-3.5 px-3.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
-                          title="80mm Termal Adisyon Yazdır"
+                          onClick={() => handlePrint(order, "full")}
+                          className="bg-slate-800 hover:bg-slate-700 text-orange-400 border border-slate-700 font-bold py-3.5 px-3 rounded-xl flex items-center gap-1 transition cursor-pointer text-xs"
+                          title="80mm Fiyatlı Kasa Adisyonu Yazdır"
                         >
-                          <Printer className="w-5 h-5" />
+                          <Printer className="w-4 h-4" />
+                          <span>Kasa</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrint(order, "kitchen_only")}
+                          className="bg-slate-800 hover:bg-orange-600/30 text-amber-300 border border-slate-700 font-bold py-3.5 px-2.5 rounded-xl flex items-center gap-1 transition cursor-pointer text-xs"
+                          title="80mm Fiyatsız Sadece Mutfak/Izgara Üretim Fişi Yazdır"
+                        >
+                          <span>🍖 Mutfak</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrint(order, "bar_only")}
+                          className="bg-slate-800 hover:bg-cyan-600/30 text-cyan-300 border border-slate-700 font-bold py-3.5 px-2.5 rounded-xl flex items-center gap-1 transition cursor-pointer text-xs"
+                          title="80mm Fiyatsız Sadece Bar (İçecek & Tatlı) Fişi Yazdır"
+                        >
+                          <span>🥤 Bar</span>
                         </button>
                         <button
                           type="button"
@@ -2148,11 +2490,29 @@ export default function KitchenTabletPage() {
                             🔔 Garson Çağır
                           </button>
                           <button
-                            onClick={() => handlePrint(order)}
-                            className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer"
+                            type="button"
+                            onClick={() => handlePrint(order, "full")}
+                            className="inline-flex items-center gap-1 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl border border-slate-700 cursor-pointer"
+                            title="Fiyatlı Kasa Adisyonu Yazdır"
                           >
-                            <Printer className="w-4 h-4 text-orange-400" />
-                            Fiş
+                            <Printer className="w-3.5 h-3.5 text-orange-400" />
+                            Kasa Fişi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePrint(order, "kitchen_only")}
+                            className="inline-flex items-center gap-1 text-xs font-bold bg-slate-800 hover:bg-orange-600/30 text-amber-300 px-2.5 py-1.5 rounded-xl border border-slate-700 cursor-pointer"
+                            title="Fiyatsız Sadece Mutfak/Izgara Üretim Fişi Yazdır"
+                          >
+                            🍖 Mutfak
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePrint(order, "bar_only")}
+                            className="inline-flex items-center gap-1 text-xs font-bold bg-slate-800 hover:bg-cyan-600/30 text-cyan-300 px-2.5 py-1.5 rounded-xl border border-slate-700 cursor-pointer"
+                            title="Fiyatsız Sadece Bar (İçecek & Tatlı) Fişi Yazdır"
+                          >
+                            🥤 Bar
                           </button>
                         </div>
                       </div>
@@ -3600,7 +3960,7 @@ export default function KitchenTabletPage() {
                       {order.totalAmount.toFixed(2)} {settings?.currency}
                     </div>
                     <button
-                      onClick={() => handlePrint(order)}
+                      onClick={() => handlePrint(order, "full")}
                       className="text-xs inline-flex items-center gap-1 bg-slate-800 px-2.5 py-1 rounded-lg text-slate-300"
                     >
                       <Printer className="w-3.5 h-3.5" /> Fiş
@@ -3608,6 +3968,179 @@ export default function KitchenTabletPage() {
                   </div>
                 </div>
               )
+            )}
+          </div>
+        )}
+
+        {/* 🛵 CANLI KURYE GPS HARİTA TAKİP PANELİ */}
+        {activeTab === "couriers_map" && (
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="font-black text-base text-cyan-300 flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-cyan-400" />
+                  <span>🛵 Canlı Kurye GPS Haritası & Paket Dağıtım Takibi</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Kuryeler mobil ekranlarından (`/courier`) &ldquo;📍 GPS Açık&rdquo;
+                  yaptığında anlık konumları, hızları ve üzerlerindeki paketler burada
+                  canlı güncellenir.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSimulateCourierGps}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-extrabold px-3.5 py-2.5 rounded-xl transition shadow cursor-pointer"
+                >
+                  📍 Test: Kurye GPS Konumu Simüle Et
+                </button>
+                <Link
+                  href="/courier"
+                  target="_blank"
+                  className="bg-slate-800 hover:bg-slate-700 text-orange-300 border border-slate-700 text-xs font-bold px-3.5 py-2.5 rounded-xl transition"
+                >
+                  🛵 Kurye Mobil Ekranını Aç ↗
+                </Link>
+              </div>
+            </div>
+
+            {courierLocations.length === 0 ? (
+              <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-10 text-center space-y-3">
+                <MapPin className="w-10 h-10 text-cyan-400 mx-auto opacity-60" />
+                <div className="font-bold text-slate-200 text-base">
+                  Şu an aktif GPS konumu paylaşan kurye görünmüyor
+                </div>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Kuryeler telefonlarından <strong>/courier</strong> sayfasına girip
+                  sağ üstteki <strong>&ldquo;📍 GPS Açık&rdquo;</strong> butonuna
+                  dokunduğunda veya yukarıdaki simülasyon butonuna tıkladığınızda
+                  harita anında açılır.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleSimulateCourierGps}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl transition shadow cursor-pointer"
+                >
+                  📍 Örnek Kurye GPS Konumlarını Başlat
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Sol: Canlı OpenStreetMap Harita Görünümü */}
+                <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col">
+                  {(() => {
+                    const primary = courierLocations[0];
+                    const lat = primary.lat;
+                    const lng = primary.lng;
+                    const delta = 0.012;
+                    const bbox = `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`;
+                    return (
+                      <>
+                        <div className="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between text-xs">
+                          <span className="font-bold text-cyan-300">
+                            🗺️ Odaklanan Kurye: {primary.courierName} (
+                            {lat.toFixed(5)}, {lng.toFixed(5)})
+                          </span>
+                          <a
+                            href={`https://www.google.com/maps?q=${lat},${lng}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-orange-400 hover:underline font-bold"
+                          >
+                            Google Haritalar&apos;da Aç ↗
+                          </a>
+                        </div>
+                        <iframe
+                          title="Canlı Kurye GPS Haritası"
+                          src={`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(
+                            bbox
+                          )}&layer=mapnik&marker=${lat},${lng}`}
+                          className="w-full h-[420px] border-0"
+                        />
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* Sağ: Kurye Kartları & Üzerlerindeki Paketler */}
+                <div className="lg:col-span-5 space-y-3">
+                  {courierLocations.map((cLoc) => {
+                    const secsAgo = Math.max(
+                      0,
+                      Math.floor(
+                        (nowMs - new Date(cLoc.updatedAt).getTime()) / 1000
+                      )
+                    );
+                    return (
+                      <div
+                        key={cLoc.courierName}
+                        className="bg-slate-900 border-2 border-cyan-500/40 rounded-2xl p-4 space-y-3 shadow-lg"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                              <span className="font-black text-base text-white">
+                                🛵 {cLoc.courierName}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-0.5">
+                              Son Sinyal:{" "}
+                              {secsAgo < 60
+                                ? `${secsAgo} sn önce`
+                                : `${Math.floor(secsAgo / 60)} dk önce`}{" "}
+                              • Koordinat: {cLoc.lat.toFixed(4)},{" "}
+                              {cLoc.lng.toFixed(4)}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            {typeof cLoc.speedKmh === "number" && (
+                              <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-black px-2.5 py-1 rounded-xl">
+                                🚀 {cLoc.speedKmh} km/s
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {cLoc.assignedOrders && cLoc.assignedOrders.length > 0 ? (
+                          <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                            <div className="text-[11px] font-black uppercase text-orange-300">
+                              📦 Üzerindeki Aktif Paketler (
+                              {cLoc.assignedOrders.length})
+                            </div>
+                            {cLoc.assignedOrders.map((ord) => (
+                              <div
+                                key={ord.id}
+                                className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs flex items-center justify-between gap-2"
+                              >
+                                <div>
+                                  <div className="font-bold text-white">
+                                    #{ord.orderNumber} — {ord.customerName}
+                                  </div>
+                                  {ord.customerAddress && (
+                                    <div className="text-[11px] text-slate-400">
+                                      📍 {ord.customerAddress}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="font-black text-emerald-400 shrink-0">
+                                  {ord.totalAmount.toFixed(0)} {settings?.currency}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-emerald-400 font-bold bg-emerald-950/30 border border-emerald-500/30 rounded-xl px-3 py-2">
+                            ✓ Kurye şu an müsait / dönüş yolunda (Üzerinde açık
+                            paket yok)
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -4167,7 +4700,7 @@ export default function KitchenTabletPage() {
         </div>
       )}
 
-      {/* 80mm Termal Yazıcı Fiş Şablonu */}
+      {/* 80mm Termal Yazıcı Fiş Şablonu (Kasa / Mutfak / Bar İstasyon Modu Destekli) */}
       {selectedOrderForPrint && (
         <div
           id="printable-receipt"
@@ -4175,8 +4708,18 @@ export default function KitchenTabletPage() {
         >
           <div className="text-center border-b-2 border-dashed border-black pb-2 mb-2">
             <h2 className="font-bold text-base uppercase">{settings?.name}</h2>
-            <p className="text-[11px]">{settings?.address}</p>
-            <p className="text-[11px]">Tel: {settings?.phone}</p>
+            {printTicketMode === "full" ? (
+              <>
+                <p className="text-[11px]">{settings?.address}</p>
+                <p className="text-[11px]">Tel: {settings?.phone}</p>
+              </>
+            ) : (
+              <div className="mt-1 py-1 bg-black text-white font-black text-sm uppercase">
+                {printTicketMode === "kitchen_only"
+                  ? "🍖 MUTFAK / IZGARA ÜRETİM FİŞİ"
+                  : "🥤 BAR / İÇECEK & TATLI FİŞİ"}
+              </div>
+            )}
             <div className="mt-1.5 py-1 border border-black font-black text-sm">
               SİPARİŞ NO: #{selectedOrderForPrint.orderNumber}
             </div>
@@ -4208,84 +4751,110 @@ export default function KitchenTabletPage() {
             <p>
               <strong>Müşteri:</strong> {selectedOrderForPrint.customerName}
             </p>
-            <p>
-              <strong>Telefon:</strong> {selectedOrderForPrint.customerPhone}
-            </p>
-            {selectedOrderForPrint.deliveryZoneName && (
-              <p>
-                <strong>Bölge:</strong> {selectedOrderForPrint.deliveryZoneName}
-              </p>
-            )}
-            {selectedOrderForPrint.customerAddress && (
-              <p>
-                <strong>Adres:</strong> {selectedOrderForPrint.customerAddress}
-              </p>
-            )}
-            {selectedOrderForPrint.courierName && (
-              <p>
-                <strong>Kurye:</strong> {selectedOrderForPrint.courierName}
-              </p>
+            {printTicketMode === "full" && (
+              <>
+                <p>
+                  <strong>Telefon:</strong>{" "}
+                  {selectedOrderForPrint.customerPhone}
+                </p>
+                {selectedOrderForPrint.deliveryZoneName && (
+                  <p>
+                    <strong>Bölge:</strong>{" "}
+                    {selectedOrderForPrint.deliveryZoneName}
+                  </p>
+                )}
+                {selectedOrderForPrint.customerAddress && (
+                  <p>
+                    <strong>Adres:</strong>{" "}
+                    {selectedOrderForPrint.customerAddress}
+                  </p>
+                )}
+                {selectedOrderForPrint.courierName && (
+                  <p>
+                    <strong>Kurye:</strong> {selectedOrderForPrint.courierName}
+                  </p>
+                )}
+              </>
             )}
           </div>
 
           <div className="border-t-2 border-b-2 border-dashed border-black py-2 space-y-1.5">
-            {selectedOrderForPrint.items.map((item) => {
-              const structuredBlocks = parseStructuredModifiers(
-                item.selectedModifiers
-              );
-              return (
-                <div key={item.id} className="space-y-0.5">
-                  <div className="flex justify-between font-bold">
-                    <span>
-                      {item.quantity}x {item.name}
-                    </span>
-                    <span>
-                      {item.totalPrice.toFixed(2)} {settings?.currency}
-                    </span>
-                  </div>
-                  {structuredBlocks.map((block, bIdx) => (
+            {(() => {
+              const filteredItems =
+                printTicketMode === "kitchen_only"
+                  ? selectedOrderForPrint.items.filter((i) => !isBarItem(i))
+                  : printTicketMode === "bar_only"
+                  ? selectedOrderForPrint.items.filter((i) => isBarItem(i))
+                  : selectedOrderForPrint.items;
+              const itemsToRender =
+                filteredItems.length > 0
+                  ? filteredItems
+                  : selectedOrderForPrint.items;
+
+              return itemsToRender.map((item) => {
+                const structuredBlocks = parseStructuredModifiers(
+                  item.selectedModifiers
+                );
+                return (
+                  <div key={item.id} className="space-y-0.5">
                     <div
-                      key={bIdx}
-                      className="pl-2 text-[11px] border-l border-black ml-1 space-y-0.5"
+                      className={`flex justify-between font-bold ${
+                        printTicketMode !== "full" ? "text-sm font-black" : ""
+                      }`}
                     >
-                      {(block.stepBadge || block.productTitle) && (
-                        <div className="font-bold">
-                          {block.stepBadge ? `[${block.stepBadge}] ` : ""}
-                          {block.productTitle || ""}
-                        </div>
-                      )}
-                      {block.chosenDishName && (
-                        <div className="pl-1 font-bold">
-                          • Ürün: {block.chosenDishName}
-                        </div>
-                      )}
-                      {block.portionLabel && (
-                        <div className="pl-1">
-                          • Porsiyon: {block.portionLabel}
-                        </div>
-                      )}
-                      {block.extras.length > 0 && (
-                        <div className="pl-1">
-                          + Ekstra:{" "}
-                          {block.extras.map((e) => e.name).join(", ")}
-                        </div>
-                      )}
-                      {block.removals.length > 0 && (
-                        <div className="pl-1 font-bold">
-                          - Çıkarılacak:{" "}
-                          {block.removals.map((r) => r.name).join(", ")}
-                        </div>
+                      <span>
+                        {item.quantity}x {item.name}
+                      </span>
+                      {printTicketMode === "full" && (
+                        <span>
+                          {item.totalPrice.toFixed(2)} {settings?.currency}
+                        </span>
                       )}
                     </div>
-                  ))}
-                  {item.itemNote && (
-                    <div className="pl-2 text-[11px] font-bold">
-                      * Not: {item.itemNote}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    {structuredBlocks.map((block, bIdx) => (
+                      <div
+                        key={bIdx}
+                        className="pl-2 text-[11px] border-l border-black ml-1 space-y-0.5"
+                      >
+                        {(block.stepBadge || block.productTitle) && (
+                          <div className="font-bold">
+                            {block.stepBadge ? `[${block.stepBadge}] ` : ""}
+                            {block.productTitle || ""}
+                          </div>
+                        )}
+                        {block.chosenDishName && (
+                          <div className="pl-1 font-bold">
+                            • Ürün: {block.chosenDishName}
+                          </div>
+                        )}
+                        {block.portionLabel && (
+                          <div className="pl-1">
+                            • Porsiyon: {block.portionLabel}
+                          </div>
+                        )}
+                        {block.extras.length > 0 && (
+                          <div className="pl-1">
+                            + Ekstra:{" "}
+                            {block.extras.map((e) => e.name).join(", ")}
+                          </div>
+                        )}
+                        {block.removals.length > 0 && (
+                          <div className="pl-1 font-bold">
+                            - Çıkarılacak:{" "}
+                            {block.removals.map((r) => r.name).join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {item.itemNote && (
+                      <div className="pl-2 text-[11px] font-bold">
+                        * Not: {item.itemNote}
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
           </div>
 
           {selectedOrderForPrint.orderNote && (
@@ -4294,58 +4863,68 @@ export default function KitchenTabletPage() {
             </div>
           )}
 
-          <div className="pt-1.5 space-y-0.5 text-[11px]">
-            <div className="flex justify-between">
-              <span>ARA TOPLAM:</span>
-              <span>
-                {selectedOrderForPrint.subtotal.toFixed(2)} {settings?.currency}
-              </span>
+          {printTicketMode === "full" ? (
+            <>
+              <div className="pt-1.5 space-y-0.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span>ARA TOPLAM:</span>
+                  <span>
+                    {selectedOrderForPrint.subtotal.toFixed(2)}{" "}
+                    {settings?.currency}
+                  </span>
+                </div>
+                {selectedOrderForPrint.discountAmount &&
+                selectedOrderForPrint.discountAmount > 0 ? (
+                  <div className="flex justify-between">
+                    <span>
+                      İNDİRİM ({selectedOrderForPrint.couponCode || "Kampanya"}
+                      ):
+                    </span>
+                    <span>
+                      -{selectedOrderForPrint.discountAmount.toFixed(2)}{" "}
+                      {settings?.currency}
+                    </span>
+                  </div>
+                ) : null}
+                {selectedOrderForPrint.deliveryFee > 0 && (
+                  <div className="flex justify-between">
+                    <span>GETİRME ÜCRETİ:</span>
+                    <span>
+                      {selectedOrderForPrint.deliveryFee.toFixed(2)}{" "}
+                      {settings?.currency}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-1.5 pt-1.5 border-t-2 border-black font-black flex justify-between text-sm">
+                <span>GENEL TOPLAM:</span>
+                <span>
+                  {selectedOrderForPrint.totalAmount.toFixed(2)}{" "}
+                  {settings?.currency}
+                </span>
+              </div>
+
+              <div className="mt-1 text-[11px] font-bold flex justify-between border-b border-dashed border-black pb-2">
+                <span>ÖDEME YÖNTEMİ:</span>
+                <span>
+                  {selectedOrderForPrint.paymentMethod === "cash"
+                    ? "KAPIDA / KASADA NAKİT"
+                    : selectedOrderForPrint.paymentMethod === "card_at_door"
+                    ? "KAPIDA KREDİ KARTI (POS)"
+                    : "MASADA ÖDEME"}
+                </span>
+              </div>
+
+              <div className="text-center pt-2 text-[10px]">
+                <p className="font-bold">Afiyet Olsun! Teşekkür Ederiz.</p>
+              </div>
+            </>
+          ) : (
+            <div className="text-center pt-2 text-[11px] font-bold">
+              *** İSTASYON ÜRETİM FİŞİ (FİYATSIZ) ***
             </div>
-            {selectedOrderForPrint.discountAmount &&
-            selectedOrderForPrint.discountAmount > 0 ? (
-              <div className="flex justify-between">
-                <span>
-                  İNDİRİM ({selectedOrderForPrint.couponCode || "Kampanya"}):
-                </span>
-                <span>
-                  -{selectedOrderForPrint.discountAmount.toFixed(2)}{" "}
-                  {settings?.currency}
-                </span>
-              </div>
-            ) : null}
-            {selectedOrderForPrint.deliveryFee > 0 && (
-              <div className="flex justify-between">
-                <span>GETİRME ÜCRETİ:</span>
-                <span>
-                  {selectedOrderForPrint.deliveryFee.toFixed(2)}{" "}
-                  {settings?.currency}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-1.5 pt-1.5 border-t-2 border-black font-black flex justify-between text-sm">
-            <span>GENEL TOPLAM:</span>
-            <span>
-              {selectedOrderForPrint.totalAmount.toFixed(2)}{" "}
-              {settings?.currency}
-            </span>
-          </div>
-
-          <div className="mt-1 text-[11px] font-bold flex justify-between border-b border-dashed border-black pb-2">
-            <span>ÖDEME YÖNTEMİ:</span>
-            <span>
-              {selectedOrderForPrint.paymentMethod === "cash"
-                ? "KAPIDA / KASADA NAKİT"
-                : selectedOrderForPrint.paymentMethod === "card_at_door"
-                ? "KAPIDA KREDİ KARTI (POS)"
-                : "MASADA ÖDEME"}
-            </span>
-          </div>
-
-          <div className="text-center pt-2 text-[10px]">
-            <p className="font-bold">Afiyet Olsun! Teşekkür Ederiz.</p>
-          </div>
+          )}
         </div>
       )}
     </div>
