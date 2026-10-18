@@ -300,13 +300,14 @@ export interface CreditAccount {
   updatedAt: string;
 }
 
-/** 5. ÖZELLİK: Saatlik Happy Hour / Öğle Menüsü Otomatik İndirim Kuralı */
+/** 5. ÖZELLİK: Saatlik Happy Hour / Öğle Menüsü Otomatik İndirim veya Bindirim Kuralı */
 export interface HappyHourConfig {
   enabled: boolean;
-  title: string; // Örn: "Öğle Molası Happy Hour İndirimi"
+  title: string; // Örn: "Öğle Molası Happy Hour"
   startTime: string; // Örn: "12:00"
   endTime: string; // Örn: "16:00"
-  discountPercent: number; // Örn: 15 (%15 indirim)
+  discountPercent: number; // Örn: 15 (%15 indirim veya bindirim)
+  mode?: "discount" | "surcharge"; // "discount" = İndirim (-%), "surcharge" = Bindirim (+%)
   categoryIds?: string[]; // Boşsa tüm menüde geçerli
 }
 

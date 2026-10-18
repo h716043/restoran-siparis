@@ -1088,7 +1088,7 @@ export function bulkUpdateMenuPrices(params: {
     } else if (params.rounding === "nearest_10") {
       next = Math.round(next / 10) * 10;
     } else {
-      next = Math.round(next);
+      next = Math.round(next * 100) / 100;
     }
     return Math.max(5, next);
   };

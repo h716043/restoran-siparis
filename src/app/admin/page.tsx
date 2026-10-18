@@ -4359,10 +4359,10 @@ export default function AdminDashboardPage() {
                   </div>
                   <div>
                     <h2 className="font-extrabold text-base text-slate-900">
-                      Saatlik &quot;Happy Hour&quot; / Öğle Menüsü Otomatik İndirim Kuralı
+                      Saatlik &quot;Happy Hour&quot; Otomatik İndirim / Bindirim Kuralı
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Restoranın sakin saatlerinde (Örn: 14:00 - 17:00) kupon koduna gerek kalmadan sepette otomatik yüzdelik indirim uygular
+                      Belirlediğiniz saat aralığında sepette otomatik yüzdelik indirim (-%) veya saatlik tarife bindirimi (+%) kuruşu kuruşuna tam uygulanır
                     </p>
                   </div>
                 </div>
@@ -4371,10 +4371,11 @@ export default function AdminDashboardPage() {
                   onClick={() => {
                     const cur = settings.happyHourConfig || {
                       enabled: false,
-                      title: "Öğle Saatleri Happy Hour İndirimi",
+                      title: "Happy Hour",
                       startTime: "14:00",
                       endTime: "17:00",
                       discountPercent: 15,
+                      mode: "discount" as const,
                     };
                     persistSettings(
                       {
@@ -4385,8 +4386,8 @@ export default function AdminDashboardPage() {
                         },
                       },
                       !cur.enabled
-                        ? "⏱️ Saatlik Happy Hour indirimi AKTİF edildi!"
-                        : "Saatlik Happy Hour indirimi kapatıldı."
+                        ? "⏱️ Saatlik Happy Hour kuralı AKTİF edildi!"
+                        : "Saatlik Happy Hour kuralı kapatıldı."
                     );
                   }}
                   className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
@@ -4402,15 +4403,15 @@ export default function AdminDashboardPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                <div className="md:col-span-5">
+                <div className="md:col-span-3">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Kampanya Başlığı
+                    Kampanya / Tarife Başlığı
                   </label>
                   <input
                     type="text"
                     value={
                       settings.happyHourConfig?.title ??
-                      "Öğle Saatleri Happy Hour İndirimi"
+                      "Happy Hour"
                     }
                     onChange={(e) =>
                       setSettings({
@@ -4423,11 +4424,47 @@ export default function AdminDashboardPage() {
                           endTime: settings.happyHourConfig?.endTime ?? "17:00",
                           discountPercent:
                             settings.happyHourConfig?.discountPercent ?? 15,
+                          mode: settings.happyHourConfig?.mode ?? "discount",
+                          categoryIds: settings.happyHourConfig?.categoryIds,
                         },
                       })
                     }
                     className="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl"
                   />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    İşlem Türü
+                  </label>
+                  <select
+                    value={settings.happyHourConfig?.mode ?? "discount"}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        happyHourConfig: {
+                          enabled: settings.happyHourConfig?.enabled ?? false,
+                          title:
+                            settings.happyHourConfig?.title ??
+                            "Happy Hour",
+                          startTime:
+                            settings.happyHourConfig?.startTime ?? "14:00",
+                          endTime: settings.happyHourConfig?.endTime ?? "17:00",
+                          discountPercent:
+                            settings.happyHourConfig?.discountPercent ?? 15,
+                          mode: e.target.value as "discount" | "surcharge",
+                          categoryIds: settings.happyHourConfig?.categoryIds,
+                        },
+                      })
+                    }
+                    className={`w-full px-2.5 py-2 text-xs font-extrabold border rounded-xl ${
+                      (settings.happyHourConfig?.mode ?? "discount") === "surcharge"
+                        ? "bg-rose-50 text-rose-700 border-rose-300"
+                        : "bg-emerald-50 text-emerald-700 border-emerald-300"
+                    }`}
+                  >
+                    <option value="discount">📉 İndirim (-%)</option>
+                    <option value="surcharge">📈 Bindirim (+%)</option>
+                  </select>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -4443,11 +4480,13 @@ export default function AdminDashboardPage() {
                           enabled: settings.happyHourConfig?.enabled ?? false,
                           title:
                             settings.happyHourConfig?.title ??
-                            "Öğle Saatleri Happy Hour İndirimi",
+                            "Happy Hour",
                           startTime: e.target.value,
                           endTime: settings.happyHourConfig?.endTime ?? "17:00",
                           discountPercent:
                             settings.happyHourConfig?.discountPercent ?? 15,
+                          mode: settings.happyHourConfig?.mode ?? "discount",
+                          categoryIds: settings.happyHourConfig?.categoryIds,
                         },
                       })
                     }
@@ -4468,12 +4507,14 @@ export default function AdminDashboardPage() {
                           enabled: settings.happyHourConfig?.enabled ?? false,
                           title:
                             settings.happyHourConfig?.title ??
-                            "Öğle Saatleri Happy Hour İndirimi",
+                            "Happy Hour",
                           startTime:
                             settings.happyHourConfig?.startTime ?? "14:00",
                           endTime: e.target.value,
                           discountPercent:
                             settings.happyHourConfig?.discountPercent ?? 15,
+                          mode: settings.happyHourConfig?.mode ?? "discount",
+                          categoryIds: settings.happyHourConfig?.categoryIds,
                         },
                       })
                     }
@@ -4483,12 +4524,15 @@ export default function AdminDashboardPage() {
                 <div className="md:col-span-3 flex gap-2">
                   <div className="flex-1">
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      İndirim (%)
+                      {(settings.happyHourConfig?.mode ?? "discount") === "surcharge"
+                        ? "Bindirim (%)"
+                        : "İndirim (%)"}
                     </label>
                     <input
                       type="number"
-                      min={1}
-                      max={80}
+                      step="any"
+                      min={0.1}
+                      max={100}
                       value={settings.happyHourConfig?.discountPercent ?? 15}
                       onChange={(e) =>
                         setSettings({
@@ -4497,12 +4541,14 @@ export default function AdminDashboardPage() {
                             enabled: settings.happyHourConfig?.enabled ?? false,
                             title:
                               settings.happyHourConfig?.title ??
-                              "Öğle Saatleri Happy Hour İndirimi",
+                              "Happy Hour",
                             startTime:
                               settings.happyHourConfig?.startTime ?? "14:00",
                             endTime:
                               settings.happyHourConfig?.endTime ?? "17:00",
                             discountPercent: Number(e.target.value),
+                            mode: settings.happyHourConfig?.mode ?? "discount",
+                            categoryIds: settings.happyHourConfig?.categoryIds,
                           },
                         })
                       }
@@ -4514,7 +4560,7 @@ export default function AdminDashboardPage() {
                     onClick={() =>
                       persistSettings(
                         settings,
-                        "⏱️ Happy Hour saatlik indirim ayarları kaydedildi!"
+                        "⏱️ Happy Hour saatlik indirim/bindirim ayarları kaydedildi!"
                       )
                     }
                     className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl cursor-pointer shrink-0"

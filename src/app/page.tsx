@@ -1481,7 +1481,7 @@ function CustomerMenuContent() {
     return cur >= startTotal || cur <= endTotal;
   }, [settings?.happyHourConfig]);
 
-  // Kupon, İlk Sipariş veya Happy Hour İndirimi Hesaplama
+  // Kupon, İlk Sipariş veya Happy Hour İndirimi / Bindirimi Hesaplama (Yuvarlamasız, Kuruşu Kuruşuna Tam Hesap)
   const isFirstOrderEligible = useMemo(() => {
     return (
       Boolean(currentUser) &&
@@ -1490,17 +1490,35 @@ function CustomerMenuContent() {
     );
   }, [currentUser, customerOrders.length, settings?.firstOrderDiscountPercent]);
 
-  const discountAmount = useMemo(() => {
-    if (cart.length === 0) return 0;
+  const activePriceAdjustment = useMemo<{
+    type: "discount" | "surcharge" | null;
+    amount: number;
+    label: string;
+    codeTag?: string;
+  }>(() => {
+    if (cart.length === 0) {
+      return { type: null, amount: 0, label: "" };
+    }
     if (appliedCoupon) {
-      if (subtotal < appliedCoupon.minOrderAmount) return 0;
+      if (subtotal < appliedCoupon.minOrderAmount) {
+        return { type: null, amount: 0, label: "" };
+      }
       const isPct =
         appliedCoupon.discountType === "percentage" ||
         (appliedCoupon.discountType as string) === "percent";
-      if (isPct) {
-        return Math.round((subtotal * appliedCoupon.discountValue) / 100);
+      const rawAmt = isPct
+        ? Number(((subtotal * appliedCoupon.discountValue) / 100).toFixed(2))
+        : Number(Math.min(subtotal, appliedCoupon.discountValue).toFixed(2));
+      if (rawAmt > 0) {
+        return {
+          type: "discount",
+          amount: rawAmt,
+          label: isPct
+            ? `İndirim (${appliedCoupon.code} %${appliedCoupon.discountValue})`
+            : `İndirim (${appliedCoupon.code})`,
+          codeTag: appliedCoupon.code,
+        };
       }
-      return Math.min(subtotal, appliedCoupon.discountValue);
     }
     if (isHappyHourActive && settings?.happyHourConfig) {
       const hh = settings.happyHourConfig;
@@ -1514,14 +1532,40 @@ function CustomerMenuContent() {
               return sum;
             }, 0)
           : subtotal;
-      const hhDisc = Math.round((eligibleSubtotal * hh.discountPercent) / 100);
-      if (hhDisc > 0) return hhDisc;
+      const hhAmt = Number(
+        ((eligibleSubtotal * hh.discountPercent) / 100).toFixed(2)
+      );
+      if (hhAmt > 0) {
+        const hhTitle = (hh.title || "Happy Hour").trim();
+        if (hh.mode === "surcharge") {
+          return {
+            type: "surcharge",
+            amount: hhAmt,
+            label: `Bindirim (${hhTitle} +%${hh.discountPercent})`,
+            codeTag: `BINDIRIM+%${hh.discountPercent}`,
+          };
+        }
+        return {
+          type: "discount",
+          amount: hhAmt,
+          label: `İndirim (${hhTitle} %${hh.discountPercent})`,
+          codeTag: `HAPPYHOUR-%${hh.discountPercent}`,
+        };
+      }
     }
     if (isFirstOrderEligible) {
       const pct = settings?.firstOrderDiscountPercent || 0;
-      return Math.round((subtotal * pct) / 100);
+      const firstAmt = Number(((subtotal * pct) / 100).toFixed(2));
+      if (firstAmt > 0) {
+        return {
+          type: "discount",
+          amount: firstAmt,
+          label: `İndirim (İlk Sipariş %${pct})`,
+          codeTag: `ILKSIPARIS%${pct}`,
+        };
+      }
     }
-    return 0;
+    return { type: null, amount: 0, label: "" };
   }, [
     cart,
     items,
@@ -1533,8 +1577,16 @@ function CustomerMenuContent() {
     settings?.firstOrderDiscountPercent,
   ]);
 
-  const baseTotalBeforeLoyalty =
-    Math.max(0, subtotal - discountAmount) + deliveryFee;
+  const discountAmount =
+    activePriceAdjustment.type === "discount" ? activePriceAdjustment.amount : 0;
+  const surchargeAmount =
+    activePriceAdjustment.type === "surcharge" ? activePriceAdjustment.amount : 0;
+
+  const baseTotalBeforeLoyalty = Number(
+    (
+      Math.max(0, subtotal - discountAmount + surchargeAmount) + deliveryFee
+    ).toFixed(2)
+  );
 
   // İsteğe Bağlı Müşteri Sadakat & Para Puan Hesaplaması
   const isLoyaltyEnabled = Boolean(settings?.loyaltyConfig?.enabled);
@@ -1548,10 +1600,12 @@ function CustomerMenuContent() {
 
   const loyaltyPointsToUse = useMemo(() => {
     if (!canRedeemPoints || !useLoyaltyPoints) return 0;
-    return Math.min(availableUserPoints, baseTotalBeforeLoyalty);
+    return Number(Math.min(availableUserPoints, baseTotalBeforeLoyalty).toFixed(2));
   }, [canRedeemPoints, useLoyaltyPoints, availableUserPoints, baseTotalBeforeLoyalty]);
 
-  const totalAmount = Math.max(0, baseTotalBeforeLoyalty - loyaltyPointsToUse);
+  const totalAmount = Number(
+    Math.max(0, baseTotalBeforeLoyalty - loyaltyPointsToUse).toFixed(2)
+  );
 
   const estimatedPointsToEarn = useMemo(() => {
     if (!isLoyaltyEnabled) return 0;
@@ -1827,11 +1881,7 @@ function CustomerMenuContent() {
           paymentMethod,
           subtotal,
           discountAmount,
-          couponCode: appliedCoupon
-            ? appliedCoupon.code
-            : isFirstOrderEligible
-            ? `ILKSIPARIS%${settings?.firstOrderDiscountPercent}`
-            : undefined,
+          couponCode: activePriceAdjustment.codeTag,
           useLoyaltyPoints: Boolean(useLoyaltyPoints && canRedeemPoints),
           deliveryFee,
           totalAmount: baseTotalBeforeLoyalty,
@@ -2496,7 +2546,7 @@ function CustomerMenuContent() {
         )}
       </div>
 
-      {/* ⏱️ SAATLİK HAPPY HOUR / ÖĞLE MENÜSÜ OTOMATİK İNDİRİM BARI */}
+      {/* ⏱️ SAATLİK HAPPY HOUR / TARİFE BARI */}
       {settings?.happyHourConfig?.enabled && (
         <div className="max-w-7xl mx-auto w-full px-4 mt-3">
           <div
@@ -2508,7 +2558,12 @@ function CustomerMenuContent() {
           >
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2 py-0.5 rounded-full bg-black/20 font-black text-[11px]">
-                ⏱️ {isHappyHourActive ? "ŞU AN AKTİF" : "SAATLİK FIRSAT"}
+                ⏱️{" "}
+                {isHappyHourActive
+                  ? "ŞU AN AKTİF"
+                  : settings.happyHourConfig.mode === "surcharge"
+                  ? "SAATLİK TARİFE"
+                  : "SAATLİK FIRSAT"}
               </span>
               <span className="font-extrabold">
                 {settings.happyHourConfig.title} (
@@ -2517,7 +2572,11 @@ function CustomerMenuContent() {
               </span>
               <span>
                 •{" "}
-                {isHappyHourActive
+                {settings.happyHourConfig.mode === "surcharge"
+                  ? isHappyHourActive
+                    ? `Sepetinizde +%${settings.happyHourConfig.discountPercent} saatlik tarife farkı otomatik uygulanıyor.`
+                    : `Belirtilen saatlerde siparişlerde +%${settings.happyHourConfig.discountPercent} saatlik tarife uygulanır.`
+                  : isHappyHourActive
                   ? `Sepetinizde %${settings.happyHourConfig.discountPercent} Happy Hour indirimi otomatik uygulanıyor!`
                   : `Belirtilen saatlerde tüm siparişlerde otomatik %${settings.happyHourConfig.discountPercent} indirim!`}
               </span>
@@ -6062,15 +6121,17 @@ function CustomerMenuContent() {
             </div>
             {discountAmount > 0 && (
               <div className="flex justify-between text-emerald-600 font-bold">
-                <span>
-                  İndirim (
-                  {appliedCoupon
-                    ? appliedCoupon.code
-                    : `İlk Sipariş %${settings?.firstOrderDiscountPercent}`}
-                  )
-                </span>
+                <span>{activePriceAdjustment.label}</span>
                 <span>
                   -{discountAmount.toFixed(2)} {settings?.currency}
+                </span>
+              </div>
+            )}
+            {surchargeAmount > 0 && (
+              <div className="flex justify-between text-rose-600 font-bold">
+                <span>{activePriceAdjustment.label}</span>
+                <span>
+                  +{surchargeAmount.toFixed(2)} {settings?.currency}
                 </span>
               </div>
             )}
