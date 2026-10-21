@@ -182,6 +182,7 @@ function CustomerMenuContent() {
     message: string;
     phone: string;
   } | null>(null);
+  const [pendingWaMeCode, setPendingWaMeCode] = useState<string>("");
 
   // Ürün detay & opsiyon seçimi modalı
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
@@ -696,6 +697,9 @@ function CustomerMenuContent() {
           setAuthName(data.existingUserName);
         }
         setAuthStep("otp");
+        setPendingWaMeCode(
+          data.waMeCode || data.offlineFallbackCode || data.simulatedCode || ""
+        );
         if (data.simulatedCode) {
           setSimulatedWaPopup({
             code: data.simulatedCode,
@@ -5427,11 +5431,98 @@ function CustomerMenuContent() {
                 <button
                   type="submit"
                   disabled={authLoading}
-                  className="w-full bg-[#075E54] hover:bg-[#064e46] text-white font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition shadow-md"
+                  className="w-full bg-[#075E54] hover:bg-[#064e46] text-white font-extrabold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition shadow-md cursor-pointer"
                 >
                   <ShieldCheck className="w-5 h-5" />
                   <span>Kodu Doğrula ve Giriş Yap</span>
                 </button>
+
+                {settings?.whatsappConfig?.enableCustomerWaMeVerification &&
+                  pendingWaMeCode && (
+                    <div className="pt-2 border-t border-slate-200 space-y-2">
+                      <p className="text-[11px] text-slate-500 text-center">
+                        Kod telefonunuza henüz ulaşmadıysa kendi WhatsApp uygulamanızla tek tıkla anında onaylayabilirsiniz:
+                      </p>
+                      <button
+                        type="button"
+                        disabled={authLoading}
+                        onClick={async () => {
+                          setAuthError("");
+                          if (!isExistingAccount && !authName.trim()) {
+                            setAuthError(
+                              "Lütfen önce yukarıdaki kutucuğa adınızı ve soyadınızı girin."
+                            );
+                            return;
+                          }
+                          const rawRestPhone = (
+                            settings?.phone || "905000000000"
+                          ).replace(/\D/g, "");
+                          const normRestPhone = rawRestPhone.startsWith("0")
+                            ? `9${rawRestPhone}`
+                            : rawRestPhone.startsWith("90")
+                            ? rawRestPhone
+                            : `90${rawRestPhone}`;
+                          const waText = `Merhaba *${
+                            settings?.name || "Restoran"
+                          }*, üyelik ve sipariş doğrulama kodum: *${pendingWaMeCode}*`;
+                          window.open(
+                            `https://wa.me/${normRestPhone}?text=${encodeURIComponent(
+                              waText
+                            )}`,
+                            "_blank",
+                            "noopener,noreferrer"
+                          );
+                          setAuthOtpCode(pendingWaMeCode);
+                          setAuthLoading(true);
+                          try {
+                            const res = await fetch("/api/auth/verify-otp", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                phone: authPhone,
+                                code: pendingWaMeCode,
+                                name: authName.trim() || "Müşteri",
+                                address: customerAddress,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (res.ok && data.user) {
+                              const user: CustomerUser = data.user;
+                              setCurrentUser(user);
+                              localStorage.setItem(
+                                "restoran_customer_user",
+                                JSON.stringify(user)
+                              );
+                              setCustomerName(user.name);
+                              setCustomerPhone(user.phone);
+                              setResName(user.name);
+                              setResPhone(user.phone);
+                              fetchUserProfileAndOrders(user.phone);
+                              setAuthModalOpen(false);
+                              setSimulatedWaPopup(null);
+                              setAuthOtpCode("");
+                              setPendingWaMeCode("");
+                              if (cart.length > 0) {
+                                setCheckoutStep("form");
+                              }
+                            } else {
+                              setAuthError(
+                                data.error || "Doğrulama yapılamadı."
+                              );
+                            }
+                          } finally {
+                            setAuthLoading(false);
+                          }
+                        }}
+                        className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-slate-950 font-extrabold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition shadow-sm text-xs cursor-pointer"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        <span>
+                          📲 WhatsApp Uygulamamla Tek Tıkla Doğrula (Kod Beklemeden)
+                        </span>
+                      </button>
+                    </div>
+                  )}
               </form>
             )}
           </div>

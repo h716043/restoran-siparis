@@ -51,6 +51,9 @@ export async function POST(req: NextRequest) {
         waResult.status === "queued_for_local" ? code : undefined,
       offlinePreviewMessage:
         waResult.status === "queued_for_local" ? waMessage : undefined,
+      waMeCode: settings.whatsappConfig?.enableCustomerWaMeVerification
+        ? code
+        : undefined,
     });
   } catch (error) {
     console.error("POST /api/auth/send-otp error:", error);

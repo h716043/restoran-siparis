@@ -5779,7 +5779,7 @@ export default function AdminDashboardPage() {
                         </label>
                         <input
                           type="text"
-                          placeholder="http://localhost:3001/send-message veya https://api.ultramsg.com/..."
+                          placeholder="http://localhost:3001/send-message veya https://...onrender.com/send-message"
                           value={waConfig.gatewayUrl}
                           onChange={(e) =>
                             setSettings({
@@ -5813,6 +5813,56 @@ export default function AdminDashboardPage() {
                           className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white font-mono"
                         />
                       </div>
+                    </div>
+
+                    {/* ☁️ Render.com Ücretsiz 7/24 Bulut WhatsApp Köprüsü Kurulum Kutusu */}
+                    <div className="bg-white border border-indigo-200 rounded-xl p-3.5 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                          ☁️ PC Kapalıyken 0 ₺ (Ücretsiz) 7/24 WhatsApp Gönderimi — Render.com Kurulumu
+                        </span>
+                        <a
+                          href="https://dashboard.render.com/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg transition shadow-2xs"
+                        >
+                          <span>Render Dashboard&apos;u Aç</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                      <ol className="list-decimal list-inside text-[11px] text-slate-600 space-y-1 leading-relaxed">
+                        <li>
+                          <a
+                            href="https://dashboard.render.com/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-bold text-indigo-700 underline"
+                          >
+                            Render Dashboard
+                          </a>{" "}
+                          sayfasından <strong>New + &rarr; Web Service</strong> seçin ve GitHub deponuzu (<code className="bg-slate-100 px-1 rounded">restoran-siparis</code>) bağlayın (Plan: <strong>Free / 0$</strong>).
+                        </li>
+                        <li>
+                          <strong>Build Command:</strong>{" "}
+                          <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                            npm install --no-save @whiskeysockets/baileys qrcode-terminal pino
+                          </code>{" "}
+                          • <strong>Start Command:</strong>{" "}
+                          <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                            node whatsapp-bridge.mjs
+                          </code>
+                        </li>
+                        <li>
+                          Servis açıldığında Render&apos;ın verdiği adresi (Örn:{" "}
+                          <code className="bg-slate-100 px-1 rounded">
+                            https://restoran-whatsapp-bridge.onrender.com
+                          </code>
+                          ) tarayıcıda açıp ekrandaki <strong>WhatsApp QR Kodu</strong> telefonunuzdan okutun ve yukarıdaki Gateway URL kutusuna sonuna{" "}
+                          <code className="bg-slate-100 px-1 rounded">/send-message</code>{" "}
+                          ekleyerek kaydedin!
+                        </li>
+                      </ol>
                     </div>
                   </div>
                 )}
@@ -5903,6 +5953,31 @@ export default function AdminDashboardPage() {
                       Sipariş mutfakta onaylandığında ve yola çıktığında
                       müşteriye otomatik WhatsApp durum mesajı gönder
                     </span>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 text-sm font-medium text-slate-800 cursor-pointer bg-emerald-50/70 border border-emerald-200 p-3 rounded-xl">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(waConfig.enableCustomerWaMeVerification)}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          whatsappConfig: {
+                            ...waConfig,
+                            enableCustomerWaMeVerification: e.target.checked,
+                          },
+                        })
+                      }
+                      className="w-4 h-4 accent-[#075E54] mt-0.5"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-900 block">
+                        📲 3. Yöntem (İsteğe Bağlı): Müşteriden İşletmeye Tek Tıkla WhatsApp Onayı (wa.me)
+                      </span>
+                      <span className="text-xs text-slate-600 block mt-0.5">
+                        Aktif edildiğinde, doğrulama ekranında <strong>&ldquo;📲 WhatsApp Uygulamamla Tek Tıkla Doğrula&rdquo;</strong> butonu da görünür. Müşteri tıkladığında kendi WhatsApp uygulamasından işletme numaranıza onay mesajı atarak (PC kapalı olsa bile %100 ücretsiz ve sunucusuz) anında giriş yapabilir.
+                      </span>
+                    </div>
                   </label>
                 </div>
 

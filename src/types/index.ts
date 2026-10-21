@@ -208,6 +208,7 @@ export interface WhatsAppConfig {
   metaAccessToken: string;
   sendOrderUpdates: boolean;
   requireAuthForDeliveryAndPickup: boolean;
+  enableCustomerWaMeVerification?: boolean; // 3. Yöntem: Müşteriden İşletmeye Tek Tıkla WhatsApp (wa.me) Ters Doğrulama (İsteğe Bağlı)
 }
 
 export interface SecurityConfig {
