@@ -32,13 +32,14 @@ export async function sendWhatsAppMessage(
   const phone = normalizePhone(rawPhone);
   const settings = getSettings();
   const config = settings.whatsappConfig || {
-    provider: "simulation",
-    gatewayUrl: "http://localhost:3001/send-message",
+    provider: "custom_gateway",
+    gatewayUrl: "https://restoran-siparis-v55a.onrender.com/send-message",
     gatewayApiKey: "",
     metaPhoneNumberId: "",
     metaAccessToken: "",
     sendOrderUpdates: true,
     requireAuthForDeliveryAndPickup: true,
+    enableCustomerWaMeVerification: true,
   };
 
   const isNetlifyCloud =

@@ -399,6 +399,17 @@ async function startBridge() {
       `🚀 WhatsApp 7/24 Köprü Servisi çalışıyor: Port ${PORT} (/send-message)`
     );
   });
+
+  // Render.com Free Tier uyku modunu (spin-down) önlemek için her 9 dakikada bir kendi /status uç noktasına ping at
+  const selfUrl = (
+    process.env.RENDER_EXTERNAL_URL ||
+    "https://restoran-siparis-v55a.onrender.com"
+  ).replace(/\/+$/, "");
+  if (selfUrl.startsWith("https://")) {
+    setInterval(() => {
+      fetch(`${selfUrl}/status`).catch(() => {});
+    }, 9 * 60 * 1000);
+  }
 }
 
 startBridge();

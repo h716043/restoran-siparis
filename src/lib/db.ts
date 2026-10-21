@@ -276,13 +276,14 @@ function initSchema(db: DatabaseSync) {
     let changed = false;
     if (!parsed.whatsappConfig) {
       parsed.whatsappConfig = {
-        provider: "simulation",
-        gatewayUrl: "http://localhost:3001/send-message",
+        provider: "custom_gateway",
+        gatewayUrl: "https://restoran-siparis-v55a.onrender.com/send-message",
         gatewayApiKey: "",
         metaPhoneNumberId: "",
         metaAccessToken: "",
         sendOrderUpdates: true,
         requireAuthForDeliveryAndPickup: true,
+        enableCustomerWaMeVerification: true,
       };
       changed = true;
     }
@@ -464,13 +465,14 @@ function seedDatabase(db: DatabaseSync) {
     coupons: DEFAULT_COUPONS,
     couriers: ["Kurye 1 (Motorlu)", "Kurye 2 (Motorlu)", "Hızlı Kurye"],
     whatsappConfig: {
-      provider: "simulation",
-      gatewayUrl: "http://localhost:3001/send-message",
+      provider: "custom_gateway",
+      gatewayUrl: "https://restoran-siparis-v55a.onrender.com/send-message",
       gatewayApiKey: "",
       metaPhoneNumberId: "",
       metaAccessToken: "",
       sendOrderUpdates: true,
       requireAuthForDeliveryAndPickup: true,
+      enableCustomerWaMeVerification: true,
     },
     securityConfig: {
       adminPassword: "admin1234",
