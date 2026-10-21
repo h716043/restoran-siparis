@@ -17,13 +17,13 @@ powercfg /change monitor-timeout-ac 60
 echo       [OK] Bilgisayar prizdeyken uyku modu tamamen devre disi birakildi!
 echo.
 
-echo [2/2] Windows acildiginda Restoran Sisteminin otomatik baslamasi ayarlaniyor...
-set "TARGET_BAT=%~dp0BASLAT.bat"
+echo [2/2] Windows acildiginda Restoran Sisteminin GIZLI ARKA PLANDA baslamasi ayarlaniyor...
+set "TARGET_VBS=%~dp0ARKAPLANDA-BASLAT.vbs"
 set "WORK_DIR=%~dp0"
 set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "SHORTCUT_PATH=%STARTUP_DIR%\Restoran-POS-Baslat.lnk"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = '%TARGET_BAT%'; $s.WorkingDirectory = '%WORK_DIR%'; $s.Description = 'Restoran Siparis ve WhatsApp Sistemi Otomatik Baslatici'; $s.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = 'wscript.exe'; $s.Arguments = '\"%TARGET_VBS%\"'; $s.WorkingDirectory = '%WORK_DIR%'; $s.WindowStyle = 7; $s.Description = 'Restoran Siparis ve WhatsApp Sistemi Gizli Arkaplan Baslatici'; $s.Save()"
 
 if exist "%SHORTCUT_PATH%" (
     echo       [OK] Baslangic kisayolu olusturuldu:

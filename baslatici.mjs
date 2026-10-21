@@ -13,6 +13,38 @@ import http from "node:http";
 const APP_PORT = 5439;
 const noBrowserOpen = process.argv.includes("--no-open");
 
+function checkAlreadyRunning() {
+  return new Promise((resolve) => {
+    const req = http.get(`http://localhost:${APP_PORT}/api/settings`, (res) => {
+      resolve(Boolean(res.statusCode && res.statusCode < 500));
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(1500, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function openBrowser() {
+  if (process.platform === "win32") {
+    spawn("cmd.exe", ["/c", "start", "", `http://localhost:${APP_PORT}/admin`], {
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    }).unref();
+  }
+}
+
+const alreadyRunning = await checkAlreadyRunning();
+if (alreadyRunning) {
+  console.log(`✅ Sistem zaten arka planda çalışıyor (Port ${APP_PORT}).`);
+  if (!noBrowserOpen) {
+    openBrowser();
+  }
+  process.exit(0);
+}
+
 console.log("==================================================================");
 console.log("  🍽️  RESTORAN SİPARİŞ & YÖNETİM SİSTEMİ BAŞLATILIYOR...");
 console.log("==================================================================");
@@ -26,6 +58,7 @@ console.log("==================================================================\
 const waProcess = spawn(process.execPath, ["whatsapp-bridge.mjs"], {
   stdio: "inherit",
   cwd: process.cwd(),
+  windowsHide: true,
 });
 
 // 2. Next.js Sunucusunu Port 5439 üzerinde Başlat
@@ -36,6 +69,7 @@ const nextProcess = spawn(
   {
     stdio: "inherit",
     cwd: process.cwd(),
+    windowsHide: true,
     env: {
       ...process.env,
       PORT: String(APP_PORT),
@@ -58,12 +92,7 @@ if (!noBrowserOpen) {
         console.log(
           `\n🌐 Sunucu hazır! Tarayıcıda Admin Paneli açılıyor: http://localhost:${APP_PORT}/admin\n`
         );
-        if (process.platform === "win32") {
-          spawn("cmd.exe", ["/c", "start", "", `http://localhost:${APP_PORT}/admin`], {
-            stdio: "ignore",
-            detached: true,
-          }).unref();
-        }
+        openBrowser();
       }
     });
     req.on("error", () => {});

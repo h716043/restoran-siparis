@@ -41,12 +41,12 @@ echo [3/4] Veri klasoru ^(data/^) hazirlaniyor...
 if not exist "data" mkdir data
 
 echo.
-echo [4/4] Masaustune "Restoran POS Baslat" kisayolu olusturuluyor...
-set "TARGET_BAT=%~dp0BASLAT.bat"
+echo [4/4] Masaustune "Restoran POS Baslat" (Gizli Arka Plan) kisayolu olusturuluyor...
+set "TARGET_VBS=%~dp0ARKAPLANDA-BASLAT.vbs"
 set "WORK_DIR=%~dp0"
 for /f "usebackq tokens=*" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('Desktop')"`) do set "DESKTOP_DIR=%%D"
 set "SHORTCUT_PATH=%DESKTOP_DIR%\Restoran POS ve WhatsApp Baslat.lnk"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = '%TARGET_BAT%'; $s.WorkingDirectory = '%WORK_DIR%'; $s.Description = 'Restoran Siparis, Mutfak ve WhatsApp Sistemi'; $s.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = 'wscript.exe'; $s.Arguments = '\"%TARGET_VBS%\"'; $s.WorkingDirectory = '%WORK_DIR%'; $s.WindowStyle = 7; $s.Description = 'Restoran Siparis, Mutfak ve WhatsApp Sistemi (Gizli Arka Plan)'; $s.Save()"
 
 echo.
 echo ============================================================================
