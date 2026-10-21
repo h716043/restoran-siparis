@@ -3,8 +3,25 @@ import { getSettings, logWhatsAppMessage, normalizePhone } from "@/lib/db";
 export interface SendWhatsAppResult {
   success: boolean;
   provider: "simulation" | "custom_gateway" | "meta_cloud";
-  status: "sent" | "simulated" | "failed";
+  status: "sent" | "simulated" | "queued_for_local" | "failed";
   previewMessage: string;
+}
+
+function isLocalNetworkGatewayUrl(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    const h = u.hostname.toLowerCase();
+    return (
+      h === "localhost" ||
+      h === "127.0.0.1" ||
+      h === "0.0.0.0" ||
+      h.startsWith("192.168.") ||
+      h.startsWith("10.") ||
+      h.endsWith(".local")
+    );
+  } catch {
+    return true;
+  }
 }
 
 export async function sendWhatsAppMessage(
@@ -24,26 +41,31 @@ export async function sendWhatsAppMessage(
     requireAuthForDeliveryAndPickup: true,
   };
 
-  // 1. Kendi QR WhatsApp Web Köprüsü (Ücretsiz Baileys / whatsapp-web.js / WAHA / Evolution)
   const isNetlifyCloud =
     process.env.NETLIFY === "true" ||
     process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
 
-  // Netlify bulut sunucusundaysak (ve Meta Cloud seçili değilse), yerel WhatsApp köprüsünün göndermesi için doğrudan bulut kuyruğuna al
-  if (isNetlifyCloud && config.provider !== "meta_cloud") {
-    logWhatsAppMessage(phone, message, type, "queued_for_local");
-    return {
-      success: true,
-      provider: "custom_gateway",
-      status: "sent",
-      previewMessage: message,
-    };
-  }
-
+  // 1. Kendi QR WhatsApp Köprüsü veya Bulut WhatsApp Gateway (UltraMsg / WaAPI / GreenAPI / Railway / Evolution)
   if (config.provider === "custom_gateway") {
-    const gatewayUrl =
-      config.gatewayUrl || "http://localhost:3001/send-message";
+    const gatewayUrl = (
+      config.gatewayUrl || "http://localhost:3001/send-message"
+    ).trim();
+    const isLocalUrl = isLocalNetworkGatewayUrl(gatewayUrl);
 
+    // Eğer Netlify bulut sunucusundaysak VE gatewayUrl yerel bir adres (localhost) ise,
+    // doğrudan yerel köprü kuyruğuna al (veya PC kapalıysa yedek doğrulama devreye girsin)
+    if (isNetlifyCloud && isLocalUrl) {
+      logWhatsAppMessage(phone, message, type, "queued_for_local");
+      return {
+        success: true,
+        provider: "custom_gateway",
+        status: "queued_for_local",
+        previewMessage: message,
+      };
+    }
+
+    // Eğer gatewayUrl uzak bir Bulut (https://...) adresi ise (PC kapalı olsa bile 7/24 buluttan gönderir)
+    // veya yerel sunucudaysak doğrudan HTTP POST isteği gönder:
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -58,12 +80,15 @@ export async function sendWhatsAppMessage(
         headers,
         body: JSON.stringify({
           phone,
+          to: `+${phone}`,
           chatId: `${phone}@c.us`,
           jid: `${phone}@s.whatsapp.net`,
           message,
+          body: message,
           text: message,
+          ...(config.gatewayApiKey ? { token: config.gatewayApiKey } : {}),
         }),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(6000),
       });
 
       if (res.ok) {
@@ -77,17 +102,17 @@ export async function sendWhatsAppMessage(
       }
     } catch (err) {
       console.warn(
-        "Yerel WhatsApp QR servisine doğrudan ulaşılamadı, kuyruğa alındı:",
+        "WhatsApp Gateway servisine doğrudan ulaşılamadı, kuyruğa alındı:",
         err
       );
     }
 
-    // Doğrudan HTTP isteği anlık başarısız olursa test moduna düşmek yerine yerel köprü kuyruğuna al
+    // Doğrudan HTTP isteği anlık başarısız olursa (örneğin PC kapalıysa) yerel köprü kuyruğuna al
     logWhatsAppMessage(phone, message, type, "queued_for_local");
     return {
       success: true,
       provider: "custom_gateway",
-      status: "sent",
+      status: "queued_for_local",
       previewMessage: message,
     };
   }

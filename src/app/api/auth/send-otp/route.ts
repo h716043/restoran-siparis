@@ -47,6 +47,10 @@ export async function POST(req: NextRequest) {
       status: waResult.status,
       simulatedCode: waResult.status === "simulated" ? code : undefined,
       previewMessage: waResult.status === "simulated" ? waMessage : undefined,
+      offlineFallbackCode:
+        waResult.status === "queued_for_local" ? code : undefined,
+      offlinePreviewMessage:
+        waResult.status === "queued_for_local" ? waMessage : undefined,
     });
   } catch (error) {
     console.error("POST /api/auth/send-otp error:", error);

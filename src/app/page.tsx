@@ -702,6 +702,18 @@ function CustomerMenuContent() {
             message: data.previewMessage,
             phone: data.phone,
           });
+        } else if (data.offlineFallbackCode) {
+          // PC açıkken whatsapp-bridge.mjs 2-3 sn içinde mesajı gönderir.
+          // Eğer PC kapalıysa müşterinin üye olurken takılmaması için 4 sn sonra yedek onay kartını aç:
+          setTimeout(() => {
+            setSimulatedWaPopup((prev) =>
+              prev || {
+                code: data.offlineFallbackCode,
+                message: data.offlinePreviewMessage,
+                phone: data.phone,
+              }
+            );
+          }, 4000);
         }
       }
     } catch {
