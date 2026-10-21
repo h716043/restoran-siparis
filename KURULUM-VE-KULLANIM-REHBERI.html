@@ -821,7 +821,7 @@ TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...</pre>
       <section id="whatsapp-qr" class="section-card">
         <div class="section-header">
           <div class="step-num">6</div>
-          <h2>WhatsApp QR Bağlantısı, OTP Doğrulama &amp; Otomatik Sipariş Bildirimleri</h2>
+          <h2>WhatsApp QR Bağlantısı, PC Kapalıyken 7/24 Bulut Köprüsü (Render.com) &amp; Otomatik Bildirimler</h2>
         </div>
         <p>
           Sistem, aylık SMS veya WhatsApp API ücreti ödemeden restoranın kendi WhatsApp veya WhatsApp Business hattını kullanarak tamamen ücretsiz mesaj gönderir:
@@ -832,9 +832,34 @@ TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...</pre>
           <li><strong>Rezervasyon Bildirimleri:</strong> Online masa rezervasyonu onaylandığında atanan masa numarasıyla birlikte müşteriye otomatik bilgi mesajı gönderilir.</li>
         </ul>
 
-        <h3>WhatsApp Bağlantısı Nasıl Yapılır / Numara Nasıl Değiştirilir?</h3>
+        <h3>A) PC Kapalıyken Bile 7/24 Çalışan Ücretsiz Bulut WhatsApp QR Köprüsü (Render.com — Önerilen)</h3>
+        <p>
+          Restorandaki Kasa PC gece kapalıyken dahi müşterilerin Netlify sitesinden 7/24 WhatsApp doğrulama kodu alıp üye olabilmesi ve sipariş verebilmesi için <strong>Render.com</strong> üzerinde ücretsiz 7/24 WhatsApp QR Köprüsü çalıştırabilirsiniz (Canlı örnek: <a href="https://restoran-siparis-v55a.onrender.com/" target="_blank" style="color:#34d399;font-weight:bold;">https://restoran-siparis-v55a.onrender.com/</a>):
+        </p>
         <ol>
-          <li><code class="inline">BASLAT.bat</code> çalıştırıldığında siyah terminal ekranında bir <strong>QR Kod</strong> görünür.</li>
+          <li><a href="https://dashboard.render.com/" target="_blank" style="color:#fb923c;font-weight:bold;">https://dashboard.render.com/</a> adresine girip GitHub hesabınızla ücretsiz oturum açın.</li>
+          <li><strong>New + &rarr; Web Service</strong> (veya <strong>Blueprint</strong>) menüsünden restoranın GitHub deposunu seçin.</li>
+          <li><strong>Build Command:</strong> <code class="inline">npm install</code>, <strong>Start Command:</strong> <code class="inline">node whatsapp-bridge.mjs</code> ve <strong>Instance Type:</strong> <code class="inline">Free ($0/ay)</code> olarak ayarlayıp servisi başlatın.</li>
+          <li>Render'ın verdiği adresi (Örn: <code class="inline">https://restoran-siparis-v55a.onrender.com</code>) tarayıcıda açın. Ekranda <strong>Canlı Web WhatsApp QR Kodu</strong> belirecektir.</li>
+          <li>Restoranın telefonundan <strong>WhatsApp &rarr; Ayarlar &rarr; Bağlı Cihazlar &rarr; Cihaz Bağla</strong> diyerek ekrandaki QR kodu okutun. Sayfada <code class="inline">✅ WhatsApp Bağlantısı Aktif (7/24 Hazır)</code> yazısını görün.</li>
+          <li>Yerel Admin Panelinde (<code class="inline">http://localhost:5439/admin</code> &rarr; <strong>💬 WhatsApp OTP &amp; Üyeler</strong> sekmesi) <strong>Bulut / Yerel WhatsApp Köprü URL</strong> kutusuna şu adresi yapıştırıp kaydedin:
+            <div class="code-wrapper">
+              <button class="copy-btn" onclick="copyCode(this)">Kopyala</button>
+              <pre>https://restoran-siparis-v55a.onrender.com/send-message</pre>
+            </div>
+            Kaydettiğiniz anda bu adres Turso Bulut veritabanına da işlenir; böylece Kasa PC kapalıyken bile Netlify doğrudan Render bulut köprüsü üzerinden müşteriye WhatsApp OTP kodu gönderir!
+          </li>
+        </ol>
+
+        <h3>B) İsteğe Bağlı "Tek Tıkla WhatsApp ile Doğrula (wa.me)" &amp; 4 Saniye Akıllı Yedek</h3>
+        <ul>
+          <li><strong>Tek Tıkla Müşteri Doğrulaması (<code class="inline">wa.me</code>):</strong> Admin Paneli &rarr; <em>💬 WhatsApp OTP &amp; Üyeler</em> sekmesindeki <strong>"Müşteri Kendi WhatsApp'ından Tek Tıkla Doğrulayabilsin (wa.me)"</strong> seçeneği açık olduğunda, müşteri doğrulama ekranında <strong>"📲 WhatsApp ile Tek Tıkla Doğrula &amp; Giriş Yap"</strong> butonu yer alır.</li>
+          <li><strong>4 Saniye Akıllı Çevrimdışı Yedek &amp; 7/24 Sipariş Kuyruğu:</strong> Kasa PC kapalıysa veya köprü uykudaysa sistem müşteriyi 4 saniyeden fazla bekletmez; doğrulama kodunu ekranda güvenli bildirim olarak sunar ve siparişi <strong>Turso Bulut (<code class="inline">cloud_orders</code>)</strong> üzerine kaydeder. Kasa PC açıldığında tüm bekleyen siparişler sesli zil ile Mutfak ekranına ve SambaPOS'a düşer.</li>
+        </ul>
+
+        <h3>C) Yerel Kasa PC Üzerinden WhatsApp Bağlantısı / Numara Değiştirme</h3>
+        <ol>
+          <li><code class="inline">BASLAT.bat</code> çalıştırıldığında siyah terminal ekranında (veya <code class="inline">http://localhost:3001</code> adresinde) bir <strong>QR Kod</strong> görünür.</li>
           <li>Restoranın telefonundan <strong>WhatsApp &rarr; Ayarlar &rarr; Bağlı Cihazlar &rarr; Cihaz Bağla</strong> menüsüne girip ekrandaki QR kodu okutun.</li>
           <li>Terminalde <code class="inline">✅ WHATSAPP BAĞLANTISI AKTİF!</code> yazısı çıktığında eşleşme tamamlanmıştır; sonraki açılışlarda tekrar QR sormaz, otomatik bağlanır.</li>
           <li>Telefon numarasını değiştirmek isterseniz <code class="inline">4-WHATSAPP-NUMARA-DEGISTIR-SIFIRLA.bat</code> dosyasına çift tıklamanız veya <code class="inline">data\whatsapp_auth</code> klasörünü silip sistemi yeniden başlatmanız yeterlidir.</li>
@@ -951,6 +976,23 @@ TURSO_AUTH_TOKEN=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...</pre>
               • Sayfanın en üstündeki kayan kampanya çubuğuna tek tıkla uygulanan indirim kuponu tanımlayabilirsiniz.<br/>
               • Her mahalle/bölge için ayrı <strong>Minimum Paket Tutarı</strong> ve <strong>Teslimat Ücreti</strong> belirleyebilirsiniz.<br/>
               • Belirli saatler için otomatik <strong>Happy Hour (% İndirim)</strong> tanımlayabilirsiniz.
+            </p>
+          </div>
+
+          <div class="arch-box">
+            <h4>🚚 5. Ücretsiz Teslimat Barajı &amp; Kısmi Para Puan</h4>
+            <p>
+              • <strong>Ücretsiz Teslimat Barajı:</strong> Belirlediğiniz sepet tutarı (Örn: 500 ₺) aşıldığında teslimat ücreti otomatik <strong>0 ₺ (Ücretsiz)</strong> olur; sepette canlı ilerleme çubuğu müşteriyi sepet büyütmeye teşvik eder.<br/>
+              • <strong>Kısmi Para Puan &amp; Otomatik İade:</strong> Müşteri biriken puanının istediği kadarını sepette kullanabilir; sipariş iptal edilirse kullanılan puanlar anında hesabına iade edilir.
+            </p>
+          </div>
+
+          <div class="arch-box">
+            <h4>📝 6. Müşteri Sipariş İptali, Ek Not, Fiş QR &amp; VIP Rozeti</h4>
+            <p>
+              • Müşteri siparişi henüz mutfakta <strong>"Onay Bekliyor"</strong> durumundayken tek tıkla iptal edebilir veya <strong>"📝 Mutfağa Ek Not Gönder"</strong> ile fişe anlık not ekleyebilir.<br/>
+              • 80mm paket servis fişinin altında <strong>Google Haritalar Kurye Navigasyon QR Kodu</strong> basılır; mutfakta ve fişte <code>👑 VIP MÜŞTERİ</code> / <code>🎉 İLK SİPARİŞ</code> rozeti görünür.<br/>
+              • <strong>Toplu Fiyat Güncelleme</strong> aracında porsiyon/ekstra dahil % zam/indirim ve canlı önizleme tablosu yer alır.
             </p>
           </div>
         </div>

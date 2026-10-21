@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yeni Firma, Yeni PC, SambaPOS V5 ve Yeni Web Sitesi — Geniş Kapsamlı Kurulum Rehberi</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --accent: #ea580c;
+      --accent-light: #fb923c;
+      --emerald: #10b981;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.68;
+      padding: 28px 16px 80px;
+    }
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    .hero {
+      background: linear-gradient(135deg, #ea580c 0%, #be123c 60%, #0f766e 100%);
+      border-radius: 24px;
+      padding: 36px;
+      margin-bottom: 28px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      padding: 6px 14px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: 30px;
+      font-weight: 900;
+      line-height: 1.25;
+    }
+    .hero p {
+      margin: 0;
+      font-size: 15.5px;
+      opacity: 0.96;
+    }
+    .quick-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .quick-nav a {
+      background: rgba(15, 23, 42, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #fff;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 800;
+      padding: 8px 14px;
+      border-radius: 12px;
+      transition: all 0.2s;
+    }
+    .quick-nav a:hover {
+      background: #0f172a;
+      border-color: #fff;
+    }
+    .step-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      margin-bottom: 24px;
+      scroll-margin-top: 20px;
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .step-badge {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 900;
+      font-size: 14px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .step-title {
+      margin: 0;
+      font-size: 21px;
+      font-weight: 800;
+    }
+    h3 {
+      color: var(--accent-light);
+      font-size: 17px;
+      margin: 20px 0 8px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 16px;
+      margin-top: 14px;
+    }
+    .dl-box {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .dl-box h4 {
+      margin: 0 0 8px;
+      color: var(--accent-light);
+      font-size: 16px;
+    }
+    .dl-box p {
+      margin: 0 0 12px;
+      font-size: 13.5px;
+      color: var(--muted);
+    }
+    .btn {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 13px;
+      padding: 9px 16px;
+      border-radius: 10px;
+    }
+    .btn:hover { background: #c2410c; }
+    code, pre {
+      font-family: Consolas, "Courier New", monospace;
+      background: #090d16;
+      color: #38bdf8;
+      border-radius: 8px;
+    }
+    code {
+      padding: 2px 7px;
+      font-size: 13px;
+    }
+    pre {
+      padding: 14px;
+      overflow-x: auto;
+      border: 1px solid #334155;
+      font-size: 13px;
+      margin: 10px 0;
+    }
+    .alert {
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #a7f3d0;
+      padding: 14px 18px;
+      border-radius: 14px;
+      font-size: 14px;
+      margin-top: 14px;
+    }
+    .warn {
+      background: rgba(245, 158, 11, 0.14);
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      color: #fde68a;
+      padding: 14px 18px;
+      border-radius: 14px;
+      font-size: 14px;
+      margin-top: 14px;
+    }
+    .info {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #bae6fd;
+      padding: 14px 18px;
+      border-radius: 14px;
+      font-size: 14px;
+      margin-top: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 11px 13px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #0f172a;
+      color: var(--accent-light);
+    }
+    ul, ol {
+      padding-left: 20px;
+    }
+    li { margin-bottom: 8px; }
+    .pill {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .pill-orange { background: rgba(234, 88, 12, 0.25); color: #fdba74; border: 1px solid #ea580c; }
+    .pill-maroon { background: rgba(159, 18, 57, 0.35); color: #fecdd3; border: 1px solid #f43f5e; }
+    .pill-green { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid #10b981; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="hero-badge">📘 A'DAN Z'YE GENİŞ ANLATIMLI KURULUM &amp; ENTEGRASYON KILAVUZU</div>
+      <h1>🍽️ Başka Firma, Yeni Kasa PC, SambaPOS V5 ve Yeni Web Sitesi Kurulum Rehberi</h1>
+      <p>
+        Bu paket, sistemi <strong>farklı bir restoranda, yeni bir bilgisayarda (Kasa PC), kendi WhatsApp hattı, kendi SambaPOS V5 veritabanı ve tamamen ayrı bir internet sitesi / bulut veritabanı</strong> üzerinde eski firmayla hiçbir verisi karışmadan sıfırdan kurmanız için hazırlanmıştır.
+      </p>
+      <div class="quick-nav">
+        <a href="#adim-1">1. Gerekli Programlar</a>
+        <a href="#adim-2">2. İlk Kurulum &amp; Başlatma (.bat)</a>
+        <a href="#adim-3">3. Turso Bulut Veritabanı</a>
+        <a href="#adim-4">4. Netlify Web Sitesi &amp; Domain</a>
+        <a href="#adim-bulut-whatsapp">☁️ 7/24 Bulut WhatsApp (PC Kapalıyken)</a>
+        <a href="#adim-5">5. SambaPOS V5 Entegrasyonu</a>
+        <a href="#adim-6">6. Sipariş Türü, Masa &amp; Yeni Özellikler</a>
+        <a href="#adim-7">7. Mutfak, Garson, Kurye &amp; TV Ekranları</a>
+        <a href="#adim-8">8. Sorun Giderme (SSS)</a>
+      </div>
+    </div>
+
+    <!-- ADIM 1 -->
+    <div id="adim-1" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">1. ADIM</span>
+        <h2 class="step-title">Yeni Bilgisayara (Kasa PC) Neler İndirilip Kurulmalı?</h2>
+      </div>
+      <p>Sistemi çalıştıracağınız yeni Windows bilgisayara (Kasa veya Mutfak PC) sadece aşağıdaki ücretsiz araçların kurulması yeterlidir:</p>
+      <div class="grid-2">
+        <div class="dl-box">
+          <h4>1. Node.js (v22 LTS - Zorunlu)</h4>
+          <p>Sistemin (Port 5439), yerel veritabanının, SambaPOS SQL köprüsünün ve WhatsApp QR servisinin (Port 3001) çalışması için gereklidir. Kurarken hiçbir ayarı değiştirmeden "Next &rarr; Next &rarr; Install" demeniz yeterlidir.</p>
+          <a class="btn" href="https://nodejs.org/" target="_blank">🌐 Node.js v22 LTS İndir</a>
+        </div>
+        <div class="dl-box">
+          <h4>2. Google Chrome veya Microsoft Edge</h4>
+          <p>Kasa/Mutfak ekranı, 80mm sessiz termal fiş yazdırma (<code>--kiosk-printing</code>), ekran uyku kilidi ve sesli sipariş zili için önerilir.</p>
+          <a class="btn" href="https://www.google.com/chrome/" target="_blank">🌐 Google Chrome İndir</a>
+        </div>
+        <div class="dl-box">
+          <h4>3. Git for Windows (Kendi Sitesini Yayınlayacaklar İçin)</h4>
+          <p>Yeni firmanın menüsünü kendi GitHub / Netlify sitesine yüklemek veya güncellemeleri çekmek için kurulmalıdır.</p>
+          <a class="btn" href="https://git-scm.com/download/win" target="_blank">🌐 Git İndir</a>
+        </div>
+        <div class="dl-box">
+          <h4>4. 80mm Termal Fiş Yazıcı Sürücüsü (Opsiyonel)</h4>
+          <p>Kasa PC'ye USB veya Ethernet (Ağ) ile bağlı 80mm adisyon yazıcısını Windows'ta <strong>"Varsayılan Yazıcı"</strong> olarak tanımlayın. Kısayola <code>--kiosk-printing</code> eklediğinizde onay sormadan doğrudan fiş keser.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADIM 2 -->
+    <div id="adim-2" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">2. ADIM</span>
+        <h2 class="step-title">Yeni PC'de Klasörü Kurma, Başlatma ve WhatsApp QR Eşleştirme</h2>
+      </div>
+      <ol>
+        <li>
+          Bu klasörün içindeki <strong><code>restoran-siparis-yeni-firma</code></strong> klasörünü yeni bilgisayarda <code>C:\restoran-siparis</code> (veya Masaüstü) konumuna kopyalayın.
+        </li>
+        <li>
+          Klasörün içindeki <strong><code>1-YENI-PC-KURULUM.bat</code></strong> (veya <code>KURULUM-YENI-PC.bat</code>) dosyasına çift tıklayın:
+          <ul>
+            <li>Bilgisayarda Node.js kurulu olup olmadığını denetler (yoksa otomatik kurmayı dener veya indirme sayfasını açar).</li>
+            <li>Gerekli tüm paketleri (<code>npm install</code>) internetten indirip kurar.</li>
+            <li>Temiz <code>data/</code> ve <code>data/whatsapp_auth/</code> klasörlerini oluşturur ve Masaüstüne <strong>"Restoran POS ve WhatsApp Başlat"</strong> kısayolunu ekler.</li>
+            <li><em>Not: Bu işlem sadece ilk kurulumda 1 kez yapılır.</em></li>
+          </ul>
+        </li>
+        <li>
+          Kurulum bitince <strong><code>2-SISTEMI-BASLAT.bat</code></strong> (veya <code>BASLAT.bat</code>) dosyasına çift tıklayın:
+          <ul>
+            <li>Siyah terminal ekranında <strong>WhatsApp QR Servisi (Port 3001)</strong> ve <strong>Restoran Sunucusu (Port 5439)</strong> aynı anda başlar.</li>
+            <li>Siyah ekranda beliren <strong>WhatsApp QR Kodunu</strong> yeni firmanın şirket telefonundan <em>WhatsApp &rarr; Ayarlar &rarr; Bağlı Cihazlar &rarr; Cihaz Bağla</em> diyerek okutun. Ekranda <code>✅ WHATSAPP BAĞLANTISI AKTİF!</code> yazısını gördüğünüzde artık 6 haneli OTP doğrulama kodları ve sipariş onay mesajları bu numaradan ücretsiz gidecektir.</li>
+            <li>Tarayıcıda otomatik olarak <code>http://localhost:5439/admin</code> (Yönetici Paneli) açılacaktır (Varsayılan Admin Şifresi: <code>admin1234</code>, Mutfak Şifresi: <code>1234</code>).</li>
+          </ul>
+        </li>
+        <li>
+          Kasa bilgisayarının gün içinde uyku moduna geçmemesi ve elektrik gidip geldiğinde sistemin kendi kendine açılması için bir kez <strong><code>3-OTOMATIK-BASLATMA-KUR.bat</code></strong> dosyasına çift tıklayın.
+        </li>
+      </ol>
+
+      <div class="alert">
+        ✅ <strong>%100 Veri İzolasyonu Garantisi:</strong> Bu paketin içindeki <code>.env.local</code> dosyasında <code>IS_NEW_FIRMA_PACKAGE=true</code> ayarı aktiftir ve eski firmanın veritabanı/WhatsApp oturumu temizlenmiştir. Yeni firma kendi Turso veritabanını girene kadar tamamen kendi yerel bilgisayarında bağımsız çalışır; eski firmanın siparişleriyle asla karışmaz!
+      </div>
+    </div>
+
+    <!-- ADIM 3 -->
+    <div id="adim-3" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">3. ADIM</span>
+        <h2 class="step-title">Yeni Firmanın Kendi Bulut Veritabanını (Turso) Açması (Ücretsiz)</h2>
+      </div>
+      <p>İnternetteki web sitesinden (Netlify / Özel Domain) gelen siparişlerin ve WhatsApp doğrulama kodu isteklerinin Kasa PC'ye anında düşmesi, ayrıca menü/fiyat/masa/sipariş türü ayarlarının internetteki siteye anında yansıması için yeni firmanın <strong>kendi ücretsiz Turso veritabanını</strong> açması gerekir:</p>
+      <ol>
+        <li><a href="https://turso.tech" target="_blank" style="color:#fb923c;font-weight:bold;">https://turso.tech</a> adresine girip ücretsiz hesap açın (GitHub veya E-posta ile; aynı hesap içinde her restoran için ayrı veritabanı da açabilirsiniz).</li>
+        <li><strong>"Create Database"</strong> butonuna tıklayıp yeni firmanın adıyla (örn: <code>lezzet-kebap-db</code>) bir veritabanı oluşturun.</li>
+        <li>Oluşturulan veritabanının üzerine tıklayıp şu iki bilgiyi kopyalayın:
+          <ul>
+            <li><strong>Database URL:</strong> <code>libsql://lezzet-kebap-db-kullanici.turso.io</code></li>
+            <li><strong>Auth Token ("Generate Token"):</strong> <code>eyJhbGciOi...</code> (Okuma ve Yazma / Read &amp; Write yetkili)</li>
+          </ul>
+        </li>
+        <li>Kasa PC'de açık olan <strong><code>http://localhost:5439/admin</code></strong> paneline girin &rarr; üst sekmelerden <strong>"☁️ Netlify &amp; Bulut Senkronizasyon"</strong> bölümünü açın:
+          <ul>
+            <li><strong>"Bulut Senkronizasyonu Etkinleştir"</strong> kutucuğunu işaretleyin.</li>
+            <li>Yeni aldığınız <strong>Turso URL</strong> ve <strong>Auth Token</strong> bilgilerini kutulara yapıştırın.</li>
+            <li><strong>"Kaydet &amp; Şimdi Bulutla Senkronize Et"</strong> butonuna basın.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <!-- ADIM 4 -->
+    <div id="adim-4" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">4. ADIM</span>
+        <h2 class="step-title">Yeni Firmanın Kendi Web Sitesini (Netlify / Özel Alan Adı) Yayınlaması</h2>
+      </div>
+      <p>Müşterilerin internetten (örn: <code>https://yenirestoran.netlify.app</code> veya <code>https://www.yenirestoran.com</code>) 7/24 sipariş verebilmesi için:</p>
+      <ol>
+        <li>
+          Aynı GitHub deponuzu (<code>h716043/restoran-siparis</code>) doğrudan kullanabilir veya yeni firma için yeni bir GitHub deposu açıp <code>restoran-siparis-yeni-firma</code> klasörünü yükleyebilirsiniz:
+<pre>git init
+git add .
+git commit -m "Yeni firma ilk kurulum"
+git branch -M main
+git remote add origin https://github.com/KULLANICI_ADI/YENI_FIRMA_REPO.git
+git push -u origin main</pre>
+        </li>
+        <li><a href="https://app.netlify.com" target="_blank" style="color:#fb923c;font-weight:bold;">https://app.netlify.com</a> adresine girip <strong>"Add new site &rarr; Import an existing project"</strong> diyerek GitHub deposunu seçin.</li>
+        <li>Netlify'da <strong>Site configuration &rarr; Environment variables</strong> bölümüne gidip şu <strong>4 ortam değişkenini</strong> ekleyin:</li>
+      </ol>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Değişken Adı (Key)</th>
+            <th>Değeri (Value)</th>
+            <th>Açıklama</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>NEXT_PUBLIC_CUSTOMER_ONLY</code></td>
+            <td><code>true</code></td>
+            <td>İnternetteki sitede sadece Müşteri Sipariş Menüsü görünür; Admin ve Mutfak panelleri dış dünyaya tamamen kapatılır.</td>
+          </tr>
+          <tr>
+            <td><code>IS_NEW_FIRMA_PACKAGE</code></td>
+            <td><code>true</code></td>
+            <td>Eski firmanın veritabanına bağlanmasını kesin olarak engeller.</td>
+          </tr>
+          <tr>
+            <td><code>TURSO_DATABASE_URL</code></td>
+            <td><code>libsql://...</code></td>
+            <td>3. Adımda yeni firma için aldığınız Turso Veritabanı URL'si.</td>
+          </tr>
+          <tr>
+            <td><code>TURSO_AUTH_TOKEN</code></td>
+            <td><code>eyJhbGci...</code></td>
+            <td>3. Adımda yeni firma için aldığınız Turso Auth Token.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="warn">
+        💡 <strong>Özel Alan Adı (Domain) &amp; QR Kod Adresi Eşleştirme:</strong><br/>
+        • Netlify'da <em>Domain Management &rarr; Add a domain</em> menüsünden firmanın kendi alan adını (örn: <code>siparis.restoranadi.com</code>) ücretsiz SSL sertifikasıyla 1 dakikada bağlayabilirsiniz.<br/>
+        • Siteniz yayınlandıktan sonra oluşan canlı URL'yi yerel Admin Panelindeki (<strong>☁️ Netlify &amp; Bulut Senkronizasyon</strong> sekmesi) <em>"Canlı Müşteri Sipariş Adresi (Netlify URL)"</em> kutusuna yapıştırıp kaydedin. Böylece basacağınız tüm <strong>Masa QR Kodları</strong> otomatik olarak bu canlı adrese yönlenir!
+      </div>
+    </div>
+
+    <!-- ADIM 4.5: PC KAPALIYKEN 7/24 BULUT WHATSAPP QR KÖPRÜSÜ (RENDER.COM) -->
+    <div id="adim-bulut-whatsapp" class="step-card" style="border-color:#10b981;">
+      <div class="step-header">
+        <span class="step-badge" style="background:#10b981;">☁️ 7/24 WHATSAPP</span>
+        <h2 class="step-title">PC Kapalıyken 7/24 WhatsApp Üyelik (OTP Kodu) &amp; Kesintisiz Sipariş Kurulumu</h2>
+      </div>
+      <p>
+        Restorandaki Kasa PC gece kapalıyken veya elektrik/internet kesildiğinde dahi müşterilerin web sitesinden (Netlify) <strong>WhatsApp 6 haneli doğrulama kodu alarak üye olabilmesi ve 7/24 sipariş verebilmesi</strong> için 3 katmanlı ücretsiz koruma mimarisi mevcuttur:
+      </p>
+
+      <h3>🟢 1. Yöntem (Önerilen &amp; Tamamen Ücretsiz): Render.com 7/24 Bulut WhatsApp QR Köprüsü</h3>
+      <p>
+        Proje içindeki <code>whatsapp-bridge.mjs</code> ve <code>render.yaml</code> dosyaları sayesinde WhatsApp QR köprüsünü <strong>Render.com</strong> üzerinde 7/24 ücretsiz çalıştırabilirsiniz (Canlı örnek: <a href="https://restoran-siparis-v55a.onrender.com/" target="_blank" style="color:#34d399;font-weight:bold;">https://restoran-siparis-v55a.onrender.com/</a>):
+      </p>
+      <ol>
+        <li>
+          <a href="https://dashboard.render.com/" target="_blank" style="color:#fb923c;font-weight:bold;">https://dashboard.render.com/</a> adresine girip GitHub hesabınızla ücretsiz giriş yapın.
+        </li>
+        <li>
+          Sağ üstten <strong>"New +" &rarr; "Web Service"</strong> (veya <strong>Blueprint</strong>) seçeneğine tıklayın ve restoranın GitHub deposunu bağlayın.
+        </li>
+        <li>
+          Ayarları şu şekilde seçin:
+          <ul>
+            <li><strong>Runtime:</strong> <code>Node</code></li>
+            <li><strong>Build Command:</strong> <code>npm install</code></li>
+            <li><strong>Start Command:</strong> <code>node whatsapp-bridge.mjs</code></li>
+            <li><strong>Instance Type:</strong> <code>Free ($0 / ay)</code></li>
+          </ul>
+        </li>
+        <li>
+          Kurulum tamamlandığında Render size bir canlı adres verir (Örn: <code>https://restoran-siparis-v55a.onrender.com</code>). Bu adresi tarayıcıda açtığınızda <strong>Canlı Web QR Kod Ekranı</strong> karşınıza gelir!
+        </li>
+        <li>
+          Restoranın telefonundan <strong>WhatsApp &rarr; Ayarlar &rarr; Bağlı Cihazlar &rarr; Cihaz Bağla</strong> menüsüne girip web sayfasındaki QR kodu okutun. Sayfada <code>✅ WhatsApp Bağlantısı Aktif (7/24 Hazır)</code> yazısı çıktığında eşleşme tamamlanmıştır.
+        </li>
+        <li>
+          Son olarak Kasa PC'de <strong><code>http://localhost:5439/admin</code> &rarr; 💬 WhatsApp OTP &amp; Üyeler</strong> sekmesine girin:
+          <ul>
+            <li>Sağlayıcı olarak <strong>"Kendi Numaranız (QR Köprü) / 7/24 Bulut WhatsApp Gateway"</strong> seçin.</li>
+            <li><strong>Gateway URL</strong> kutusuna Render adresinizin sonuna <code>/send-message</code> ekleyerek yapıştırın:<br/>
+              <pre>https://restoran-siparis-v55a.onrender.com/send-message</pre>
+            </li>
+            <li><strong>"Kaydet"</strong> butonuna basın (Bu ayar otomatik olarak Turso Bulut veritabanına da yazılır). Artık Kasa PC tamamen kapalı olsa bile Netlify doğrudan Render üzerindeki 7/24 WhatsApp köprünüzü kullanarak müşterinin telefonuna saniyeler içinde WhatsApp OTP kodu gönderir!</li>
+          </ul>
+        </li>
+      </ol>
+
+      <h3>📲 2. Yöntem (İsteğe Bağlı Ek Güvence): Müşteri Tarafından Tek Tıkla WhatsApp Doğrulama (wa.me)</h3>
+      <ul>
+        <li>
+          <strong>Admin Paneli &rarr; 💬 WhatsApp OTP &amp; Üyeler</strong> sekmesindeki <em>"Müşteri Kendi WhatsApp'ından Tek Tıkla Doğrulayabilsin (wa.me)"</em> kutucuğunu işaretleyebilirsiniz.
+        </li>
+        <li>
+          Bu özellik aktifken, müşteri doğrulama ekranında <strong>"📲 WhatsApp ile Tek Tıkla Doğrula &amp; Giriş Yap"</strong> butonu görünür. Müşteri tek tıkla kendi WhatsApp uygulamasını açıp doğrulama işlemini saniyeler içinde tamamlayabilir.
+        </li>
+      </ul>
+
+      <h3>⚡ 3. Yöntem (Otomatik Devreye Giren 4 Saniye Akıllı Çevrimdışı Yedek &amp; Bulut Sipariş Kuyruğu)</h3>
+      <ul>
+        <li>
+          Eğer restoran bulut köprüsü kullanmıyorsa (sadece yerel <code>http://localhost:3001</code> kullanıyorsa) ve o an Kasa PC kapalıysa veya Render ücretsiz sunucusu ilk saniyede uykudan uyanıyorsa, sistem müşteriyi 4 saniyeden fazla bekletmez; <strong>Akıllı Çevrimdışı Yedek</strong> devreye girerek doğrulama kodunu güvenli bildirim kutusunda gösterir.
+        </li>
+        <li>
+          Müşterinin verdiği tüm siparişler <strong>7/24 Turso Bulut Veritabanına (<code>cloud_orders</code>)</strong> kaydedilir. Sabah restoranda Kasa PC (<code>2-SISTEMI-BASLAT.bat</code>) açıldığı anda gece verilen veya bekleyen tüm siparişler sesli zil ile Mutfak ekranına (<code>/kitchen</code>) ve SambaPOS'a otomatik düşer!
+        </li>
+      </ul>
+    </div>
+
+    <!-- ADIM 5: SAMBAPOS V5 ENTEGRASYONU -->
+    <div id="adim-5" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">5. ADIM</span>
+        <h2 class="step-title">SambaPOS V5 &amp; SQL Server Entegrasyonu (Menü, Canlı Masa Durumu &amp; Müşteri Aktarımı)</h2>
+      </div>
+      <p>
+        Restoranda <strong>SambaPOS V5</strong> kullanılıyorsa, Admin Panelindeki (<code>http://localhost:5439/admin</code>) <strong>"🔌 POS &amp; Yemeksepeti/Getir"</strong> sekmesinden SambaPOS entegrasyonunu aktif edebilirsiniz:
+      </p>
+
+      <h3>1. SQL Server Bağlantısı ve Testi</h3>
+      <p>SQL Bağlantı Dizesi (Connection String) alanına Kasa PC'deki SQL Server bilgisini girip <strong>"🔍 POS Bağlantısını Test Et"</strong> butonuna tıklayın:</p>
+      <pre>Data Source=localhost; Initial Catalog=YILDIZHANPOS5; User Id=sa; Password=1453;</pre>
+
+      <h3>2. POS'tan Siteye Otomatik Menü, Porsiyon ve Seçmeli Alt Ürün Çekme</h3>
+      <ul>
+        <li><strong>"📥 POS'tan Menüyü Şimdi Çek"</strong> butonuna tıkladığınızda SambaPOS'taki tüm kategoriler, ürünler, çoklu porsiyon fiyatları (<em>1 Porsiyon, 1.5 Porsiyon, Duble</em>) ve Seçmeli Menü alt kalemleri (<strong>📦 1. Ürün Seçimi</strong>, <strong>📦 2. Ürün Seçimi</strong>, <strong>✨ Ekstralar</strong>) otomatik olarak siteye çekilir ve Turso üzerinden Netlify'a aktarılır.</li>
+      </ul>
+
+      <h3>3. POS Modülü Açıkken Canlı Masa Durumları (Garson + Mutfak Ekranları)</h3>
+      <p>
+        SambaPOS modülü <strong>Açık (Aktif)</strong> olduğunda hem <strong>Garson Cep Terminali (<code>/waiter</code>)</strong> hem de <strong>Mutfak Paneli (<code>/kitchen &rarr; 🪑 Canlı Masalar</code>)</strong> masa durumlarını ve açık masa adisyonlarını doğrudan SambaPOS veritabanından canlı olarak çeker:
+      </p>
+      <ul>
+        <li><span class="pill pill-green">🟢 Hazır (#333333)</span> : SambaPOS'ta açık adisyonu olmayan boş masalar.</li>
+        <li><span class="pill pill-orange">🟠 Yeni Siparişler (#CA6919)</span> : SambaPOS'ta açık adisyonu bulunan dolu masalar (Masadaki tüm sipariş kalemleri, porsiyonları ve toplam adisyon tutarı anlık listelenir).</li>
+        <li><span class="pill pill-maroon">🧾 Adisyon İstendi (#631816)</span> : SambaPOS'ta hesabı yazdırılmış/kilitlenmiş masalar bordo rozetle gösterilir.</li>
+        <li><strong>Çift Yönlü Masa Kapatma &amp; Taşıma:</strong> Sitedeki Garson veya Mutfak ekranından bir masanın hesabını kapattığınızda veya başka masaya taşıdığınızda, SambaPOS'taki açık masa adisyonu da <strong>otomatik olarak kapatılır veya yeni masaya taşınır</strong>!</li>
+        <li><strong>POS Modülü Kapalıysa (Pasif):</strong> SambaPOS entegrasyonu kapalıysa hiçbir POS sorgusu yapılmaz; sitenin kendi standart masa adisyonu mantığı çalışır.</li>
+      </ul>
+
+      <h3>4. Siteden SambaPOS'a Masa ve Müşteri Aktarımı (Siteden POS'a Tek Yönlü Push)</h3>
+      <ul>
+        <li><strong>🪑 Masaları Siteden POS'a Gönder:</strong> Sitede oluşturduğunuz veya düzenlediğiniz masa isimleri (<code>B10-B31</code>, <code>M10-M31</code>, <code>Teras 1</code> vb.) kaydedildiğinde veya <em>"🪑 Sitedeki Masaları POS'a Gönder"</em> butonuna basıldığında SambaPOS <code>Entities (Masalar)</code> ve <code>EntityScreenItems</code> tablolarına otomatik aktarılır; siteden silinen masalar POS'tan da silinir.</li>
+        <li><strong>👥 Müşterileri Siteden POS'a Gönder:</strong> Müşteri aktarımı <strong>siteden SambaPOS'a doğru</strong> çalışır (SambaPOS'tan siteye müşteri çekilmez). Siteden sipariş veren veya kayıt olan müşteriler otomatik olarak SambaPOS <em>Müşteriler</em> tablosuna yazılır. Ayrıca Admin panelindeki <strong>"📤 Sitedeki Kayıtlı Müşterileri SambaPOS'a Aktar"</strong> butonuyla tüm kayıtlı müşterileri tek tıkla POS'a aktarabilirsiniz.</li>
+      </ul>
+    </div>
+
+    <!-- ADIM 6: SİPARİŞ TÜRÜ, MASA VE MÜŞTERİ YÖNETİMİ -->
+    <div id="adim-6" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">6. ADIM</span>
+        <h2 class="step-title">Sipariş Türü (Kanal) Seçimi, Masa Düzenleme &amp; Kayıtlı Müşteri Arama</h2>
+      </div>
+
+      <div class="grid-2">
+        <div class="dl-box">
+          <h4>🛵🪑🛍️ 1. Admin Panelden Sipariş Türü Seçimi</h4>
+          <p>
+            <strong>Admin Paneli &rarr; Dükkan Saatleri &amp; Genel Ayarlar</strong> sekmesindeki <em>"Aktif Sipariş Türleri (Kanal Seçimi)"</em> bölümünden restoranın çalışma modelini tek tıkla belirleyebilirsiniz:<br/>
+            • Sadece <strong>Tek Masa</strong> (QR Menü)<br/>
+            • Sadece <strong>Tek Paket Servis</strong><br/>
+            • Sadece <strong>Tek Gel-Al</strong><br/>
+            • <strong>Masa + Gel-Al</strong>, <strong>Paket + Gel-Al</strong>, <strong>Masa + Paket</strong> veya <strong>Tümü (Masa + Paket + Gel-Al)</strong>.<br/>
+            Kaydettiğiniz anda müşteri vitrini ve sepet ekranı otomatik olarak sadece seçtiğiniz kanalları gösterir.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>🪑 2. Masa İsimlerini Siteden Ekleme, Düzenleme &amp; Silme</h4>
+          <p>
+            <strong>Admin Paneli &rarr; Masa QR Kodları</strong> (veya <em>Dükkan Ayarları</em>) sekmesinden:<br/>
+            • Tek tek (<code>Bahçe 1</code>, <code>VIP 2</code>) veya aralık belirterek (<code>B10-B31, M10-M31</code>) masa ekleyebilirsiniz.<br/>
+            • Her masanın yanındaki <strong>✏️ Düzenle</strong> ikonuyla masa adını değiştirebilirsiniz (Açık siparişler, rezervasyonlar ve SambaPOS masa kaydı otomatik güncellenir).<br/>
+            • <strong>🗑️ Sil</strong> butonuyla masa silebilir ve her masa için özel QR kod fişi yazdırabilirsiniz.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>🔍 3. Kayıtlı Müşterilerden Arama ve Seçme</h4>
+          <p>
+            Çok sayıda müşteri olduğunda hızlı işlem yapabilmek için:<br/>
+            • <strong>Admin Paneli &rarr; WhatsApp OTP &amp; Üyeler</strong> sekmesinde anlık müşteri arama çubuğu ve yeni müşteri ekleme formu bulunur.<br/>
+            • <strong>Cari (Veresiye) Defterinde</strong>, <strong>Mutfak/Kasa POS Sipariş Ekranında</strong> ve <strong>Masa Hesabı Kapatırken (Veresiye/Cariye Yaz)</strong> kayıtlı müşteriler içinde Ad Soyad, Telefon veya Adres ile arama yapıp tek tıkla seçebilirsiniz.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>⏳ 4. Mutfakta Çift Tıklama Koruması &amp; Hızlı Onay</h4>
+          <p>
+            Mutfak ekranında (<code>/kitchen</code>) sipariş onaylanırken (<strong>SİPARİŞİ KABUL ET</strong>, <strong>Kuryeye Ver</strong>, <strong>Tamamlandı</strong>) buton anında kilitlenir (<code>⏳ ONAYLANIYOR...</code>) ve POS/WhatsApp işlemleri arka planda yürütülür. Böylece gecikme anında tekrar tıklanması ve çift adisyon oluşması tamamen engellenmiştir.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>🛵 5. Ücretsiz Teslimat Barajı &amp; Sepet İlerleme Çubuğu</h4>
+          <p>
+            <strong>Admin Paneli &rarr; Dükkan Ayarları</strong> sekmesinden <em>"Ücretsiz Teslimat Barajı (Örn: 500 ₺)"</em> belirleyebilirsiniz. Müşterinin sepetinde <em>"🚚 Ücretsiz teslimat için X ₺ daha ürün ekleyin!"</em> şeklinde canlı ilerleme çubuğu görünür; baraj geçildiğinde teslimat ücreti otomatik <strong>0 ₺ (Ücretsiz)</strong> olur.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>📝 6. Müşteri Sipariş İptali, Ek Not &amp; Kısmi Para Puan</h4>
+          <p>
+            • Müşteri siparişi henüz mutfakta <strong>"Yeni (Onay Bekliyor)"</strong> aşamasındayken kendi ekranından tek tıkla iptal edebilir (kullandığı Para Puanlar anında hesabına iade edilir) veya <strong>"📝 Mutfağa Ek Not Gönder"</strong> butonuyla unuttuğu notu mutfak fişine anlık ekleyebilir.<br/>
+            • Müşteri sepetinde birikmiş Para Puanının tamamını değil, <strong>istediği kadarını (Kısmi Puan)</strong> kullanabilir.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>🗺️ 7. 80mm Fişte Kurye Harita QR Kodu &amp; VIP Müşteri Rozeti</h4>
+          <p>
+            • Paket servis siparişlerinin 80mm termal fişinin en altında otomatik <strong>Google Haritalar Yol Tarifi QR Kodu</strong> basılır; kurye telefon kamerasıyla fişi okuttuğu anda müşterinin konumuna navigasyon başlar.<br/>
+            • Mutfak ekranında ve fişte müşterinin kaçıncı siparişi olduğu (<code>🎉 İLK SİPARİŞ!</code> veya <code>👑 VIP MÜŞTERİ • 12. Sipariş</code>) otomatik rozetle vurgulanır.
+          </p>
+        </div>
+
+        <div class="dl-box">
+          <h4>📈 8. Canlı Önizlemeli Toplu Fiyat (% Zam / İndirim)</h4>
+          <p>
+            <strong>Admin Paneli &rarr; Menü &amp; Ürünler</strong> sekmesindeki Toplu Fiyat Güncelleme aracıyla tüm menüye veya seçili kategoriye % zam/indirim uygularken, <strong>porsiyon ve ekstra fiyatlarının da</strong> güncellenmesini seçebilir ve kaydetmeden önce <em>Eski Fiyat &rarr; Yeni Fiyat</em> canlı önizleme tablosunu görebilirsiniz.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADIM 7 -->
+    <div id="adim-7" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">7. ADIM</span>
+        <h2 class="step-title">Restoran İçi Tüm Ekranlar ve Hazır Bakım Araçları (.bat)</h2>
+      </div>
+      <p>Kasa PC'nin yerel Wi-Fi IP adresini öğrenmek için Komut İstemi'nde <code>ipconfig</code> yazın (Örn: <code>192.168.1.50</code>). Restoran içindeki aynı Wi-Fi'ye bağlı tüm telefon, tablet ve TV'lerden şu adreslerle giriş yapılır:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Ekran / Cihaz</th>
+            <th>Kasa PC Adresi</th>
+            <th>Wi-Fi (Telefon/Tablet/TV) Adresi</th>
+            <th>Görev ve Özellikler</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>⚙️ <strong>Yönetici (Admin) Paneli</strong></td>
+            <td><code>http://localhost:5439/admin</code></td>
+            <td><code>http://192.168.1.50:5439/admin</code></td>
+            <td>Menü, fiyat, sipariş türü, masa isimleri, müşteri rehberi, cari defter, Z raporu, SambaPOS ve Bulut ayarları.</td>
+          </tr>
+          <tr>
+            <td>👨‍🍳 <strong>Mutfak &amp; Kasa POS Ekranı</strong></td>
+            <td><code>http://localhost:5439/kitchen</code></td>
+            <td><code>http://192.168.1.50:5439/kitchen</code></td>
+            <td>Sesli yeni sipariş zili, çift tıklama korumalı onay, 80mm fiş yazdırma, canlı masa haritası, parçalı/Alman usulü ödeme ve telefon siparişi.</td>
+          </tr>
+          <tr>
+            <td>📱 <strong>Garson Cep Terminali</strong></td>
+            <td><code>http://localhost:5439/waiter</code></td>
+            <td><code>http://192.168.1.50:5439/waiter</code></td>
+            <td>Garson PIN girişi, canlı masa haritası (POS entegreli), masaya sipariş açma/ekleme, masa taşıma, mutfaktan hazır tepsi bildirimi.</td>
+          </tr>
+          <tr>
+            <td>🛵 <strong>Kurye Teslimat Ekranı</strong></td>
+            <td><code>http://localhost:5439/courier</code></td>
+            <td><code>http://192.168.1.50:5439/courier</code></td>
+            <td>Kurye PIN girişi, üzerindeki paketler, tek tıkla müşteriyi arama, Google Haritalar yol tarifi, kurye nakit/kart hesap mutabakatı.</td>
+          </tr>
+          <tr>
+            <td>📺 <strong>Müşteri Sıra Çağrı TV Ekranı</strong></td>
+            <td><code>http://localhost:5439/tv</code></td>
+            <td><code>http://192.168.1.50:5439/tv</code></td>
+            <td>Hazırlanan ve teslime hazır sipariş numaralarını sesli anons ve kampanya bandıyla TV'de tam ekran yayınlar.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top:22px;">Klasör İçindeki Hazır (.bat) Bakım ve Yönetim Araçları</h3>
+      <ul>
+        <li><code>1-YENI-PC-KURULUM.bat</code> (veya <code>KURULUM-YENI-PC.bat</code>) &rarr; Yeni bilgisayarda ilk kez kurulum yapar, paketleri yükler ve masaüstü kısayolu oluşturur.</li>
+        <li><code>2-SISTEMI-BASLAT.bat</code> (veya <code>BASLAT.bat</code>) &rarr; Restoran sunucusunu (Port 5439) ve WhatsApp QR servisini (Port 3001) başlatır.</li>
+        <li><code>3-OTOMATIK-BASLATMA-KUR.bat</code> (veya <code>OTOMATIK-BASLATMA-KUR.bat</code>) &rarr; Windows açılışında otomatik başlatma ve uyku modu engelleme kurar.</li>
+        <li><code>4-WHATSAPP-NUMARA-DEGISTIR-SIFIRLA.bat</code> &rarr; WhatsApp numarasını değiştirmek istediğinizde eski oturumu silip yeni QR kod çıkartır.</li>
+        <li><code>5-TUM-VERILERI-SIFIRLA-YENI-RESTORAN.bat</code> &rarr; Test siparişlerini silip veritabanını yeni restoran için sıfırlar.</li>
+      </ul>
+    </div>
+
+    <!-- ADIM 8: SORUN GİDERME -->
+    <div id="adim-8" class="step-card">
+      <div class="step-header">
+        <span class="step-badge">8. ADIM</span>
+        <h2 class="step-title">Sıkça Sorulan Sorular (SSS) ve Hızlı Sorun Giderme</h2>
+      </div>
+      <ul>
+        <li>
+          <strong>İnternetten (Netlify) verilen sipariş Kasa PC'ye düşmüyor:</strong><br/>
+          Kasa PC'de <code>2-SISTEMI-BASLAT.bat</code> penceresinin açık olduğundan ve Admin Paneli &rarr; <em>☁️ Netlify &amp; Bulut Senkronizasyon</em> sekmesindeki Turso URL / Token bilgilerinin Netlify'daki <em>Environment Variables</em> ile birebir aynı olduğundan emin olun.
+        </li>
+        <li>
+          <strong>Garson veya Mutfak ekranında SambaPOS masaları görünmüyor:</strong><br/>
+          Admin Paneli &rarr; <em>🔌 POS &amp; Yemeksepeti/Getir</em> sekmesinde <strong>"SambaPOS Entegrasyonunu Etkinleştir"</strong> seçeneğinin açık olduğunu ve SQL bağlantı testinin başarılı olduğunu kontrol edin. POS modülü açıksa masa durumları POS'tan, kapalıysa standart site siparişlerinden çekilir.
+        </li>
+        <li>
+          <strong>Termal yazıcıdan onay penceresi çıkmadan (sessiz) fiş nasıl yazdırılır?</strong><br/>
+          Masaüstündeki Google Chrome kısayoluna sağ tıklayıp <em>Özellikler &rarr; Hedef</em> satırının en sonuna bir boşluk bırakarak <code>--kiosk-printing</code> ekleyin ve 80mm yazıcınızı Windows'ta Varsayılan Yazıcı yapın.
+        </li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

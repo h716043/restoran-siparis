@@ -466,7 +466,11 @@ function seedDatabase(db: DatabaseSync) {
     couriers: ["Kurye 1 (Motorlu)", "Kurye 2 (Motorlu)", "Hızlı Kurye"],
     whatsappConfig: {
       provider: "custom_gateway",
-      gatewayUrl: "https://restoran-siparis-v55a.onrender.com/send-message",
+      gatewayUrl:
+        process.env.WHATSAPP_GATEWAY_URL ||
+        (process.env.IS_NEW_FIRMA_PACKAGE === "true"
+          ? "http://localhost:3001/send-message"
+          : "https://restoran-siparis-v55a.onrender.com/send-message"),
       gatewayApiKey: "",
       metaPhoneNumberId: "",
       metaAccessToken: "",

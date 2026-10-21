@@ -513,9 +513,9 @@
           <li>
             Sipariş kartının üzerinde şunları görürsünüz:
             <ul>
-              <li>Sipariş numarası (<code class="inline">#105</code>) ve türü (<span class="pill pill-orange">🛵 Paket Servis</span>, <span class="pill pill-purple">🪑 Masa B10 (4 Kişi)</span> veya <span class="pill pill-blue">🛍️ Gel-Al</span>).</li>
+              <li>Sipariş numarası (<code class="inline">#105</code>), müşterinin kaçıncı siparişi olduğu (<code class="inline">🎉 İLK SİPARİŞ!</code> veya <code class="inline">👑 VIP MÜŞTERİ • 12. Sipariş</code> rozeti) ve türü (<span class="pill pill-orange">🛵 Paket Servis</span>, <span class="pill pill-purple">🪑 Masa B10 (4 Kişi)</span> veya <span class="pill pill-blue">🛍️ Gel-Al</span>).</li>
               <li>Müşteri adı, telefonu, teslimat adresi, bölge adı ve ödeme yöntemi (<em>Nakit, Kapıda Kredi Kartı, Online Ödeme</em>).</li>
-              <li>Varsa <strong>⏰ İLERİ SAAT</strong> bilgisi (müşteri ileri bir saat seçtiyse mavi rozetle görünür).</li>
+              <li>Varsa <strong>⏰ İLERİ SAAT</strong> bilgisi (müşteri ileri bir saat seçtiyse mavi rozetle görünür) ve müşterinin sonradan gönderdiği <strong>📝 Müşteri Ek Notu</strong>.</li>
               <li>Sipariş kalemleri, porsiyonları (<em>1.5 Porsiyon</em> vb.), seçmeli menü alt ürünleri (<em>📦 1. Ürün Seçimi, 📦 2. Ürün Seçimi</em>), ekstraları ve müşteri notu.</li>
             </ul>
           </li>
@@ -528,7 +528,7 @@
               <li>Butona bastığınız anda buton <code class="inline">⏳ ONAYLANIYOR...</code> olarak kilitlenir (<strong>Çift tıklama koruması</strong> sayesinde yanlışlıkla iki kez basılsa bile çift fiş veya çift POS kaydı oluşmaz).</li>
               <li>Sipariş anında sağ sütuna (<em>Hazırlananlar</em>) geçer.</li>
               <li>Müşteriye otomatik olarak <em>"Siparişiniz onaylandı, yaklaşık 25 dk içinde hazırlanacaktır"</em> WhatsApp mesajı gider.</li>
-              <li><strong>Otomatik Fiş Yazdır</strong> açıksa 80mm termal yazıcıdan adisyon fişi otomatik çıkar.</li>
+              <li><strong>Otomatik Fiş Yazdır</strong> açıksa 80mm termal yazıcıdan adisyon fişi otomatik çıkar (Paket siparişlerde fişin en altında kuryenin telefon kamerasıyla okutup doğrudan navigasyon başlatabileceği <strong>🗺️ Google Haritalar Yol Tarifi QR Kodu</strong> yer alır!).</li>
               <li><strong>SambaPOS Modülü Açıksa:</strong> Sipariş otomatik olarak SambaPOS veritabanına adisyon olarak düşer (Kart üzerinde yeşil <code class="inline">🔌 POS #...</code> rozeti belirir).</li>
             </ul>
           </li>
@@ -790,6 +790,17 @@
               <li>Müşteri ödeme yaptığında Cari Defterden <strong>"💵 Nakit Tahsilat Düş"</strong> veya <strong>"💳 Kart Tahsilat Düş"</strong> yapabilir, tek tıkla <strong>WhatsApp üzerinden güncel bakiye/ekstre mesajı</strong> gönderebilirsiniz.</li>
             </ul>
           </div>
+          <div class="step-item">
+            <strong class="title">4. PC Kapalıyken 7/24 WhatsApp Üyelik (Render.com Bulut Köprüsü) &amp; Tek Tıkla Doğrulama (wa.me)</strong>
+            <p>
+              Restorandaki Kasa PC kapalıyken bile müşterilerin internetten 7/24 WhatsApp doğrulama kodu alıp üye olabilmesi ve sipariş verebilmesi için:
+            </p>
+            <ul>
+              <li><strong>Render.com 7/24 Ücretsiz Bulut WhatsApp Köprüsü:</strong> Canlı bulut köprü adresiniz (<a href="https://restoran-siparis-v55a.onrender.com/" target="_blank" style="color:#ea580c;font-weight:bold;">https://restoran-siparis-v55a.onrender.com/</a>) üzerinden WhatsApp QR kodunu tarayıcıda okuttuğunuzda ve Admin Paneli &rarr; <em>💬 WhatsApp OTP &amp; Üyeler</em> sekmesinde Gateway URL olarak <code class="inline">https://restoran-siparis-v55a.onrender.com/send-message</code> tanımladığınızda, Kasa PC kapalı olsa bile 6 haneli doğrulama kodları 7/24 müşterinin WhatsApp'ına gider.</li>
+              <li><strong>📲 Tek Tıkla Müşteri Doğrulaması (wa.me):</strong> Aynı sekmedeki <em>"Müşteri Kendi WhatsApp'ından Tek Tıkla Doğrulayabilsin (wa.me)"</em> seçeneği açık olduğunda, müşteri doğrulama ekranındaki yeşil butona basarak kendi WhatsApp'ından tek tıkla giriş yapabilir.</li>
+              <li><strong>⚡ 4 Saniye Akıllı Yedek &amp; Bulut Sipariş Kuyruğu:</strong> Kasa PC kapalıyken verilen tüm siparişler Turso Bulut (<code class="inline">cloud_orders</code>) üzerinde güvenle saklanır; sabah Kasa PC açıldığında sesli zil ile Mutfak ekranına ve SambaPOS'a otomatik düşer.</li>
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -802,11 +813,11 @@
 
         <div class="grid-2">
           <div class="feature-box">
-            <h4>🍔 Menü &amp; Çoklu Porsiyon / Seçmeli Menü</h4>
+            <h4>🍔 Menü, Çoklu Porsiyon &amp; Canlı Önizlemeli Toplu Fiyat</h4>
             <p>
               • <strong>Menü &amp; Ürünler</strong> sekmesinden yeni ürün ekleyebilir, fotoğraf yükleyebilir veya porsiyon/ekstra seçenekleri tanımlayabilirsiniz.<br/>
               • <strong>SambaPOS Açıksa:</strong> <em>"📥 POS'tan Menüyü Şimdi Çek"</em> butonuyla SambaPOS'taki kategorileri, porsiyonları ve seçmeli menü alt kalemlerini otomatik çekebilirsiniz.<br/>
-              • <strong>Excel/CSV Toplu Fiyat Güncelleme:</strong> Tüm menüyü CSV olarak indirip fiyatları düzenleyerek tek tıkla geri yükleyebilirsiniz.
+              • <strong>Canlı Önizlemeli Toplu % Zam/İndirim &amp; CSV:</strong> Tüm menüye veya seçili kategoriye (porsiyon ve ekstralar dahil) % zam/indirim uygularken kaydetmeden önce <em>Eski Fiyat &rarr; Yeni Fiyat</em> canlı önizleme tablosunu görebilirsiniz.
             </p>
           </div>
 
@@ -819,17 +830,20 @@
           </div>
 
           <div class="feature-box">
-            <h4>🎉 Üst Kampanya Barı &amp; Happy Hour</h4>
+            <h4>🎉 Üst Kampanya Barı, Happy Hour &amp; Ücretsiz Teslimat Barajı</h4>
             <p>
               • <strong>Üst Bar, Bölgeler &amp; Kuponlar</strong> sekmesinden sitenin en üstündeki duyuru bandını ve tek tıkla sepette uygulanan indirim kuponunu (Örn: <code class="inline">HOSGELDIN10</code>) ayarlayabilirsiniz.<br/>
-              • Belirli saatler arasında (Örn: <code class="inline">14:00 - 17:00</code>) otomatik <strong>Happy Hour % İndirimi</strong> başlatabilirsiniz.
+              • Belirli saatler arasında (Örn: <code class="inline">14:00 - 17:00</code>) otomatik <strong>Happy Hour % İndirimi</strong> başlatabilirsiniz.<br/>
+              • <strong>Ücretsiz Teslimat Barajı:</strong> Belirlediğiniz tutar (Örn: 500 ₺) aşıldığında teslimat ücreti otomatik sıfırlanır ve sepette canlı ilerleme çubuğu gösterilir.
             </p>
           </div>
 
           <div class="feature-box">
-            <h4>🗺️ Mahalle / Bölge Bazlı Minimum Paket</h4>
+            <h4>🗺️ Mahalle Minimum Paket, Kısmi Puan &amp; Müşteri İptal/Ek Not</h4>
             <p>
-              Yakın mahallelere düşük minimum paket tutarı (Örn: 250 ₺), uzak mahallelere farklı minimum paket tutarı (Örn: 450 ₺) ve teslimat ücreti tanımlayabilirsiniz. Müşteri sipariş verirken mahallesini seçtiğinde sepet limiti otomatik kontrol edilir.
+              • Her mahalle için ayrı <strong>Minimum Paket Tutarı</strong> ve <strong>Teslimat Ücreti</strong> tanımlayabilirsiniz.<br/>
+              • Müşteri biriken Para Puanının istediği kadarını (Kısmi Puan) kullanabilir.<br/>
+              • Sipariş henüz mutfakta <strong>"Onay Bekliyor"</strong> aşamasındayken müşteri kendi ekranından siparişi iptal edebilir (puanı otomatik iade edilir) veya <strong>"📝 Mutfağa Ek Not Gönder"</strong> ile fişe anlık not ekleyebilir.
             </p>
           </div>
         </div>
