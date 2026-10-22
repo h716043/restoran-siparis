@@ -48,6 +48,7 @@ export default function CourierPage() {
   const [loading, setLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [batchUpdating, setBatchUpdating] = useState(false);
+  const [selectedPackageIds, setSelectedPackageIds] = useState<string[]>([]);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [courierAlertMsg, setCourierAlertMsg] = useState<string>("");
   const [showSettlementSlip, setShowSettlementSlip] = useState<boolean>(false);
@@ -379,6 +380,81 @@ export default function CourierPage() {
     () => activeDeliveries.filter((o) => o.status === "accepted"),
     [activeDeliveries]
   );
+
+  const togglePackageSelection = (id: string) => {
+    setSelectedPackageIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const targetRouteOrders = useMemo(() => {
+    const picked = activeDeliveries.filter((o) =>
+      selectedPackageIds.includes(o.id)
+    );
+    return picked.length > 0 ? picked : activeDeliveries;
+  }, [activeDeliveries, selectedPackageIds]);
+
+  const multiStopMapsUrl = useMemo(() => {
+    const stops = targetRouteOrders
+      .map((o) => {
+        const coords = o.splitPaymentInfo?.customerCoords;
+        if (
+          coords &&
+          typeof coords.lat === "number" &&
+          typeof coords.lng === "number"
+        ) {
+          return `${coords.lat},${coords.lng}`;
+        }
+        return (o.customerAddress || "").trim();
+      })
+      .filter(Boolean);
+    if (stops.length === 0) return "";
+    if (stops.length === 1) {
+      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+        stops[0]
+      )}&travelmode=driving`;
+    }
+    const destination = stops[stops.length - 1];
+    const waypoints = stops.slice(0, -1).join("|");
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+      destination
+    )}&waypoints=${encodeURIComponent(waypoints)}&travelmode=driving`;
+  }, [targetRouteOrders]);
+
+  const handleBatchCompleteSelected = async () => {
+    const toComplete =
+      selectedPackageIds.length > 0
+        ? activeDeliveries.filter((o) => selectedPackageIds.includes(o.id))
+        : activeDeliveries.filter((o) => o.status === "ready");
+    if (toComplete.length === 0) return;
+    setBatchUpdating(true);
+    try {
+      const assignedCourier =
+        lockedCourierName ||
+        (selectedCourier !== "all"
+          ? selectedCourier
+          : couriers[0] || "Kurye");
+      await Promise.all(
+        toComplete.map((ord) =>
+          fetch(`/api/orders/${ord.id}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-courier-pin": savedPin,
+            },
+            body: JSON.stringify({
+              status: "completed",
+              courierName: ord.courierName || assignedCourier,
+            }),
+          })
+        )
+      );
+      setSelectedPackageIds([]);
+      await fetchCourierOrders(savedPin);
+    } finally {
+      setBatchUpdating(false);
+    }
+  };
 
   const handleBatchPickupAll = async () => {
     if (claimableAcceptedPackages.length === 0) return;
@@ -757,22 +833,103 @@ export default function CourierPage() {
             </div>
           ) : (
             <div className="space-y-3.5">
-              {/* Çoklu Paket Toplu Teslim Al & Yola Çık Butonu */}
-              {claimableAcceptedPackages.length > 1 && (
-                <button
-                  type="button"
-                  disabled={batchUpdating}
-                  onClick={handleBatchPickupAll}
-                  className="w-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold text-xs py-3 px-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg cursor-pointer"
-                >
-                  <Truck className="w-4 h-4" />
-                  <span>
-                    {batchUpdating
-                      ? "Paketler Üzerinize Alınıyor..."
-                      : `🛵 Hazır ${claimableAcceptedPackages.length} Paketin Tümünü Üzerime Al & Toplu Yola Çık`}
+              {/* Çoklu Paket Toplu İşlem & Çoklu Durak Harita Rotası Araç Çubuğu */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (
+                        selectedPackageIds.length === activeDeliveries.length
+                      ) {
+                        setSelectedPackageIds([]);
+                      } else {
+                        setSelectedPackageIds(activeDeliveries.map((o) => o.id));
+                      }
+                    }}
+                    className="text-xs font-extrabold text-orange-300 hover:text-orange-200 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={
+                        activeDeliveries.length > 0 &&
+                        selectedPackageIds.length === activeDeliveries.length
+                      }
+                      className="w-4 h-4 accent-orange-500 rounded cursor-pointer"
+                    />
+                    <span>
+                      {selectedPackageIds.length > 0
+                        ? `${selectedPackageIds.length} Paket Seçildi (Tümünü Bırak)`
+                        : `Tüm Paketleri Seç (${activeDeliveries.length})`}
+                    </span>
+                  </button>
+                  <span className="text-[11px] font-bold text-slate-400">
+                    Toplu Tutar:{" "}
+                    <strong className="text-emerald-400">
+                      {targetRouteOrders
+                        .reduce((s, o) => s + o.totalAmount, 0)
+                        .toFixed(0)}{" "}
+                      ₺
+                    </strong>
                   </span>
-                </button>
-              )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {multiStopMapsUrl && (
+                    <a
+                      href={multiStopMapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                    >
+                      <Navigation className="w-4 h-4 shrink-0" />
+                      <span>
+                        🗺️{" "}
+                        {selectedPackageIds.length > 0
+                          ? `Seçili ${selectedPackageIds.length} Durağı Tek Rotada Aç`
+                          : `Tüm Paketleri (${activeDeliveries.length} Durak) Tek Rotada Aç`}
+                      </span>
+                    </a>
+                  )}
+
+                  {(selectedPackageIds.length > 0 ||
+                    activeDeliveries.filter((o) => o.status === "ready").length >
+                      1) && (
+                    <button
+                      type="button"
+                      disabled={batchUpdating}
+                      onClick={handleBatchCompleteSelected}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>
+                        {batchUpdating
+                          ? "Tamamlanıyor..."
+                          : selectedPackageIds.length > 0
+                          ? `✅ Seçili ${selectedPackageIds.length} Paketi Teslim Edildi Yap`
+                          : `✅ Yoldaki Tüm Paketleri Teslim Edildi Yap`}
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {claimableAcceptedPackages.length > 1 && (
+                  <button
+                    type="button"
+                    disabled={batchUpdating}
+                    onClick={handleBatchPickupAll}
+                    className="w-full bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow cursor-pointer"
+                  >
+                    <Truck className="w-4 h-4" />
+                    <span>
+                      {batchUpdating
+                        ? "Paketler Üzerinize Alınıyor..."
+                        : `🛵 Hazır ${claimableAcceptedPackages.length} Paketin Tümünü Üzerime Al & Toplu Yola Çık`}
+                    </span>
+                  </button>
+                )}
+              </div>
 
               {activeDeliveries.map((order) => {
                 const elapsedMins = Math.max(
@@ -823,9 +980,17 @@ export default function CourierPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="bg-orange-600 text-white font-black text-sm px-2.5 py-0.5 rounded-lg">
-                            #{order.orderNumber}
-                          </span>
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedPackageIds.includes(order.id)}
+                              onChange={() => togglePackageSelection(order.id)}
+                              className="w-4 h-4 accent-orange-500 rounded cursor-pointer"
+                            />
+                            <span className="bg-orange-600 text-white font-black text-sm px-2.5 py-0.5 rounded-lg">
+                              #{order.orderNumber}
+                            </span>
+                          </label>
                           <span
                             className={`text-[11px] font-extrabold px-2 py-0.5 rounded-md ${
                               order.status === "ready"

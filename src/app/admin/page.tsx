@@ -107,8 +107,11 @@ export default function AdminDashboardPage() {
   const [waLogs, setWaLogs] = useState<WhatsAppLog[]>([]);
   const [crmCustomers, setCrmCustomers] = useState<CrmCustomerItem[]>([]);
   const [crmSegment, setCrmSegment] = useState<
-    "all" | "vip" | "inactive" | "with_points"
+    "all" | "vip" | "inactive" | "inactive30" | "with_points"
   >("all");
+  const [cloudWaConnected, setCloudWaConnected] = useState<boolean | null>(
+    null
+  );
   const [crmSearchQuery, setCrmSearchQuery] = useState("");
   const [editingPointsPhone, setEditingPointsPhone] = useState<string | null>(
     null
@@ -301,6 +304,22 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     loadData();
+    const checkCloudWa = async () => {
+      try {
+        const r = await fetch(
+          "https://restoran-siparis-v55a.onrender.com/status"
+        );
+        if (r.ok) {
+          const d = await r.json();
+          setCloudWaConnected(Boolean(d.connected));
+        }
+      } catch {
+        // ignore
+      }
+    };
+    checkCloudWa();
+    // Render ücretsiz sunucusunun uykuya dalmasını önlemek için her 8 dakikada bir otomatik Keep-Alive ping at
+    const keepAliveTimer = setInterval(checkCloudWa, 8 * 60 * 1000);
     const timer = setInterval(async () => {
       try {
         const ordRes = await fetch("/api/orders");
@@ -314,7 +333,10 @@ export default function AdminDashboardPage() {
         // ignore background poll error
       }
     }, 5000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearInterval(keepAliveTimer);
+    };
   }, []);
 
   const showToast = (msg: string) => {
@@ -1531,23 +1553,70 @@ export default function AdminDashboardPage() {
     );
   };
 
-  // En Çok Satan Ürünler (Seçili Dönem)
+  // En Çok Satan ve En Çok Kâr Bırakan Ürünler (Seçili Dönem)
   const productSalesMap: Record<
     string,
-    { name: string; qty: number; revenue: number }
+    {
+      name: string;
+      qty: number;
+      revenue: number;
+      cost: number;
+      profit: number;
+      hasExactCost: boolean;
+    }
   > = {};
   for (const ord of validOrders) {
     for (const it of ord.items) {
+      const matchedMenu = items.find(
+        (m) => m.id === it.menuItemId || m.name === it.name
+      );
+      const hasExactCost =
+        typeof matchedMenu?.costPrice === "number" && matchedMenu.costPrice > 0;
+      const unitCost = hasExactCost
+        ? Number(matchedMenu!.costPrice)
+        : Number((it.unitPrice * 0.45).toFixed(2));
+      const lineCost = unitCost * it.quantity;
+      const lineProfit = it.totalPrice - lineCost;
+
       if (!productSalesMap[it.name]) {
-        productSalesMap[it.name] = { name: it.name, qty: 0, revenue: 0 };
+        productSalesMap[it.name] = {
+          name: it.name,
+          qty: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+          hasExactCost,
+        };
       }
       productSalesMap[it.name].qty += it.quantity;
       productSalesMap[it.name].revenue += it.totalPrice;
+      productSalesMap[it.name].cost += lineCost;
+      productSalesMap[it.name].profit += lineProfit;
     }
   }
   const topSellingProducts = Object.values(productSalesMap).sort(
     (a, b) => b.qty - a.qty
   );
+  const topProfitableProducts = Object.values(productSalesMap).sort(
+    (a, b) => b.profit - a.profit
+  );
+  const totalEstimatedFoodCost = Object.values(productSalesMap).reduce(
+    (s, p) => s + p.cost,
+    0
+  );
+  const totalGrossProductProfit = totalRevenue - totalEstimatedFoodCost;
+  const netOperatingProfitAfterExpenses =
+    totalGrossProductProfit - totalExpensesAmount;
+  const avgPrepMinutesStat = (() => {
+    const withPrep = validOrders.filter(
+      (o) => typeof o.estimatedMinutes === "number" && o.estimatedMinutes > 0
+    );
+    if (withPrep.length === 0) return settings?.estimatedPrepMinutes || 25;
+    return Math.round(
+      withPrep.reduce((s, o) => s + (o.estimatedMinutes || 25), 0) /
+        withPrep.length
+    );
+  })();
 
   const reportPeriodLabel =
     reportPeriod === "today"
@@ -1649,6 +1718,8 @@ export default function AdminDashboardPage() {
   const filteredCrmCustomers = crmCustomers.filter((c) => {
     if (crmSegment === "vip" && !c.isVip) return false;
     if (crmSegment === "inactive" && !c.isInactive15Days) return false;
+    if (crmSegment === "inactive30" && !((c.daysSinceLastOrder ?? 0) >= 30))
+      return false;
     if (crmSegment === "with_points" && !(c.loyaltyPoints > 0)) return false;
     if (crmSearchQuery.trim()) {
       const q = crmSearchQuery.trim().toLocaleLowerCase("tr-TR");
@@ -1828,6 +1899,23 @@ export default function AdminDashboardPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <a
+            href="https://restoran-siparis-v55a.onrender.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-2 rounded-xl border transition ${
+              cloudWaConnected
+                ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/60"
+                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+            }`}
+            title="7/24 Render Bulut WhatsApp QR Köprüsü (Her 8 dk'da otomatik Keep-Alive ping atılır)"
+          >
+            <span>
+              {cloudWaConnected
+                ? "🟢 7/24 Bulut WhatsApp: AKTİF"
+                : "☁️ 7/24 Bulut WhatsApp QR"}
+            </span>
+          </a>
           {settings && (
             <>
               <button
@@ -2371,31 +2459,100 @@ export default function AdminDashboardPage() {
                     </p>
                   ) : (
                     <div className="divide-y divide-slate-100">
-                      {topSellingProducts.slice(0, 10).map((prod, idx) => (
-                        <div
-                          key={prod.name}
-                          className="py-3 flex items-center justify-between text-sm"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 font-black text-xs flex items-center justify-center">
-                              {idx + 1}
-                            </span>
-                            <span className="font-bold text-slate-900">
-                              {prod.name}
-                            </span>
+                      {topSellingProducts.slice(0, 10).map((prod, idx) => {
+                        const marginPct =
+                          prod.revenue > 0
+                            ? Math.round((prod.profit / prod.revenue) * 100)
+                            : 0;
+                        return (
+                          <div
+                            key={prod.name}
+                            className="py-3 flex flex-wrap items-center justify-between gap-2 text-sm"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 font-black text-xs flex items-center justify-center">
+                                {idx + 1}
+                              </span>
+                              <div>
+                                <span className="font-bold text-slate-900">
+                                  {prod.name}
+                                </span>
+                                <div className="text-[11px] text-slate-500">
+                                  Maliyet: {prod.cost.toFixed(0)}{" "}
+                                  {settings?.currency} • Net Kâr:{" "}
+                                  <strong className="text-emerald-700">
+                                    +{prod.profit.toFixed(0)}{" "}
+                                    {settings?.currency} (%{marginPct})
+                                  </strong>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
+                                {prod.qty} Adet
+                              </span>
+                              <span className="font-extrabold text-emerald-700 w-24 text-right">
+                                {prod.revenue.toFixed(2)} {settings?.currency}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
-                              {prod.qty} Adet
-                            </span>
-                            <span className="font-extrabold text-emerald-700 w-24 text-right">
-                              {prod.revenue.toFixed(2)} {settings?.currency}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
+
+                  {/* 📈 Ürün Karlılık, Maliyet & Mutfak Performans Özeti */}
+                  <div className="pt-3 border-t border-slate-100 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-800">
+                        📈 Ürün Karlılık, Maliyet & Mutfak Performans Analizi:
+                      </span>
+                      {topProfitableProducts[0] && (
+                        <span className="text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                          🏆 En Çok Kâr Bırakan: {topProfitableProducts[0].name}{" "}
+                          (+{topProfitableProducts[0].profit.toFixed(0)}{" "}
+                          {settings?.currency})
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase">
+                          Tahmini Hammadde Maliyeti
+                        </div>
+                        <div className="text-xs font-black text-slate-800 mt-0.5">
+                          {totalEstimatedFoodCost.toFixed(0)}{" "}
+                          {settings?.currency}
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                        <div className="text-[10px] font-bold text-emerald-700 uppercase">
+                          Brüt Ürün Kârı
+                        </div>
+                        <div className="text-xs font-black text-emerald-900 mt-0.5">
+                          +{totalGrossProductProfit.toFixed(0)}{" "}
+                          {settings?.currency}
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-200">
+                        <div className="text-[10px] font-bold text-indigo-700 uppercase">
+                          Gider Sonrası Net Kâr
+                        </div>
+                        <div className="text-xs font-black text-indigo-900 mt-0.5">
+                          {netOperatingProfitAfterExpenses.toFixed(0)}{" "}
+                          {settings?.currency}
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200">
+                        <div className="text-[10px] font-bold text-amber-800 uppercase">
+                          Mutfak Ort. Hazırlama
+                        </div>
+                        <div className="text-xs font-black text-amber-900 mt-0.5">
+                          ⏱️ ~{avgPrepMinutesStat} dk
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   {topModifiers.length > 0 && (
                     <div className="pt-3 border-t border-slate-100 space-y-2">
@@ -5400,8 +5557,30 @@ export default function AdminDashboardPage() {
                         : "bg-rose-50 text-rose-800"
                     }`}
                   >
-                    ⏰ Özledik 15+ Gün (
+                    ⏰ 15+ Gün Yok (
                     {crmCustomers.filter((c) => c.isInactive15Days).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCrmSegment("inactive30");
+                      setCampaignMessage(
+                        "Merhaba {isim} 👋 Uzun süredir sizi aramızda göremedik, sizi özledik! Bu akşam vereceğiniz siparişte geçerli %15 indirim kuponunuz: MERHABA50 🎁 Sıcak lezzetlerimiz için hemen sipariş verebilirsiniz!"
+                      );
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      crmSegment === "inactive30"
+                        ? "bg-purple-700 text-white"
+                        : "bg-purple-50 text-purple-900 border border-purple-200"
+                    }`}
+                  >
+                    💤 30+ Gün Pasif (
+                    {
+                      crmCustomers.filter(
+                        (c) => (c.daysSinceLastOrder ?? 0) >= 30
+                      ).length
+                    }
+                    )
                   </button>
                 </div>
               </div>
@@ -5544,6 +5723,16 @@ export default function AdminDashboardPage() {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSendBulkCampaign([cust])
+                              }
+                              className="px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                              title="Bu müşteriye seçili 'Sizi Özledik / Kampanya' WhatsApp mesajını tek tıkla gönder"
+                            >
+                              💌 Özledik WA
+                            </button>
                             <button
                               type="button"
                               onClick={() =>

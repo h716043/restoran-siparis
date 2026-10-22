@@ -2782,6 +2782,48 @@ function CustomerMenuContent() {
         )}
       </div>
 
+      {/* 🔄 SON SİPARİŞİNİ TEK TIKLA TEKRARLA HIZLI KARTI */}
+      {pastUserOrders.length > 0 && (
+        <div className="max-w-7xl mx-auto w-full px-4 mt-3">
+          <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-orange-50 border border-orange-200 rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-8 h-8 rounded-xl bg-orange-600 text-white flex items-center justify-center font-black text-sm shrink-0 shadow-xs">
+                🔄
+              </span>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                  <span>Son Siparişinizi Tek Tıkla Tekrarlayın</span>
+                  <span className="text-[10px] font-bold bg-orange-200/70 text-orange-900 px-2 py-0.5 rounded-full">
+                    #{pastUserOrders[0].orderNumber} •{" "}
+                    {pastUserOrders[0].totalAmount.toFixed(0)}{" "}
+                    {settings?.currency || "₺"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 font-semibold truncate max-w-xl">
+                  {pastUserOrders[0].items
+                    .map((it) => `${it.quantity}x ${it.name}`)
+                    .join(", ")}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                handleReorderPastOrder(pastUserOrders[0]);
+                setTableCallToast(
+                  "✅ Son siparişinizdeki ürünler porsiyon ve tercihleriyle sepetinize eklendi!"
+                );
+                setTimeout(() => setTableCallToast(""), 4000);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer shrink-0"
+            >
+              <span>🔄 Tek Tıkla Sepete Ekle</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ⏱️ SAATLİK HAPPY HOUR / TARİFE BARI */}
       {settings?.happyHourConfig?.enabled && (
         <div className="max-w-7xl mx-auto w-full px-4 mt-3">

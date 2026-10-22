@@ -9,6 +9,7 @@
 
 import { spawn } from "node:child_process";
 import http from "node:http";
+import https from "node:https";
 
 const APP_PORT = 5439;
 const noBrowserOpen = process.argv.includes("--no-open");
@@ -98,6 +99,26 @@ if (!noBrowserOpen) {
     req.on("error", () => {});
     req.end();
   }, 1500);
+}
+
+// Render 7/24 Bulut WhatsApp Köprüsünü uykuya dalmaması için her 8 dakikada bir otomatik pingle
+const cloudBridgeStatusUrl =
+  process.env.IS_NEW_FIRMA_PACKAGE === "true"
+    ? ""
+    : "https://restoran-siparis-v55a.onrender.com/status";
+
+if (cloudBridgeStatusUrl) {
+  const pingCloudBridge = () => {
+    try {
+      const req = https.get(cloudBridgeStatusUrl, (res) => {
+        res.resume();
+      });
+      req.on("error", () => {});
+      req.setTimeout(10000, () => req.destroy());
+    } catch {}
+  };
+  pingCloudBridge();
+  setInterval(pingCloudBridge, 8 * 60 * 1000);
 }
 
 const cleanup = () => {
