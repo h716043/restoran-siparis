@@ -17,9 +17,16 @@ If WScript.Arguments.Count > 0 Then
   Next
 End If
 
-' 0 = vbHide: Siyah CMD ekrani cikmadan tamamen gizli (arka planda) baslatir
+' 1) 0 = vbHide: Siyah CMD ekrani cikmadan tamamen gizli (arka planda) sunucuyu baslatir
 cmd = "cmd.exe /c ""node baslatici.mjs" & extraArgs & " >> data\sistem.log 2>&1"""
 WshShell.Run cmd, 0, False
+
+' 2) Masaustu sag ust kose + Saat yani (System Tray) Canli Sunucu Durum Gostergesini baslatir
+psFile = workDir & "\SUNUCU-DURUM-GOSTERGESI.ps1"
+If fso.FileExists(psFile) Then
+  psCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & psFile & """"
+  WshShell.Run psCmd, 0, False
+End If
 
 Set WshShell = Nothing
 Set fso = Nothing
