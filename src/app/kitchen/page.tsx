@@ -2169,17 +2169,17 @@ export default function KitchenTabletPage() {
                         Şu an ocakta veya tezgahta bekleyen açık ürün bulunmuyor.
                       </p>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-col space-y-1.5 max-w-lg">
                         {batchList.map(([itemName, totalQty]) => (
-                          <span
+                          <div
                             key={itemName}
-                            className="inline-flex items-center gap-1.5 bg-slate-950 border border-orange-500/40 px-3 py-1.5 rounded-xl text-xs font-extrabold text-white shadow-2xs"
+                            className="flex items-center justify-between gap-3 bg-slate-950 border border-orange-500/40 px-3.5 py-2 rounded-xl text-xs font-extrabold text-white shadow-2xs"
                           >
-                            <strong className="text-orange-400 font-black">
-                              {totalQty}x
+                            <span className="truncate">{itemName}</span>
+                            <strong className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2.5 py-0.5 rounded-lg font-black shrink-0">
+                              {totalQty} Adet
                             </strong>
-                            <span>{itemName}</span>
-                          </span>
+                          </div>
                         ))}
                       </div>
                     )}
