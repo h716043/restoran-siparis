@@ -48,6 +48,7 @@ export default function TvOrderQueuePage() {
   const [currency, setCurrency] = useState<string>("₺");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [currentTime, setCurrentTime] = useState("");
+  const [originUrl, setOriginUrl] = useState("https://restoran-siparis.local");
   const [highlightedReadyIds, setHighlightedReadyIds] = useState<string[]>([]);
   const knownReadyIdsRef = useRef<Set<string>>(new Set());
   const firstLoadRef = useRef(true);
@@ -150,6 +151,9 @@ export default function TvOrderQueuePage() {
   }, [voiceEnabled]);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      setOriginUrl(window.location.origin);
+    }
     const updateClock = () => {
       setCurrentTime(
         new Date().toLocaleTimeString("tr-TR", {
@@ -267,9 +271,7 @@ export default function TvOrderQueuePage() {
           <div className="hidden lg:flex items-center gap-2 bg-slate-950 border border-orange-500/40 px-2.5 py-1 rounded-xl shadow">
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(
-                typeof window !== "undefined"
-                  ? window.location.origin
-                  : "https://restoran-siparis.local"
+                originUrl
               )}`}
               alt="Online QR Menü"
               className="w-8 h-8 rounded bg-white p-0.5 shrink-0"

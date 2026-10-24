@@ -1993,8 +1993,14 @@ function CustomerMenuContent() {
     "all" | "favorites" | "popular" | "discounted" | "spicy" | "chef"
   >("all");
   const [showOrderConfetti, setShowOrderConfetti] = useState(false);
-  const [liveClockMs, setLiveClockMs] = useState<number>(() => Date.now());
+  const [liveClockMs, setLiveClockMs] = useState<number>(0);
   const [splitSelectedCartIds, setSplitSelectedCartIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setLiveClockMs(Date.now());
+    const t = setInterval(() => setLiveClockMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const getItemNutritionAndAllergenInfo = (item: MenuItem) => {
     const text = `${item.name} ${item.description}`.toLowerCase();
@@ -2101,11 +2107,6 @@ function CustomerMenuContent() {
     setChosenModifiers(defaults);
     setChosenSubOptions({});
   };
-
-  useEffect(() => {
-    const t = setInterval(() => setLiveClockMs(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   // 🎡 3. Müşteri Sadakat Seviyesi (Bronz / Gümüş / Altın VIP) Hesabı
   const customerLoyaltyTier = useMemo(() => {
