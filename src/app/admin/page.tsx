@@ -2675,36 +2675,79 @@ export default function AdminDashboardPage() {
                           prod.revenue > 0
                             ? Math.round((prod.profit / prod.revenue) * 100)
                             : 0;
+                        const maxQty = Math.max(
+                          1,
+                          topSellingProducts[0]?.qty || 1
+                        );
+                        const barPct = Math.max(
+                          8,
+                          Math.round((prod.qty / maxQty) * 100)
+                        );
+                        const medal =
+                          idx === 0
+                            ? "🥇"
+                            : idx === 1
+                            ? "🥈"
+                            : idx === 2
+                            ? "🥉"
+                            : null;
                         return (
                           <div
                             key={prod.name}
-                            className="py-3 flex flex-wrap items-center justify-between gap-2 text-sm"
+                            className="py-3 space-y-1.5 text-sm"
                           >
-                            <div className="flex items-center gap-3">
-                              <span className="w-6 h-6 rounded-full bg-orange-100 text-orange-700 font-black text-xs flex items-center justify-center">
-                                {idx + 1}
-                              </span>
-                              <div>
-                                <span className="font-bold text-slate-900">
-                                  {prod.name}
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`w-7 h-7 rounded-xl font-black text-xs flex items-center justify-center shadow-2xs ${
+                                    idx === 0
+                                      ? "bg-amber-100 text-amber-800 border border-amber-300 text-base"
+                                      : idx === 1
+                                      ? "bg-slate-200 text-slate-800 border border-slate-300 text-base"
+                                      : idx === 2
+                                      ? "bg-orange-100 text-orange-800 border border-orange-300 text-base"
+                                      : "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {medal || idx + 1}
                                 </span>
-                                <div className="text-[11px] text-slate-500">
-                                  Maliyet: {prod.cost.toFixed(0)}{" "}
-                                  {settings?.currency} • Net Kâr:{" "}
-                                  <strong className="text-emerald-700">
-                                    +{prod.profit.toFixed(0)}{" "}
-                                    {settings?.currency} (%{marginPct})
-                                  </strong>
+                                <div>
+                                  <span className="font-extrabold text-slate-900">
+                                    {prod.name}
+                                  </span>
+                                  <div className="text-[11px] text-slate-500">
+                                    Maliyet: {prod.cost.toFixed(0)}{" "}
+                                    {settings?.currency} • Net Kâr:{" "}
+                                    <strong className="text-emerald-700">
+                                      +{prod.profit.toFixed(0)}{" "}
+                                      {settings?.currency} (%{marginPct})
+                                    </strong>
+                                  </div>
                                 </div>
                               </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-extrabold bg-slate-100 text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200">
+                                  {prod.qty} Adet
+                                </span>
+                                <span className="font-black text-emerald-700 w-24 text-right">
+                                  {prod.revenue.toFixed(2)} {settings?.currency}
+                                </span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
-                                {prod.qty} Adet
-                              </span>
-                              <span className="font-extrabold text-emerald-700 w-24 text-right">
-                                {prod.revenue.toFixed(2)} {settings?.currency}
-                              </span>
+                            {/* Yatay Şampiyonluk Oran Çubuğu */}
+                            <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  idx === 0
+                                    ? "bg-gradient-to-r from-amber-400 to-orange-500"
+                                    : idx === 1
+                                    ? "bg-gradient-to-r from-slate-400 to-slate-600"
+                                    : idx === 2
+                                    ? "bg-gradient-to-r from-orange-400 to-amber-600"
+                                    : "bg-emerald-500/70"
+                                }`}
+                                style={{ width: `${barPct}%` }}
+                              />
                             </div>
                           </div>
                         );

@@ -1304,35 +1304,57 @@ export default function WaiterTerminalPage() {
               </div>
             </div>
 
-            {/* Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              {[
-                { id: "all", label: `Tüm Masalar (${totalTables})` },
-                { id: "occupied", label: `🟠 Dolu (${occupiedTableNumbers.size})` },
-                {
-                  id: "empty",
-                  label: `🟢 Boş (${Math.max(0, totalTables - occupiedTableNumbers.size)})`,
-                },
-                { id: "ready", label: `🍽️ Hazır (${readyTableOrders.length})` },
-                { id: "calls", label: `🔴 Çağrı (${tableRequests.length})` },
-              ].map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() =>
-                    setTableFilter(
-                      f.id as "all" | "occupied" | "empty" | "ready" | "calls"
-                    )
+            {/* Filter Pills & Renkli Salon Durum Lejantı */}
+            <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                {[
+                  { id: "all", label: `Tüm Masalar (${totalTables})` },
+                  { id: "occupied", label: `🟠 Dolu (${occupiedTableNumbers.size})` },
+                  {
+                    id: "empty",
+                    label: `⚪ Boş (${Math.max(0, totalTables - occupiedTableNumbers.size)})`,
+                  },
+                  { id: "ready", label: `🟢 Hazır (${readyTableOrders.length})` },
+                  { id: "calls", label: `🔴 Çağrı (${tableRequests.length})` },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() =>
+                      setTableFilter(
+                        f.id as "all" | "occupied" | "empty" | "ready" | "calls"
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                      tableFilter === f.id
+                        ? "bg-amber-500 text-stone-950 font-black shadow"
+                        : "bg-stone-950 text-stone-300 border border-stone-800 hover:border-stone-700"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <div className="hidden sm:flex items-center gap-2 text-[10px] font-extrabold text-stone-400">
+                <span className="inline-flex items-center gap-1 bg-red-950/60 text-red-300 border border-red-500/40 px-2 py-0.5 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                  Çağrı/Hesap ({tableRequests.length})
+                </span>
+                <span className="inline-flex items-center gap-1 bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Tezgahta Hazır ({readyTableOrders.length})
+                </span>
+                <span className="inline-flex items-center gap-1 bg-purple-950/60 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-purple-400" />
+                  Rezerve (
+                  {
+                    (settings?.reservations || []).filter(
+                      (r) => r.status === "pending" || r.status === "confirmed"
+                    ).length
                   }
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                    tableFilter === f.id
-                      ? "bg-amber-500 text-stone-950 font-black"
-                      : "bg-stone-900 text-stone-300 border border-stone-800"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+                  )
+                </span>
+              </div>
             </div>
 
             {/* Tables Grid */}

@@ -273,6 +273,30 @@ export default function TvOrderQueuePage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* 🔥 Canlı Mutfak Yoğunluk & Akış Göstergesi */}
+          <div
+            className={`hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-black ${
+              preparingList.length >= 6
+                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                : "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                preparingList.length >= 6
+                  ? "bg-amber-400 animate-ping"
+                  : "bg-emerald-400 animate-pulse"
+              }`}
+            />
+            <span>
+              {preparingList.length >= 6
+                ? "Mutfak Akışı: Yoğun"
+                : "Mutfak Akışı: Normal"}
+            </span>
+            <span className="text-slate-400 font-bold">
+              • ~{preparingList[0]?.estimatedMinutes || 20} dk
+            </span>
+          </div>
           {/* 📱 7. ÖNERİ: SIRADA BEKLEMEDEN QR OKUT & SİPARİŞ VER KÖŞE KARTI */}
           <div className="hidden lg:flex items-center gap-2 bg-slate-950 border border-orange-500/40 px-2.5 py-1 rounded-xl shadow">
             <img

@@ -1074,11 +1074,24 @@ export default function CourierPage() {
                       </div>
                     </div>
 
-                    {/* Kapıda Tahsilat Yöntemi Hızlı Değiştirme (Nakit <-> POS Kart) */}
-                    <div className="flex items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 px-3 py-2 rounded-xl">
-                      <span className="text-[11px] font-bold text-slate-400">
-                        Tahsilat Tipi:
-                      </span>
+                    {/* 💳 / 💵 Görsel POS Cihazı & Nakit Tahsilat Uyarı Şeridi */}
+                    <div
+                      className={`rounded-xl px-3.5 py-2.5 border flex flex-wrap items-center justify-between gap-2 ${
+                        order.paymentMethod === "cash"
+                          ? "bg-gradient-to-r from-emerald-950/90 via-emerald-900/50 to-slate-950 border-emerald-500/60 text-emerald-200"
+                          : "bg-gradient-to-r from-blue-950/90 via-blue-900/50 to-slate-950 border-blue-500/60 text-blue-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-xs font-black">
+                        <span className="text-base">
+                          {order.paymentMethod === "cash" ? "💵" : "💳"}
+                        </span>
+                        <span>
+                          {order.paymentMethod === "cash"
+                            ? `KAPIDA NAKİT TAHSİL EDİLECEK • ${order.totalAmount.toFixed(2)} ₺`
+                            : `YANINA POS CİHAZI AL! (KAPIDA KART) • ${order.totalAmount.toFixed(2)} ₺`}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"

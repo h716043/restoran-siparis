@@ -2917,20 +2917,37 @@ function CustomerMenuContent() {
             >
               <span>❤️ Favoriler ({favoriteIds.length})</span>
             </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setActiveCategory(cat.id)}
-                className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  activeCategory === cat.id
-                    ? "bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-md shadow-orange-500/25 scale-[1.02]"
-                    : "bg-slate-100/90 text-slate-700 hover:bg-slate-200"
-                }`}
-              >
-                {cat.name}
-              </button>
-            ))}
+            {categories.map((cat) => {
+              const catPh = getCategoryVisualPlaceholder(cat.id, cat.name);
+              const catCount = items.filter(
+                (i) => i.categoryId === cat.id && i.available
+              ).length;
+              const isActiveCat = activeCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setActiveCategory(cat.id)}
+                  className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-extrabold whitespace-nowrap transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                    isActiveCat
+                      ? "bg-gradient-to-r from-orange-600 via-orange-500 to-red-600 text-white shadow-md shadow-orange-500/30 ring-2 ring-orange-400/40 scale-[1.03]"
+                      : "bg-slate-100/90 text-slate-700 hover:bg-orange-50 hover:text-orange-700 border border-slate-200/70"
+                  }`}
+                >
+                  <span>{catPh.icon}</span>
+                  <span>{cat.name}</span>
+                  <span
+                    className={`text-[10px] font-black px-1.5 py-0.2 rounded-full ${
+                      isActiveCat
+                        ? "bg-white/25 text-white"
+                        : "bg-slate-200/80 text-slate-600"
+                    }`}
+                  >
+                    {catCount}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -4629,7 +4646,7 @@ function CustomerMenuContent() {
                               </div>
                             </div>
 
-                            <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0 shadow-xs">
+                            <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-slate-100 flex-shrink-0 shadow-sm border border-slate-200/80 group-hover:border-orange-300 transition">
                               {item.imageUrl ? (
                                 <img
                                   src={item.imageUrl}
@@ -4651,6 +4668,20 @@ function CustomerMenuContent() {
                                     {visualPh.label}
                                   </span>
                                 </div>
+                              )}
+                              {/* Alt Yumuşak Sinematik Çerçeve Geçişi */}
+                              <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/45 to-transparent pointer-events-none" />
+                              {/* Sol Üst İndirim Kurdelesi */}
+                              {hasDiscount && (
+                                <span className="absolute top-1.5 left-1.5 bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-sm">
+                                  -%{discountPercent}
+                                </span>
+                              )}
+                              {/* Sağ Üst Canlı Sepet Adet Rozeti */}
+                              {inCartQty > 0 && (
+                                <span className="absolute top-1.5 right-1.5 bg-orange-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-lg shadow-md border border-white/40 animate-bounce">
+                                  🛒 {inCartQty}
+                                </span>
                               )}
                               {item.imageUrl && (
                                 <button
@@ -7214,20 +7245,32 @@ function CustomerMenuContent() {
                 )}
                 <span className="font-black">%{progressPct}</span>
               </div>
-              <div className="w-full h-2 rounded-full bg-black/10 overflow-hidden">
+              <div className="w-full h-2.5 rounded-full bg-black/10 overflow-hidden shadow-inner">
                 <div
-                  className={`h-full rounded-full transition-all duration-300 ${
+                  className={`h-full rounded-full transition-all duration-500 relative ${
                     needsMinDelivery
-                      ? "bg-orange-500"
+                      ? "bg-gradient-to-r from-orange-500 to-amber-500"
                       : needsFreeDelivery
-                      ? "bg-teal-600"
+                      ? "bg-gradient-to-r from-teal-500 to-emerald-500"
                       : nextCouponGoal
-                      ? "bg-indigo-600"
-                      : "bg-emerald-500"
+                      ? "bg-gradient-to-r from-indigo-500 to-purple-500"
+                      : "bg-gradient-to-r from-emerald-500 to-teal-500"
                   }`}
                   style={{ width: `${progressPct}%` }}
-                />
+                >
+                  <div className="absolute inset-0 bg-white/25 animate-pulse" />
+                </div>
               </div>
+              {estimatedPointsToEarn > 0 && (
+                <div className="pt-1 flex items-center justify-between text-[11px] font-extrabold text-amber-800 border-t border-black/5">
+                  <span className="inline-flex items-center gap-1">
+                    ✨ Bu siparişten kazanacağınız sadakat ödülü:
+                  </span>
+                  <span className="bg-amber-500 text-white px-2 py-0.5 rounded-full text-[10px] font-black shadow-2xs">
+                    +{estimatedPointsToEarn.toFixed(2)} {settings?.currency} Para Puan
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

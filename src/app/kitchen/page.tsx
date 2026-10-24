@@ -2805,13 +2805,43 @@ export default function KitchenTabletPage() {
                       </div>
 
                       <div className="space-y-2.5 text-sm">
-                        <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-400 px-1">
-                          <span>👨‍🍳 Usta Hazırlık Kontrolü (Ürüne Tıklayıp Tikleyin)</span>
-                          <span className="text-emerald-400">
-                            {order.items.filter((i) => i.prepared).length} /{" "}
-                            {order.items.length} Kalem Hazır ✓
-                          </span>
-                        </div>
+                        {(() => {
+                          const doneCnt = order.items.filter(
+                            (i) => i.prepared
+                          ).length;
+                          const totalCnt = Math.max(1, order.items.length);
+                          const donePct = Math.round(
+                            (doneCnt / totalCnt) * 100
+                          );
+                          return (
+                            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-300">
+                                <span>
+                                  👨‍🍳 Usta Hazırlık Kontrolü (Ürüne Tıklayıp Tikleyin)
+                                </span>
+                                <span
+                                  className={
+                                    donePct === 100
+                                      ? "text-emerald-400 font-black"
+                                      : "text-amber-300 font-black"
+                                  }
+                                >
+                                  🍽️ {doneCnt} / {order.items.length} Kalem Hazır (%{donePct})
+                                </span>
+                              </div>
+                              <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    donePct === 100
+                                      ? "bg-gradient-to-r from-emerald-500 to-teal-400"
+                                      : "bg-gradient-to-r from-amber-500 to-emerald-500"
+                                  }`}
+                                  style={{ width: `${donePct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {order.items.map((item) => {
                           const structuredBlocks = parseStructuredModifiers(
                             item.selectedModifiers
