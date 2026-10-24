@@ -24,7 +24,7 @@ WshShell.Run cmd, 0, False
 ' 2) Masaustu sag ust kose + Saat yani (System Tray) Canli Sunucu Durum Gostergesini baslatir
 psFile = workDir & "\SUNUCU-DURUM-GOSTERGESI.ps1"
 If fso.FileExists(psFile) Then
-  psCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & psFile & """"
+  psCmd = "powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File """ & psFile & """"
   WshShell.Run psCmd, 0, False
 End If
 

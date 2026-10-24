@@ -6,7 +6,7 @@ WshShell.CurrentDirectory = workDir
 
 psFile = workDir & "\SUNUCU-DURUM-GOSTERGESI.ps1"
 If fso.FileExists(psFile) Then
-  psCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & psFile & """"
+  psCmd = "powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -File """ & psFile & """"
   WshShell.Run psCmd, 0, False
 End If
 

@@ -4,6 +4,17 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32Show {
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+}
+"@
+
 # Tek ornek (Single Instance) kontrolu
 $mutexName = "Global\RestoranPosSunucuDurumGostergesi"
 $createdNew = $false
@@ -71,12 +82,23 @@ function Stop-RestaurantServer {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+# WPF'in ilk pencereyi SW_HIDE (gizli) acma davranisini tuketmek icin gecici 0x0 pencere
+$dummyWin = New-Object System.Windows.Window
+$dummyWin.Width = 0
+$dummyWin.Height = 0
+$dummyWin.WindowStyle = [System.Windows.WindowStyle]::None
+$dummyWin.ShowInTaskbar = $false
+$dummyWin.AllowsTransparency = $true
+$dummyWin.Opacity = 0
+$dummyWin.Show()
+$dummyWin.Close()
+
 # WPF XAML: Gercek yari-seffaf cam (frosted glass / translucent) gorunumu ve yuvarlatilmis koseler
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Restoran Sunucu Durumu"
-        Width="300" Height="74"
+        Width="304" Height="76"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -87,10 +109,10 @@ function Stop-RestaurantServer {
             CornerRadius="14"
             Margin="4"
             Background="#78FFFFFF"
-            BorderBrush="#B8FFFFFF"
-            BorderThickness="1.2">
+            BorderBrush="#CCFFFFFF"
+            BorderThickness="1.4">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.22" Color="#000000"/>
+            <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.24" Color="#000000"/>
         </Border.Effect>
         <Grid Margin="12,7,10,8">
             <Grid.RowDefinitions>
@@ -110,7 +132,7 @@ function Stop-RestaurantServer {
                          Fill="#10B981" Stroke="#FFFFFF" StrokeThickness="1.5"
                          VerticalAlignment="Center" Margin="0,0,7,0">
                     <Ellipse.Effect>
-                        <DropShadowEffect x:Name="DotGlow" BlurRadius="6" ShadowDepth="0" Color="#10B981" Opacity="0.8"/>
+                        <DropShadowEffect x:Name="DotGlow" BlurRadius="6" ShadowDepth="0" Color="#10B981" Opacity="0.85"/>
                     </Ellipse.Effect>
                 </Ellipse>
 
@@ -122,8 +144,8 @@ function Stop-RestaurantServer {
                 <Button x:Name="BtnHide" Grid.Column="2" Content="—"
                         Width="22" Height="18"
                         FontFamily="Segoe UI" FontSize="11" FontWeight="Bold"
-                        Foreground="#334155" Background="#45FFFFFF"
-                        BorderBrush="#80FFFFFF" BorderThickness="1"
+                        Foreground="#1E293B" Background="#55FFFFFF"
+                        BorderBrush="#99FFFFFF" BorderThickness="1"
                         Cursor="Hand" ToolTip="Saatin yanına (Sistem Tepsisine) küçült">
                     <Button.Resources>
                         <Style TargetType="Border">
@@ -144,8 +166,8 @@ function Stop-RestaurantServer {
                 <Button x:Name="BtnAdmin" Grid.Column="0" Content="Yönetim"
                         Height="24" Margin="0,0,5,0"
                         FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
-                        Foreground="#0F172A" Background="#68FFFFFF"
-                        BorderBrush="#99FFFFFF" BorderThickness="1"
+                        Foreground="#0F172A" Background="#75FFFFFF"
+                        BorderBrush="#B0FFFFFF" BorderThickness="1"
                         Cursor="Hand">
                     <Button.Resources>
                         <Style TargetType="Border">
@@ -157,8 +179,8 @@ function Stop-RestaurantServer {
                 <Button x:Name="BtnKitchen" Grid.Column="1" Content="Mutfak POS"
                         Height="24" Margin="2,0,5,0"
                         FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
-                        Foreground="#0F172A" Background="#68FFFFFF"
-                        BorderBrush="#99FFFFFF" BorderThickness="1"
+                        Foreground="#0F172A" Background="#75FFFFFF"
+                        BorderBrush="#B0FFFFFF" BorderThickness="1"
                         Cursor="Hand">
                     <Button.Resources>
                         <Style TargetType="Border">
@@ -171,7 +193,7 @@ function Stop-RestaurantServer {
                         Height="24" Margin="2,0,0,0"
                         FontFamily="Segoe UI" FontSize="11" FontWeight="Bold"
                         Foreground="#FFFFFF" Background="#CCDC2626"
-                        BorderBrush="#99FFFFFF" BorderThickness="1"
+                        BorderBrush="#B0FFFFFF" BorderThickness="1"
                         Cursor="Hand">
                     <Button.Resources>
                         <Style TargetType="Border">
@@ -188,9 +210,23 @@ function Stop-RestaurantServer {
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-$screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-$window.Left = $screen.Right - 314
-$window.Top  = $screen.Top + 12
+# WPF DPI olceklendirmesine (%125, %150, %175) tam uyumlu sag ust kose koordinati
+$workArea = [System.Windows.SystemParameters]::WorkArea
+$window.Left = $workArea.Right - $window.Width - 14
+$window.Top  = $workArea.Top + 12
+
+# Pencere acildiginda SW_HIDE etkisini kesin olarak kaldirip ekranda goster (SW_SHOW = 5)
+$window.Add_SourceInitialized({
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
+    [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
+})
+
+$window.Add_Loaded({
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
+    [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
+    $window.Visibility = [System.Windows.Visibility]::Visible
+    $window.Activate() | Out-Null
+})
 
 $mainBorder = $window.FindName("MainBorder")
 $statusDot  = $window.FindName("StatusDot")
@@ -205,12 +241,12 @@ $brushConverter = New-Object System.Windows.Media.BrushConverter
 
 # Mouse uzerine gelince biraz daha netlessin, cekilince daha seffaf olsun
 $window.Add_MouseEnter({
-    $mainBorder.Background = $brushConverter.ConvertFromString("#A8FFFFFF")
+    $mainBorder.Background = $brushConverter.ConvertFromString("#B0FFFFFF")
 })
 $window.Add_MouseLeave({
-    $mainBorder.Background = $brushConverter.ConvertFromString("#72FFFFFF")
+    $mainBorder.Background = $brushConverter.ConvertFromString("#68FFFFFF")
 })
-$mainBorder.Background = $brushConverter.ConvertFromString("#72FFFFFF")
+$mainBorder.Background = $brushConverter.ConvertFromString("#68FFFFFF")
 
 # Sol tik ile istedigin yere surukleme
 $window.Add_MouseLeftButtonDown({
@@ -252,7 +288,14 @@ $contextMenu.Items.Add("-") | Out-Null
 
 $menuShowWidget = $contextMenu.Items.Add("Masaüstü Durum Kutucuğunu Göster / Gizle")
 $menuShowWidget.Add_Click({
-    if ($window.IsVisible) { $window.Hide() } else { $window.Show(); $window.Activate() }
+    if ($window.IsVisible) {
+        $window.Hide()
+    } else {
+        $window.Show()
+        $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
+        [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
+        $window.Activate()
+    }
 })
 
 $menuOpenAdmin = $contextMenu.Items.Add("Yönetici (Admin) Panelini Aç")
@@ -286,7 +329,10 @@ $menuExit.Add_Click({
 $notifyIcon.ContextMenuStrip = $contextMenu
 $notifyIcon.Add_MouseClick({
     if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-        if ($window.IsVisible) { $window.Activate() } else { $window.Show(); $window.Activate() }
+        $window.Show()
+        $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
+        [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
+        $window.Activate()
     }
 })
 
@@ -298,21 +344,21 @@ function Update-ServerStatusUI {
     if ($posOpen) {
         $statusDot.Fill = $brushConverter.ConvertFromString("#10B981")
         $dotGlow.Color  = [System.Windows.Media.Color]::FromRgb(16, 185, 129)
-        $lblTitle.Foreground = $brushConverter.ConvertFromString("#065F46")
+        $lblTitle.Foreground = $brushConverter.ConvertFromString("#064E3B")
         $waText = if ($waOpen) { "WA: Açık" } else { "Bulut WA" }
         $lblTitle.Text = "SUNUCU AÇIK (5439 • $waText)"
         $btnToggle.Content = "Durdur"
-        $btnToggle.Background = $brushConverter.ConvertFromString("#B8DC2626")
+        $btnToggle.Background = $brushConverter.ConvertFromString("#BFDC2626")
         $notifyIcon.Icon = $iconGreen
         $notifyIcon.Text = "Restoran POS Sunucusu: AÇIK (Port 5439)"
         $menuStatus.Text = "Sunucu AÇIK (Port 5439 Aktif)"
     } else {
         $statusDot.Fill = $brushConverter.ConvertFromString("#EF4444")
         $dotGlow.Color  = [System.Windows.Media.Color]::FromRgb(239, 68, 68)
-        $lblTitle.Foreground = $brushConverter.ConvertFromString("#991B1B")
+        $lblTitle.Foreground = $brushConverter.ConvertFromString("#7F1D1D")
         $lblTitle.Text = "SUNUCU KAPALI (Port 5439)"
         $btnToggle.Content = "Başlat"
-        $btnToggle.Background = $brushConverter.ConvertFromString("#B8059669")
+        $btnToggle.Background = $brushConverter.ConvertFromString("#BF059669")
         $notifyIcon.Icon = $iconRed
         $notifyIcon.Text = "Restoran POS Sunucusu: KAPALI"
         $menuStatus.Text = "Sunucu KAPALI"
