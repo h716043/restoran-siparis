@@ -76,6 +76,8 @@ export async function GET(req: NextRequest) {
         tvDisplayOrderTypes: allowedTvTypes,
         tvTickerSpeed: settings.tvTickerSpeed || "normal",
         tvCustomNote: settings.tvCustomNote ?? "",
+        publicStorefrontUrl:
+          settings.cloudSyncConfig?.publicStorefrontUrl || "",
         announcementBar: settings.announcementBar || null,
         happyHourConfig: settings.happyHourConfig || null,
         featuredItems,

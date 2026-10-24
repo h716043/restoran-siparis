@@ -95,6 +95,12 @@ export default function TvOrderQueuePage() {
       if (typeof data.tvCustomNote === "string") {
         setTvCustomNote(data.tvCustomNote);
       }
+      if (
+        typeof data.publicStorefrontUrl === "string" &&
+        data.publicStorefrontUrl.trim()
+      ) {
+        setOriginUrl(data.publicStorefrontUrl.trim());
+      }
       if (data.announcementBar?.enabled && data.announcementBar?.text) {
         setAnnouncementText(
           `${data.announcementBar.badgeText || "🔥 FIRSAT"}: ${data.announcementBar.text}`
