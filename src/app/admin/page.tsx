@@ -2359,6 +2359,199 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
+            {/* 📊 6. SON 7 GÜNLÜK GÖRSEL CİRO ÇUBUK GRAFİĞİ & SİPARİŞ KANALI ORAN HALKASI */}
+            {(() => {
+              const last7Days: {
+                dateKey: string;
+                label: string;
+                revenue: number;
+                count: number;
+              }[] = [];
+              const now = new Date();
+              for (let i = 6; i >= 0; i--) {
+                const d = new Date(now);
+                d.setDate(now.getDate() - i);
+                const key = d.toLocaleDateString("tr-TR");
+                const dayLabel = d.toLocaleDateString("tr-TR", {
+                  weekday: "short",
+                  day: "2-digit",
+                  month: "2-digit",
+                });
+                let rev = 0;
+                let cnt = 0;
+                for (const ord of orders) {
+                  if (ord.status === "rejected") continue;
+                  const oKey = new Date(ord.createdAt).toLocaleDateString(
+                    "tr-TR"
+                  );
+                  if (oKey === key) {
+                    rev += ord.totalAmount;
+                    cnt += 1;
+                  }
+                }
+                last7Days.push({
+                  dateKey: key,
+                  label: dayLabel,
+                  revenue: rev,
+                  count: cnt,
+                });
+              }
+              const max7Rev = Math.max(1, ...last7Days.map((d) => d.revenue));
+              const totalCh = Math.max(
+                1,
+                deliveryCount + pickupCount + dineInCount
+              );
+              const delPct = Math.round((deliveryCount / totalCh) * 100);
+              const pickPct = Math.round((pickupCount / totalCh) * 100);
+              const dinePct = Math.max(0, 100 - delPct - pickPct);
+
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Sol 7 Sütun: Son 7 Günlük Ciro Çubuk Grafiği */}
+                  <div className="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-extrabold text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-orange-600" />
+                          <span>Son 7 Günlük Ciro Grafiği</span>
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Günlük brüt satış cirosu ve sipariş adedi eğilimi
+                        </p>
+                      </div>
+                      <span className="text-xs font-extrabold bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-1 rounded-full">
+                        7 Gün Toplam:{" "}
+                        {last7Days
+                          .reduce((s, d) => s + d.revenue, 0)
+                          .toFixed(0)}{" "}
+                        {settings?.currency || "₺"}
+                      </span>
+                    </div>
+
+                    <div className="h-44 flex items-end justify-between gap-2 sm:gap-3 pt-6 px-1 border-b border-slate-100 pb-2">
+                      {last7Days.map((d, idx) => {
+                        const hPct =
+                          d.revenue > 0
+                            ? Math.max(
+                                12,
+                                Math.round((d.revenue / max7Rev) * 100)
+                              )
+                            : 4;
+                        const isTodayBar = idx === last7Days.length - 1;
+                        return (
+                          <div
+                            key={d.dateKey}
+                            className="flex-1 flex flex-col items-center justify-end h-full group"
+                          >
+                            <div className="text-[10px] font-extrabold text-slate-700 mb-1 whitespace-nowrap">
+                              {d.revenue > 0
+                                ? `${d.revenue.toFixed(0)}${
+                                    settings?.currency || "₺"
+                                  }`
+                                : "0"}
+                            </div>
+                            <div className="w-full max-w-[42px] h-28 bg-slate-100 rounded-t-xl flex items-end overflow-hidden p-0.5">
+                              <div
+                                className={`w-full rounded-t-lg transition-all duration-500 ${
+                                  isTodayBar
+                                    ? "bg-gradient-to-t from-orange-600 to-amber-400 shadow-sm"
+                                    : d.revenue > 0
+                                    ? "bg-gradient-to-t from-slate-700 to-slate-500 group-hover:from-orange-600 group-hover:to-orange-400"
+                                    : "bg-slate-200"
+                                }`}
+                                style={{ height: `${hPct}%` }}
+                                title={`${d.label}: ${d.revenue.toFixed(2)} ${
+                                  settings?.currency || "₺"
+                                } (${d.count} Sipariş)`}
+                              />
+                            </div>
+                            <div
+                              className={`text-[10px] mt-1.5 font-bold truncate max-w-full ${
+                                isTodayBar
+                                  ? "text-orange-600 font-black"
+                                  : "text-slate-500"
+                              }`}
+                            >
+                              {isTodayBar ? "Bugün" : d.label}
+                            </div>
+                            <div className="text-[9px] text-slate-400 font-semibold">
+                              {d.count} sip.
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Sağ 5 Sütun: Sipariş Kanalı Görsel Oran Barı & Özeti */}
+                  <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-4">
+                    <div>
+                      <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                        🎯 Sipariş Türü Oran Dağılımı
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Seçili dönemdeki ({reportPeriodLabel}) kanal payları
+                      </p>
+                    </div>
+
+                    <div className="w-full h-5 rounded-full bg-slate-100 overflow-hidden flex p-0.5 gap-0.5">
+                      <div
+                        className="h-full bg-orange-500 rounded-l-full transition-all duration-500"
+                        style={{ width: `${Math.max(4, delPct)}%` }}
+                        title={`Paket Servis: %${delPct}`}
+                      />
+                      <div
+                        className="h-full bg-blue-500 transition-all duration-500"
+                        style={{ width: `${Math.max(4, pickPct)}%` }}
+                        title={`Gel-Al: %${pickPct}`}
+                      />
+                      <div
+                        className="h-full bg-purple-600 rounded-r-full transition-all duration-500"
+                        style={{ width: `${Math.max(4, dinePct)}%` }}
+                        title={`Masada QR: %${dinePct}`}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="p-2.5 rounded-xl bg-orange-50 border border-orange-200">
+                        <div className="text-[11px] font-bold text-orange-800">
+                          🛵 Paket
+                        </div>
+                        <div className="text-base font-black text-orange-600">
+                          %{delPct}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-semibold">
+                          {deliveryCount} Sipariş
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200">
+                        <div className="text-[11px] font-bold text-blue-800">
+                          🛍️ Gel-Al
+                        </div>
+                        <div className="text-base font-black text-blue-600">
+                          %{pickPct}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-semibold">
+                          {pickupCount} Sipariş
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-200">
+                        <div className="text-[11px] font-bold text-purple-800">
+                          🪑 Masa QR
+                        </div>
+                        <div className="text-base font-black text-purple-600">
+                          %{dinePct}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-semibold">
+                          {dineInCount} Sipariş
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Sol: Kanal & Ödeme Dağılımı */}
               <div className="lg:col-span-5 space-y-6">

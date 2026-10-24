@@ -2499,17 +2499,20 @@ export default function KitchenTabletPage() {
                       (nowMs - new Date(order.createdAt).getTime()) / 60000
                     )
                   );
-                  const isLate = elapsedMins >= 25;
+                  const isLate = elapsedMins >= 20;
+                  const isWarn = elapsedMins >= 10 && elapsedMins < 20;
 
                   return (
                     <div
                       key={order.id}
-                      className={`bg-slate-900 rounded-2xl p-5 space-y-4 border ${
+                      className={`bg-slate-900/95 backdrop-blur-md rounded-2xl p-5 space-y-4 border transition-all ${
                         order.isPriority
                           ? "border-2 border-rose-500 ring-2 ring-rose-500/40 shadow-lg shadow-rose-950/30"
                           : isLate
-                          ? "border-2 border-red-500 shadow-lg shadow-red-950/30"
-                          : "border-slate-800"
+                          ? "border-2 border-red-500 ring-2 ring-red-500/30 shadow-lg shadow-red-950/40 animate-pulse"
+                          : isWarn
+                          ? "border-2 border-amber-500/80 shadow-md shadow-amber-950/25"
+                          : "border-emerald-500/40 shadow-sm"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
@@ -2900,6 +2903,53 @@ export default function KitchenTabletPage() {
                 </span>
               </div>
             </div>
+
+            {/* 👨‍🍳 5. CANLI SALON DOLULUK ORANI & AÇIK ADİSYON ÖZET ÇUBUĞU */}
+            {(() => {
+              const allTbls = getRestaurantTables(settings);
+              let occCount = 0;
+              let totalOpenSalon = 0;
+              for (const t of allTbls) {
+                const ps = getPosStateForTable(t);
+                const tOrds = getEffectiveTableOrders(t);
+                const occ = posLiveTablesEnabled
+                  ? Boolean(ps?.isOccupied) || tOrds.length > 0
+                  : tOrds.length > 0;
+                if (occ) occCount++;
+                totalOpenSalon += tOrds.reduce((s, o) => s + o.totalAmount, 0);
+              }
+              const occPct =
+                allTbls.length > 0
+                  ? Math.round((occCount / allTbls.length) * 100)
+                  : 0;
+              return (
+                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    <span className="font-extrabold text-slate-300">
+                      📊 Salon Doluluk Durumu:
+                    </span>
+                    <span className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2.5 py-1 rounded-lg font-black">
+                      {occCount} / {allTbls.length} Masa Dolu (%{occPct})
+                    </span>
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-1 rounded-lg font-black">
+                      {allTbls.length - occCount} Masa Müsait
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 flex-1 max-w-md">
+                    <div className="flex-1 h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-amber-500 to-orange-500 transition-all duration-500"
+                        style={{ width: `${occPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-emerald-400 whitespace-nowrap">
+                      Açık Salon Toplamı: {totalOpenSalon.toFixed(2)}{" "}
+                      {settings?.currency || "₺"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {getRestaurantTables(settings).map((tableNum) => {
