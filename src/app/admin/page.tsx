@@ -11451,6 +11451,104 @@ TURSO_AUTH_TOKEN=${settings.cloudSyncConfig?.tursoAuthToken ? "*****************
               </div>
             </div>
 
+            {/* 🔍 Besin Değeri, Kalori, Hazırlık Süresi & Alerjen Bilgileri (Opsiyonel) */}
+            <div className="bg-sky-50/50 border border-sky-200 rounded-xl p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-1">
+                <div className="text-xs font-extrabold text-sky-950">
+                  🔍 Besin Değeri, Kalori, Hazırlık Süresi &amp; Alerjen Kartı (İsteğe Bağlı)
+                </div>
+                <span className="text-[10px] font-semibold text-sky-700">
+                  Boş bırakılan alanlar ürün adı ve kategorisinden otomatik tahmin edilir
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    ⏱️ Hazırlık Süresi (Örn: 15-20 dk)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Otomatik (Örn: 15-20 dk)"
+                    value={editingItem.prepTimeLabel ?? ""}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        prepTimeLabel:
+                          e.target.value.trim() === ""
+                            ? undefined
+                            : e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 bg-white rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    🔥 Porsiyon Kalorisi (kcal)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Otomatik (Örn: 480)"
+                    value={editingItem.calories ?? ""}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        calories:
+                          e.target.value === ""
+                            ? undefined
+                            : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 bg-white rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] font-bold text-slate-700">
+                  🛡️ Alerjen &amp; İçerik Uyarıları (Seçilmezse Otomatik Algılanır):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "🌾 Gluten (Buğday)",
+                    "🥛 Süt & Süt Ürünü",
+                    "🥜 Kuruyemiş (Antep Fıstığı/Ceviz)",
+                    "🥚 Yumurta",
+                    "🌶️ Acı / Baharat",
+                    "🌱 Susam / Tahin",
+                    "✅ Alerjen İçermez",
+                  ].map((alg) => {
+                    const currentAllergens = editingItem.allergens || [];
+                    const isAlgSelected = currentAllergens.includes(alg);
+                    return (
+                      <button
+                        key={alg}
+                        type="button"
+                        onClick={() => {
+                          const next = isAlgSelected
+                            ? currentAllergens.filter((x) => x !== alg)
+                            : [...currentAllergens, alg];
+                          setEditingItem({
+                            ...editingItem,
+                            allergens: next.length > 0 ? next : undefined,
+                          });
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                          isAlgSelected
+                            ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:border-sky-300"
+                        }`}
+                      >
+                        {alg}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
             {/* Popüler & Stokta Durumu */}
             <div className="flex flex-wrap items-center gap-4 pt-1">
               <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">

@@ -2066,7 +2066,22 @@ function CustomerMenuContent() {
         ? "5-8 dk"
         : "15-20 dk";
 
-    return { allergens, estKcal, estPrepMins };
+    const finalAllergens =
+      item.allergens && item.allergens.length > 0 ? item.allergens : allergens;
+    const finalKcal =
+      typeof item.calories === "number" && item.calories > 0
+        ? item.calories
+        : estKcal;
+    const finalPrepMins =
+      item.prepTimeLabel && item.prepTimeLabel.trim()
+        ? item.prepTimeLabel.trim()
+        : estPrepMins;
+
+    return {
+      allergens: finalAllergens,
+      estKcal: finalKcal,
+      estPrepMins: finalPrepMins,
+    };
   };
 
   const openQuickViewDetail = (item: MenuItem, e?: React.MouseEvent) => {

@@ -46,6 +46,12 @@ export interface MenuItem {
   badges?: string[];
   /** Günlük porsiyon / kritik stok sınırı (null veya undefined = Sınırsız) */
   dailyStock?: number | null;
+  /** Ürün özel hazırlık süresi metni (örn: "15-20 dk", boş bırakılırsa otomatik hesaplanır) */
+  prepTimeLabel?: string;
+  /** Ürün porsiyon kalorisi (kcal, boş bırakılırsa otomatik hesaplanır) */
+  calories?: number;
+  /** Ürün alerjen etiketleri (boş bırakılırsa ürün adı/açıklamasından otomatik algılanır) */
+  allergens?: string[];
   modifierGroups: ModifierGroup[];
 }
 
