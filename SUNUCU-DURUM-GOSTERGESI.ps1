@@ -1,4 +1,4 @@
-﻿Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
@@ -322,16 +322,22 @@ $contextMenu.Items.Add("-") | Out-Null
 $menuExit = $contextMenu.Items.Add("Göstergeden Çık")
 $menuExit.Add_Click({
     $notifyIcon.Visible = $false
+    $timer.Stop()
     $window.Close()
+    if ([System.Windows.Application]::Current) {
+        [System.Windows.Application]::Current.Shutdown()
+    }
 })
 
 $notifyIcon.ContextMenuStrip = $contextMenu
 $notifyIcon.Add_MouseClick({
     if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
         $window.Show()
+        $window.WindowState = [System.Windows.WindowState]::Normal
         $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
         [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
-        $window.Activate()
+        [Win32Show]::SetForegroundWindow($helper.Handle) | Out-Null
+        $window.Activate() | Out-Null
     }
 })
 
@@ -372,7 +378,19 @@ $timer.Start()
 $window.Add_Closed({
     $notifyIcon.Visible = $false
     $timer.Stop()
+    if ([System.Windows.Application]::Current) {
+        [System.Windows.Application]::Current.Shutdown()
+    }
 })
 
 Update-ServerStatusUI
-$window.ShowDialog() | Out-Null
+
+# ShowDialog() yerine OnExplicitShutdown modunda Application.Run() kullanilir;
+# boylece $window.Hide() cagrildiginda arka plan sureci ve saatin yanindaki yesil simge kapanmaz!
+$app = [System.Windows.Application]::Current
+if (-not $app) {
+    $app = New-Object System.Windows.Application
+}
+$app.ShutdownMode = [System.Windows.ShutdownMode]::OnExplicitShutdown
+$window.Show()
+$app.Run() | Out-Null
