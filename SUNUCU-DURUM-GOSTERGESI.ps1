@@ -134,16 +134,16 @@ $dummyWin.Close()
                 </Ellipse>
 
                 <TextBlock x:Name="LblTitle" Grid.Column="1"
-                           Text="SUNUCU KONTROL EDİLİYOR..."
+                           Text="SUNUCU KONTROL ED&#x0130;L&#x0130;YOR..."
                            FontFamily="Segoe UI" FontSize="11.5" FontWeight="Bold"
                            Foreground="#0F172A" VerticalAlignment="Center"/>
 
-                <Button x:Name="BtnHide" Grid.Column="2" Content="—"
+                <Button x:Name="BtnHide" Grid.Column="2" Content="&#x2014;"
                         Width="22" Height="18"
                         FontFamily="Segoe UI" FontSize="11" FontWeight="Bold"
                         Foreground="#1E293B" Background="#55FFFFFF"
                         BorderBrush="#99FFFFFF" BorderThickness="1"
-                        Cursor="Hand" ToolTip="Saatin yanına (Sistem Tepsisine) küçült">
+                        Cursor="Hand" ToolTip="Saatin yan&#x0131;na (Sistem Tepsisine) k&#x00FC;&#x00E7;&#x00FC;lt">
                     <Button.Resources>
                         <Style TargetType="Border">
                             <Setter Property="CornerRadius" Value="5"/>
@@ -160,7 +160,7 @@ $dummyWin.Close()
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <Button x:Name="BtnAdmin" Grid.Column="0" Content="Yönetim"
+                <Button x:Name="BtnAdmin" Grid.Column="0" Content="Y&#x00F6;netim"
                         Height="24" Margin="0,0,5,0"
                         FontFamily="Segoe UI" FontSize="11" FontWeight="SemiBold"
                         Foreground="#0F172A" Background="#75FFFFFF"
@@ -252,9 +252,18 @@ $window.Add_MouseLeftButtonDown({
     $window.DragMove()
 })
 
+function TrText([string]$s) {
+    return [System.Text.RegularExpressions.Regex]::Unescape($s)
+}
+
 $btnHide.Add_Click({
     $window.Hide()
-    $notifyIcon.ShowBalloonTip(2000, "Restoran Sunucu Göstergesi", "Durum göstergesi sağ alt saat yanına küçültüldü. Tekrar açmak için simgeye tıklayın.", [System.Windows.Forms.ToolTipIcon]::Info)
+    $notifyIcon.ShowBalloonTip(
+        2000,
+        (TrText "Restoran Sunucu G\u00F6stergesi"),
+        (TrText "Durum g\u00F6stergesi sa\u011F alt saat yan\u0131na k\u00FC\u00E7\u00FClt\u00FCld\u00FC. Tekrar a\u00E7mak i\u00E7in simgeye t\u0131klay\u0131n."),
+        [System.Windows.Forms.ToolTipIcon]::Info
+    )
 })
 
 $btnAdmin.Add_Click({ Start-Process "http://localhost:5439/admin" })
@@ -264,11 +273,11 @@ $script:isServerOnline = $false
 
 $btnToggle.Add_Click({
     if ($script:isServerOnline) {
-        $lblTitle.Text = "SUNUCU DURDURULUYOR..."
+        $lblTitle.Text = (TrText "SUNUCU DURDURULUYOR...")
         $lblTitle.Foreground = $brushConverter.ConvertFromString("#B45309")
         Stop-RestaurantServer
     } else {
-        $lblTitle.Text = "SUNUCU BAŞLATILIYOR..."
+        $lblTitle.Text = (TrText "SUNUCU BA\u015ELATILIYOR...")
         $lblTitle.Foreground = $brushConverter.ConvertFromString("#B45309")
         Start-RestaurantServer
     }
@@ -277,15 +286,15 @@ $btnToggle.Add_Click({
 # Sag alt saat yani (System Tray) simgesi
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Icon = $iconGreen
-$notifyIcon.Text = "Restoran POS Sunucusu Kontrol Ediliyor..."
+$notifyIcon.Text = (TrText "Restoran POS Sunucusu Kontrol Ediliyor...")
 $notifyIcon.Visible = $true
 
 $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
-$menuStatus = $contextMenu.Items.Add("Durum: Kontrol Ediliyor...")
+$menuStatus = $contextMenu.Items.Add((TrText "Durum: Kontrol Ediliyor..."))
 $menuStatus.Enabled = $false
 $contextMenu.Items.Add("-") | Out-Null
 
-$menuShowWidget = $contextMenu.Items.Add("Masaüstü Durum Kutucuğunu Göster / Gizle")
+$menuShowWidget = $contextMenu.Items.Add((TrText "Masa\u00FCst\u00FC Durum Kutucu\u011Funu G\u00F6ster / Gizle"))
 $menuShowWidget.Add_Click({
     if ($window.IsVisible) {
         $window.Hide()
@@ -297,29 +306,29 @@ $menuShowWidget.Add_Click({
     }
 })
 
-$menuOpenAdmin = $contextMenu.Items.Add("Yönetici (Admin) Panelini Aç")
+$menuOpenAdmin = $contextMenu.Items.Add((TrText "Y\u00F6netici (Admin) Panelini A\u00E7"))
 $menuOpenAdmin.Add_Click({ Start-Process "http://localhost:5439/admin" })
 
-$menuOpenKitchen = $contextMenu.Items.Add("Mutfak & Kasa POS Ekranını Aç")
+$menuOpenKitchen = $contextMenu.Items.Add((TrText "Mutfak && Kasa POS Ekran\u0131n\u0131 A\u00E7"))
 $menuOpenKitchen.Add_Click({ Start-Process "http://localhost:5439/kitchen" })
 
 $contextMenu.Items.Add("-") | Out-Null
 
-$menuStart = $contextMenu.Items.Add("Sunucuyu Başlat (Gizli Arka Plan)")
+$menuStart = $contextMenu.Items.Add((TrText "Sunucuyu Ba\u015Flat (Gizli Arka Plan)"))
 $menuStart.Add_Click({ Start-RestaurantServer })
 
-$menuRestart = $contextMenu.Items.Add("Sunucuyu Yeniden Başlat")
+$menuRestart = $contextMenu.Items.Add((TrText "Sunucuyu Yeniden Ba\u015Flat"))
 $menuRestart.Add_Click({
     Stop-RestaurantServer
     Start-Sleep -Seconds 1
     Start-RestaurantServer
 })
 
-$menuStop = $contextMenu.Items.Add("Sunucuyu Durdur")
+$menuStop = $contextMenu.Items.Add((TrText "Sunucuyu Durdur"))
 $menuStop.Add_Click({ Stop-RestaurantServer })
 
 $contextMenu.Items.Add("-") | Out-Null
-$menuExit = $contextMenu.Items.Add("Göstergeden Çık")
+$menuExit = $contextMenu.Items.Add((TrText "G\u00F6stergeden \u00C7\u0131k"))
 $menuExit.Add_Click({
     $notifyIcon.Visible = $false
     $timer.Stop()
@@ -350,19 +359,19 @@ function Update-ServerStatusUI {
         $statusDot.Fill = $brushConverter.ConvertFromString("#10B981")
         $dotGlow.Color  = [System.Windows.Media.Color]::FromRgb(16, 185, 129)
         $lblTitle.Foreground = $brushConverter.ConvertFromString("#064E3B")
-        $waText = if ($waOpen) { "WA: Açık" } else { "Bulut WA" }
-        $lblTitle.Text = "SUNUCU AÇIK (5439 • $waText)"
+        $waText = if ($waOpen) { (TrText "WA: A\u00E7\u0131k") } else { "Bulut WA" }
+        $lblTitle.Text = (TrText "SUNUCU A\u00C7IK (5439 \u2022 $waText)")
         $btnToggle.Content = "Durdur"
         $btnToggle.Background = $brushConverter.ConvertFromString("#BFDC2626")
         $notifyIcon.Icon = $iconGreen
-        $notifyIcon.Text = "Restoran POS Sunucusu: AÇIK (Port 5439)"
-        $menuStatus.Text = "Sunucu AÇIK (Port 5439 Aktif)"
+        $notifyIcon.Text = (TrText "Restoran POS Sunucusu: A\u00C7IK (Port 5439)")
+        $menuStatus.Text = (TrText "Sunucu A\u00C7IK (Port 5439 Aktif)")
     } else {
         $statusDot.Fill = $brushConverter.ConvertFromString("#EF4444")
         $dotGlow.Color  = [System.Windows.Media.Color]::FromRgb(239, 68, 68)
         $lblTitle.Foreground = $brushConverter.ConvertFromString("#7F1D1D")
         $lblTitle.Text = "SUNUCU KAPALI (Port 5439)"
-        $btnToggle.Content = "Başlat"
+        $btnToggle.Content = (TrText "Ba\u015Flat")
         $btnToggle.Background = $brushConverter.ConvertFromString("#BF059669")
         $notifyIcon.Icon = $iconRed
         $notifyIcon.Text = "Restoran POS Sunucusu: KAPALI"
