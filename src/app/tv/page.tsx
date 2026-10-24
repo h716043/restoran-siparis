@@ -265,6 +265,27 @@ export default function TvOrderQueuePage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* 📱 7. ÖNERİ: SIRADA BEKLEMEDEN QR OKUT & SİPARİŞ VER KÖŞE KARTI */}
+          <div className="hidden xl:flex items-center gap-2.5 bg-slate-950 border border-orange-500/40 px-3 py-1.5 rounded-2xl shadow">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(
+                typeof window !== "undefined"
+                  ? window.location.origin
+                  : "https://restoran-siparis.local"
+              )}`}
+              alt="Online QR Menü"
+              className="w-10 h-10 rounded-lg bg-white p-0.5"
+            />
+            <div className="leading-tight">
+              <div className="text-[11px] font-black text-orange-400 uppercase">
+                📱 QR Okut • Sıra Bekleme!
+              </div>
+              <div className="text-[10px] font-semibold text-slate-300">
+                Telefonunuzdan anında sipariş verin
+              </div>
+            </div>
+          </div>
+
           <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl font-mono text-lg font-black text-amber-400">
             {currentTime}
           </div>

@@ -2097,6 +2097,42 @@ export default function KitchenTabletPage() {
               </div>
             </div>
 
+            {/* 🔥 4. ÖNERİ: OCAK / IZGARA TOPLU ÜRETİM ÖZETİ BANDI */}
+            {(() => {
+              const batchMap: Record<string, number> = {};
+              const activeKitchenOrders = [...pendingOrders, ...preparingOrders];
+              activeKitchenOrders.forEach((ord) => {
+                ord.items.forEach((it) => {
+                  if (!it.prepared) {
+                    batchMap[it.name] = (batchMap[it.name] || 0) + it.quantity;
+                  }
+                });
+              });
+              const batchList = Object.entries(batchMap).sort(
+                (a, b) => b[1] - a[1]
+              );
+              if (batchList.length === 0) return null;
+              return (
+                <div className="bg-gradient-to-r from-slate-900 via-orange-950/40 to-slate-900 border border-orange-500/40 rounded-2xl p-3 flex flex-wrap items-center gap-2 shadow-md">
+                  <span className="text-xs font-black uppercase tracking-wider text-orange-400 flex items-center gap-1.5 mr-1">
+                    <span className="animate-pulse">🔥</span>
+                    Şu An Ocakta / Tezgahta Bekleyen Toplamlar:
+                  </span>
+                  {batchList.slice(0, 12).map(([itemName, totalQty]) => (
+                    <span
+                      key={itemName}
+                      className="inline-flex items-center gap-1.5 bg-slate-950 border border-orange-500/40 px-2.5 py-1 rounded-xl text-xs font-extrabold text-white shadow-2xs"
+                    >
+                      <strong className="text-orange-400 font-black">
+                        {totalQty}x
+                      </strong>
+                      <span>{itemName}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Sol Sütun: Onay Bekleyen Yeni Siparişler (GloriaFood Gelen Kutusu) */}
               <div className="lg:col-span-6 space-y-4">

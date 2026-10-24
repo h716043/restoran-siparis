@@ -1648,6 +1648,45 @@ export default function WaiterTerminalPage() {
                   </button>
                 </div>
               )}
+
+              {/* 🍵 5. ÖNERİ: TEK TUŞLA HIZLI MASA SERVİSİ & İKRAM GÖNDERME BARI */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-stone-800">
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 whitespace-nowrap mr-1">
+                  ⚡ Hızlı İkram / Servis:
+                </span>
+                {[
+                  { id: "srv-tea", label: "🍵 Çay İkramı", name: "İkram Çay (Servis)" },
+                  { id: "srv-water", label: "💧 Su & Buz", name: "Su & Buz İsteği" },
+                  { id: "srv-fork", label: "🍴 Ekstra Çatal/Servis", name: "Ekstra Servis Takımı" },
+                  { id: "srv-lemon", label: "🍋 Limon & Yeşillik", name: "İlave Limon & Yeşillik" },
+                  { id: "srv-napkin", label: "🧻 Islak Mendil/Peçete", name: "Islak Mendil & Peçete" },
+                ].map((srv) => (
+                  <button
+                    key={srv.id}
+                    type="button"
+                    onClick={() => {
+                      setCart((prev) => [
+                        ...prev,
+                        {
+                          id: `waiter-srv-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                          menuItemId: srv.id,
+                          name: srv.name,
+                          quantity: 1,
+                          basePrice: 0,
+                          unitPrice: 0,
+                          totalPrice: 0,
+                          selectedModifiers: [],
+                          itemNote: "Garson Hızlı Servis / İkram",
+                        },
+                      ]);
+                      showToast(`✅ "${srv.name}" Masa ${selectedTable} sepetine eklendi`);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-stone-950 hover:bg-amber-500 hover:text-stone-950 text-stone-200 border border-stone-700 text-[11px] font-extrabold whitespace-nowrap transition cursor-pointer"
+                  >
+                    {srv.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Split Layout: SOL TARAF KATEGORİLER | SAĞ TARAF ÜRÜNLER */}

@@ -1988,12 +1988,104 @@ function CustomerMenuContent() {
     }
   };
 
-  // 🌙 8. Hızlı Etiket / Diyet / İndirim Filtresi State & Canlı Geri Sayım Sayacı
+  // 🌙 8. Hızlı Etiket / Diyet / İndirim / Favori Filtresi State & Canlı Geri Sayım Sayacı
   const [quickTagFilter, setQuickTagFilter] = useState<
-    "all" | "popular" | "discounted" | "spicy" | "chef"
+    "all" | "favorites" | "popular" | "discounted" | "spicy" | "chef"
   >("all");
   const [showOrderConfetti, setShowOrderConfetti] = useState(false);
   const [liveClockMs, setLiveClockMs] = useState<number>(() => Date.now());
+  const [splitSelectedCartIds, setSplitSelectedCartIds] = useState<string[]>([]);
+
+  const getItemNutritionAndAllergenInfo = (item: MenuItem) => {
+    const text = `${item.name} ${item.description}`.toLowerCase();
+    const allergens: string[] = [];
+    if (
+      text.includes("lahmacun") ||
+      text.includes("pide") ||
+      text.includes("dürüm") ||
+      text.includes("lava") ||
+      text.includes("ekmek") ||
+      text.includes("künefe") ||
+      text.includes("baklava") ||
+      text.includes("kadayıf") ||
+      text.includes("katmer")
+    ) {
+      allergens.push("🌾 Gluten (Buğday)");
+    }
+    if (
+      text.includes("kaşar") ||
+      text.includes("peynir") ||
+      text.includes("ayran") ||
+      text.includes("yoğurt") ||
+      text.includes("sütlaç") ||
+      text.includes("künefe") ||
+      text.includes("tereyağ") ||
+      text.includes("kaymak")
+    ) {
+      allergens.push("🥛 Süt & Süt Ürünü");
+    }
+    if (
+      text.includes("fıstık") ||
+      text.includes("ceviz") ||
+      text.includes("fındık") ||
+      text.includes("badem") ||
+      text.includes("içli köfte")
+    ) {
+      allergens.push("🥜 Kuruyemiş (Antep Fıstığı/Ceviz)");
+    }
+    if (
+      item.badges?.includes("spicy") ||
+      text.includes("acılı") ||
+      text.includes("adana") ||
+      text.includes("isot") ||
+      text.includes("pul biber")
+    ) {
+      allergens.push("🌶️ Acı / Baharat");
+    }
+    if (allergens.length === 0) {
+      allergens.push("✅ Standart Taze Mutfak Ürünü");
+    }
+
+    const estKcal =
+      item.categoryId === "cat-6"
+        ? 110
+        : item.categoryId === "cat-4"
+        ? 185
+        : item.categoryId === "cat-5"
+        ? 440
+        : text.includes("lahmacun")
+        ? 320
+        : text.includes("pide")
+        ? 540
+        : 580;
+
+    const estPrepMins =
+      item.categoryId === "cat-6"
+        ? "2-4 dk"
+        : item.categoryId === "cat-4"
+        ? "5-8 dk"
+        : "15-20 dk";
+
+    return { allergens, estKcal, estPrepMins };
+  };
+
+  const openQuickViewDetail = (item: MenuItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!item.available) return;
+    setSelectedItem(item);
+    setItemQuantity(1);
+    setItemNote("");
+    const defaults: Record<string, string[]> = {};
+    (item.modifierGroups || []).forEach((g) => {
+      if (g.required && g.options.length > 0) {
+        defaults[g.id] = [g.options[0].id];
+      } else {
+        defaults[g.id] = [];
+      }
+    });
+    setChosenModifiers(defaults);
+    setChosenSubOptions({});
+  };
 
   useEffect(() => {
     const t = setInterval(() => setLiveClockMs(Date.now()), 1000);
@@ -2108,6 +2200,8 @@ function CustomerMenuContent() {
       const matchesQuickTag =
         quickTagFilter === "all"
           ? true
+          : quickTagFilter === "favorites"
+          ? favoriteIds.includes(item.id)
           : quickTagFilter === "popular"
           ? Boolean(item.popular)
           : quickTagFilter === "discounted"
@@ -2871,10 +2965,16 @@ function CustomerMenuContent() {
             </div>
           </div>
 
-          {/* 🏷️ AKILLI HIZLI ETİKET FİLTRE ÇUBUĞU (Çok Satanlar / İndirimdekiler / Acılı / Şefin Spesiyali) */}
+          {/* 🏷️ AKILLI HIZLI ETİKET FİLTRE ÇUBUĞU (Favorilerim / Çok Satanlar / İndirimdekiler / Acılı / Şefin Spesiyali) */}
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 mt-2 border-t border-slate-100">
             {[
               { id: "all", label: "🍽️ Tüm Lezzetler" },
+              {
+                id: "favorites",
+                label: `❤️ Favorilerim${
+                  favoriteIds.length > 0 ? ` (${favoriteIds.length})` : ""
+                }`,
+              },
               { id: "popular", label: "🔥 Çok Satanlar" },
               { id: "discounted", label: "🏷️ İndirimdekiler" },
               { id: "chef", label: "👨‍🍳 Şefin Spesiyali" },
@@ -2889,6 +2989,7 @@ function CustomerMenuContent() {
                     setQuickTagFilter(
                       chip.id as
                         | "all"
+                        | "favorites"
                         | "popular"
                         | "discounted"
                         | "spicy"
@@ -4332,6 +4433,14 @@ function CustomerMenuContent() {
                                     <span>
                                       {isFav ? "❤️ Favorim" : "🤍 Favori"}
                                     </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => openQuickViewDetail(item, e)}
+                                    title="Besin değeri, kalori ve alerjen detaylarını incele"
+                                    className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md border bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 transition cursor-pointer"
+                                  >
+                                    <span>🔍 Besin &amp; Detay</span>
                                   </button>
                                   {hasDiscount && (
                                     <span className="inline-flex items-center text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-md shadow-2xs">
@@ -6326,6 +6435,54 @@ function CustomerMenuContent() {
                 <p className="text-sm text-slate-600 mt-1.5">
                   {selectedItem.description}
                 </p>
+
+                {/* 🔍 BESİN DEĞERİ, KALORİ, HAZIRLIK SÜRESİ & ALERJEN BİLGİ KARTI */}
+                {(() => {
+                  const info = getItemNutritionAndAllergenInfo(selectedItem);
+                  return (
+                    <div className="mt-3 bg-slate-50 border border-slate-200/90 rounded-2xl p-3 space-y-2">
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-white border border-slate-200/80 rounded-xl p-2">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase">
+                            Hazırlık Süresi
+                          </div>
+                          <div className="text-xs font-black text-slate-800 mt-0.5">
+                            ⏱️ ~{info.estPrepMins}
+                          </div>
+                        </div>
+                        <div className="bg-white border border-slate-200/80 rounded-xl p-2">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase">
+                            Tahmini Enerji
+                          </div>
+                          <div className="text-xs font-black text-orange-600 mt-0.5">
+                            🔥 ~{info.estKcal} kcal
+                          </div>
+                        </div>
+                        <div className="bg-white border border-slate-200/80 rounded-xl p-2">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase">
+                            Üretim Kalitesi
+                          </div>
+                          <div className="text-xs font-black text-emerald-700 mt-0.5">
+                            ✨ Günlük Taze
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        <span className="text-[10px] font-extrabold text-slate-500">
+                          🛡️ İçerik &amp; Alerjen Bilgisi:
+                        </span>
+                        {info.allergens.map((alg) => (
+                          <span
+                            key={alg}
+                            className="text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-full"
+                          >
+                            {alg}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {(selectedItem.modifierGroups || []).map((group) => {
@@ -7466,39 +7623,93 @@ function CustomerMenuContent() {
               </div>
             </div>
 
-            {orderType === "dine_in" && (
-              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2 flex flex-col gap-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-bold text-slate-700">
-                    👥 Hesabı Böl (Alman Usulü):
-                  </span>
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5, 6].map((cnt) => (
-                      <button
-                        key={cnt}
-                        type="button"
-                        onClick={() => setSplitPeopleCount(cnt)}
-                        className={`w-6 h-6 rounded-md text-[10px] font-extrabold border transition cursor-pointer ${
-                          splitPeopleCount === cnt
-                            ? "bg-indigo-600 text-white border-indigo-600"
-                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                        }`}
-                      >
-                        {cnt === 1 ? "Tek" : `${cnt}K`}
-                      </button>
-                    ))}
-                  </div>
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-700">
+                  👥 Hesabı Böl (Alman Usulü):
+                </span>
+                <div className="flex items-center gap-1">
+                  {[1, 2, 3, 4, 5, 6].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setSplitPeopleCount(cnt)}
+                      className={`w-6 h-6 rounded-md text-[10px] font-extrabold border transition cursor-pointer ${
+                        splitPeopleCount === cnt
+                          ? "bg-indigo-600 text-white border-indigo-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {cnt === 1 ? "Tek" : `${cnt}K`}
+                    </button>
+                  ))}
                 </div>
-                {splitPeopleCount > 1 && (
-                  <div className="flex items-center justify-between text-xs font-extrabold text-indigo-800 bg-indigo-50/80 border border-indigo-200/70 rounded-lg px-2.5 py-1">
-                    <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
-                    <span>
-                      {(totalAmount / splitPeopleCount).toFixed(2)} {settings?.currency}
-                    </span>
-                  </div>
-                )}
               </div>
-            )}
+              {splitPeopleCount > 1 && (
+                <div className="flex items-center justify-between text-xs font-extrabold text-indigo-800 bg-indigo-50/80 border border-indigo-200/70 rounded-lg px-2.5 py-1">
+                  <span>👥 Eşit Kişi Başı ({splitPeopleCount} Kişi):</span>
+                  <span>
+                    {(totalAmount / splitPeopleCount).toFixed(2)} {settings?.currency}
+                  </span>
+                </div>
+              )}
+
+              {/* 🧮 Kişi Bazlı Seçili Ürün Hesaplayıcı ("Benim Yediklerim Ne Kadar?") */}
+              {cart.length > 1 && (
+                <div className="pt-1.5 border-t border-slate-200/70 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-600">
+                    <span>🧮 Kendi Yediklerini Seç &amp; Hesapla:</span>
+                    {splitSelectedCartIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSplitSelectedCartIds([])}
+                        className="text-indigo-600 hover:underline font-extrabold cursor-pointer"
+                      >
+                        Sıfırla
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {cart.map((cItem) => {
+                      const isSel = splitSelectedCartIds.includes(cItem.id);
+                      return (
+                        <button
+                          key={`split-${cItem.id}`}
+                          type="button"
+                          onClick={() =>
+                            setSplitSelectedCartIds((prev) =>
+                              prev.includes(cItem.id)
+                                ? prev.filter((id) => id !== cItem.id)
+                                : [...prev, cItem.id]
+                            )
+                          }
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            isSel
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs"
+                              : "bg-white text-slate-700 border-slate-200 hover:border-indigo-300"
+                          }`}
+                        >
+                          {cItem.quantity}x {cItem.name} ({cItem.totalPrice.toFixed(0)}
+                          {settings?.currency})
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {splitSelectedCartIds.length > 0 && (
+                    <div className="flex items-center justify-between text-[11px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1">
+                      <span>✓ Seçilen Ürünlerin Payı:</span>
+                      <span>
+                        {cart
+                          .filter((c) => splitSelectedCartIds.includes(c.id))
+                          .reduce((s, c) => s + c.totalPrice, 0)
+                          .toFixed(2)}{" "}
+                        {settings?.currency}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Tutar Özeti */}

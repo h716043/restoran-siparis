@@ -1103,6 +1103,32 @@ export default function CourierPage() {
                       </div>
                     </div>
 
+                    {/* 💵 6. ÖNERİ: KAPIDA NAKİT PARA ÜSTÜ HIZLI HESAPLAYICI */}
+                    {order.paymentMethod === "cash" && (
+                      <div className="bg-emerald-950/40 border border-emerald-700/50 rounded-xl px-3 py-2 space-y-1">
+                        <div className="text-[10px] font-extrabold text-emerald-300 uppercase tracking-wider">
+                          💵 Kapıda Nakit Para Üstü Rehberi (Tutar:{" "}
+                          {order.totalAmount.toFixed(0)} ₺)
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[200, 300, 400, 500, 1000]
+                            .filter((note) => note > order.totalAmount)
+                            .slice(0, 3)
+                            .map((note) => (
+                              <span
+                                key={note}
+                                className="inline-flex items-center gap-1 bg-slate-950 border border-emerald-600/50 px-2 py-0.5 rounded-lg text-[11px] font-bold text-slate-200"
+                              >
+                                <span>{note}₺ verirse →</span>
+                                <strong className="text-emerald-400 font-black">
+                                  {(note - order.totalAmount).toFixed(0)} ₺ Üstü
+                                </strong>
+                              </span>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Açık Adres & Hızlı Teslimat Tercih Rozetleri Kutusu */}
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2">
                       <div className="flex items-start justify-between gap-2">

@@ -2820,27 +2820,42 @@ export default function AdminDashboardPage() {
                   <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
                     {hourlyStats.map((h) => {
                       const ratio = h.count / maxHourlyCount;
+                      const isPeakHour = h.count > 0 && h.count === maxHourlyCount;
                       const bgClass =
                         h.count === 0
                           ? "bg-slate-50 border-slate-200 text-slate-400"
                           : ratio >= 0.75
-                          ? "bg-orange-600 border-orange-700 text-white"
+                          ? "bg-orange-600 border-orange-700 text-white shadow-sm"
                           : ratio >= 0.4
                           ? "bg-orange-100 border-orange-300 text-orange-900"
                           : "bg-amber-50 border-amber-200 text-amber-900";
                       return (
                         <div
                           key={h.hourLabel}
-                          className={`p-2.5 rounded-xl border text-center space-y-0.5 ${bgClass}`}
+                          className={`p-2.5 rounded-xl border text-center space-y-1 relative overflow-hidden ${bgClass}`}
                         >
+                          {isPeakHour && (
+                            <span className="block text-[9px] font-black uppercase bg-white/25 rounded px-1 py-0.2">
+                              🔥 Zirve
+                            </span>
+                          )}
                           <div className="text-[11px] font-bold">
                             {h.hourLabel}
+                          </div>
+                          {/* Görsel Doluluk Çubuğu */}
+                          <div className="w-full h-1.5 bg-black/10 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                ratio >= 0.75 ? "bg-white" : "bg-orange-500"
+                              }`}
+                              style={{ width: `${Math.round(ratio * 100)}%` }}
+                            />
                           </div>
                           <div className="text-sm font-black">
                             {h.count} Sipariş
                           </div>
                           <div className="text-[10px] opacity-85 font-semibold">
-                            {h.revenue.toFixed(2)} {settings?.currency}
+                            {h.revenue.toFixed(0)} {settings?.currency}
                           </div>
                         </div>
                       );
