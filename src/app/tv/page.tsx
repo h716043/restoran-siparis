@@ -229,71 +229,69 @@ export default function TvOrderQueuePage() {
           will-change: transform;
         }
       `}</style>
-      {/* Üst TV Başlık Çubuğu */}
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-600/30">
-            <Tv className="w-6 h-6 text-white" />
+      {/* Üst TV Başlık Çubuğu (Tek Satır Kompakt Görünüm) */}
+      <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3 whitespace-nowrap overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-600/30 shrink-0">
+            <Tv className="w-5 h-5 text-white" />
           </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-                {restaurantName}
-              </h1>
-              <div className="flex items-center gap-1.5">
-                {tvOrderTypes.includes("pickup") && (
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/40">
-                    🛍️ Gel-Al
-                  </span>
-                )}
-                {tvOrderTypes.includes("dine_in") && (
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                    🪑 Masa
-                  </span>
-                )}
-                {tvOrderTypes.includes("delivery") && (
-                  <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/40">
-                    🛵 Paket
-                  </span>
-                )}
-              </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="text-lg sm:text-xl font-black tracking-tight text-white truncate">
+              {restaurantName}
+            </h1>
+            <div className="flex items-center gap-1 shrink-0">
+              {tvOrderTypes.includes("pickup") && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                  🛍️ Gel-Al
+                </span>
+              )}
+              {tvOrderTypes.includes("dine_in") && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  🪑 Masa
+                </span>
+              )}
+              {tvOrderTypes.includes("delivery") && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/40">
+                  🛵 Paket
+                </span>
+              )}
             </div>
-            <p className="text-xs text-slate-400 font-semibold">
-              📺 Canlı Müşteri Sipariş & Sıra Çağrı Ekranı • {slogan}
-            </p>
+            <span className="hidden 2xl:inline text-xs text-slate-400 font-semibold truncate">
+              • {slogan}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 shrink-0">
           {/* 📱 7. ÖNERİ: SIRADA BEKLEMEDEN QR OKUT & SİPARİŞ VER KÖŞE KARTI */}
-          <div className="hidden xl:flex items-center gap-2.5 bg-slate-950 border border-orange-500/40 px-3 py-1.5 rounded-2xl shadow">
+          <div className="hidden lg:flex items-center gap-2 bg-slate-950 border border-orange-500/40 px-2.5 py-1 rounded-xl shadow">
             <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(
                 typeof window !== "undefined"
                   ? window.location.origin
                   : "https://restoran-siparis.local"
               )}`}
               alt="Online QR Menü"
-              className="w-10 h-10 rounded-lg bg-white p-0.5"
+              className="w-8 h-8 rounded bg-white p-0.5 shrink-0"
             />
             <div className="leading-tight">
-              <div className="text-[11px] font-black text-orange-400 uppercase">
+              <div className="text-[10px] font-black text-orange-400 uppercase">
                 📱 QR Okut • Sıra Bekleme!
               </div>
-              <div className="text-[10px] font-semibold text-slate-300">
-                Telefonunuzdan anında sipariş verin
+              <div className="text-[9px] font-semibold text-slate-300">
+                Telefondan anında sipariş
               </div>
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl font-mono text-lg font-black text-amber-400">
+          <div className="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl font-mono text-sm sm:text-base font-black text-amber-400">
             {currentTime}
           </div>
 
           <button
             type="button"
             onClick={() => setVoiceEnabled((v) => !v)}
-            className={`px-3.5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 border transition cursor-pointer ${
+            className={`px-3 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition cursor-pointer ${
               voiceEnabled
                 ? "bg-emerald-600/20 border-emerald-500/50 text-emerald-300"
                 : "bg-slate-800 border-slate-700 text-slate-400"
@@ -301,11 +299,11 @@ export default function TvOrderQueuePage() {
           >
             {voiceEnabled ? (
               <>
-                <Volume2 className="w-4 h-4" /> Sesli Anons Açık
+                <Volume2 className="w-3.5 h-3.5" /> Sesli Anons Açık
               </>
             ) : (
               <>
-                <VolumeX className="w-4 h-4" /> Sesli Anons Kapalı
+                <VolumeX className="w-3.5 h-3.5" /> Sesli Anons Kapalı
               </>
             )}
           </button>
@@ -313,27 +311,27 @@ export default function TvOrderQueuePage() {
           <button
             type="button"
             onClick={handleToggleFullscreen}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
             title="Tam Ekran Yap"
           >
-            <Maximize2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Tam Ekran</span>
+            <Maximize2 className="w-3.5 h-3.5" />
+            <span>Tam Ekran</span>
           </button>
 
           <Link
             href="/kitchen"
-            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1.5 transition"
+            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1.5 transition"
           >
-            <ChefHat className="w-4 h-4 text-orange-400" />
-            <span className="hidden sm:inline">Mutfak</span>
+            <ChefHat className="w-3.5 h-3.5 text-orange-400" />
+            <span>Mutfak</span>
           </Link>
 
           <Link
             href="/"
-            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1.5 transition"
+            className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1.5 transition"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Menü</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Menü</span>
           </Link>
         </div>
       </header>

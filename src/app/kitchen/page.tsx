@@ -174,6 +174,7 @@ export default function KitchenTabletPage() {
   >("all");
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [voiceTtsEnabled, setVoiceTtsEnabled] = useState(true);
+  const [showBatchSummaryOpen, setShowBatchSummaryOpen] = useState(false);
 
   const knownPendingIds = useRef<Set<string>>(new Set());
   const knownCallIds = useRef<Set<string>>(new Set());
@@ -2088,50 +2089,103 @@ export default function KitchenTabletPage() {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-2 text-[11px] font-bold text-slate-400">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-400">
+                {(() => {
+                  const activeKitchenOrders = [
+                    ...pendingOrders,
+                    ...preparingOrders,
+                  ];
+                  const totalUnpreparedCount = activeKitchenOrders.reduce(
+                    (sum, ord) =>
+                      sum +
+                      ord.items.reduce(
+                        (iSum, it) => iSum + (!it.prepared ? it.quantity : 0),
+                        0
+                      ),
+                    0
+                  );
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchSummaryOpen((v) => !v)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition flex items-center gap-1.5 cursor-pointer ${
+                        showBatchSummaryOpen
+                          ? "bg-orange-600 text-white border-orange-500 shadow"
+                          : "bg-slate-950 hover:bg-slate-800 text-orange-300 border-orange-500/40"
+                      }`}
+                    >
+                      <span>🔥</span>
+                      <span>
+                        Ocak / Tezgah Toplamları ({totalUnpreparedCount} Adet)
+                      </span>
+                      <span>{showBatchSummaryOpen ? "▲" : "▼"}</span>
+                    </button>
+                  );
+                })()}
                 <span className="text-emerald-400">🟢 0-15 dk Normal</span>
                 <span>•</span>
                 <span className="text-amber-300">🟡 15-20 dk Uyarı</span>
                 <span>•</span>
-                <span className="text-red-400">🔴 20+ dk SLA Gecikme Alarmı (En Üste Sabitlenir)</span>
+                <span className="text-red-400">🔴 20+ dk SLA Gecikme</span>
               </div>
             </div>
 
-            {/* 🔥 4. ÖNERİ: OCAK / IZGARA TOPLU ÜRETİM ÖZETİ BANDI */}
-            {(() => {
-              const batchMap: Record<string, number> = {};
-              const activeKitchenOrders = [...pendingOrders, ...preparingOrders];
-              activeKitchenOrders.forEach((ord) => {
-                ord.items.forEach((it) => {
-                  if (!it.prepared) {
-                    batchMap[it.name] = (batchMap[it.name] || 0) + it.quantity;
-                  }
+            {/* 🔥 4. ÖNERİ: BUTONA TIKLAYINCA AÇILAN/KAPANAN OCAK / TEZGAH TOPLU ÜRETİM ÖZETİ PANELİ */}
+            {showBatchSummaryOpen &&
+              (() => {
+                const batchMap: Record<string, number> = {};
+                const activeKitchenOrders = [
+                  ...pendingOrders,
+                  ...preparingOrders,
+                ];
+                activeKitchenOrders.forEach((ord) => {
+                  ord.items.forEach((it) => {
+                    if (!it.prepared) {
+                      batchMap[it.name] =
+                        (batchMap[it.name] || 0) + it.quantity;
+                    }
+                  });
                 });
-              });
-              const batchList = Object.entries(batchMap).sort(
-                (a, b) => b[1] - a[1]
-              );
-              if (batchList.length === 0) return null;
-              return (
-                <div className="bg-gradient-to-r from-slate-900 via-orange-950/40 to-slate-900 border border-orange-500/40 rounded-2xl p-3 flex flex-wrap items-center gap-2 shadow-md">
-                  <span className="text-xs font-black uppercase tracking-wider text-orange-400 flex items-center gap-1.5 mr-1">
-                    <span className="animate-pulse">🔥</span>
-                    Şu An Ocakta / Tezgahta Bekleyen Toplamlar:
-                  </span>
-                  {batchList.slice(0, 12).map(([itemName, totalQty]) => (
-                    <span
-                      key={itemName}
-                      className="inline-flex items-center gap-1.5 bg-slate-950 border border-orange-500/40 px-2.5 py-1 rounded-xl text-xs font-extrabold text-white shadow-2xs"
-                    >
-                      <strong className="text-orange-400 font-black">
-                        {totalQty}x
-                      </strong>
-                      <span>{itemName}</span>
-                    </span>
-                  ))}
-                </div>
-              );
-            })()}
+                const batchList = Object.entries(batchMap).sort(
+                  (a, b) => b[1] - a[1]
+                );
+                return (
+                  <div className="bg-gradient-to-r from-slate-900 via-orange-950/40 to-slate-900 border border-orange-500/50 rounded-2xl p-3.5 space-y-2.5 shadow-lg">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+                        <span className="animate-pulse">🔥</span>
+                        Şu An Ocakta / Tezgahta Bekleyen Toplamlar:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowBatchSummaryOpen(false)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 cursor-pointer"
+                      >
+                        ✕ Kapat
+                      </button>
+                    </div>
+                    {batchList.length === 0 ? (
+                      <p className="text-xs text-slate-400 font-semibold">
+                        Şu an ocakta veya tezgahta bekleyen açık ürün bulunmuyor.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {batchList.map(([itemName, totalQty]) => (
+                          <span
+                            key={itemName}
+                            className="inline-flex items-center gap-1.5 bg-slate-950 border border-orange-500/40 px-3 py-1.5 rounded-xl text-xs font-extrabold text-white shadow-2xs"
+                          >
+                            <strong className="text-orange-400 font-black">
+                              {totalQty}x
+                            </strong>
+                            <span>{itemName}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Sol Sütun: Onay Bekleyen Yeni Siparişler (GloriaFood Gelen Kutusu) */}
