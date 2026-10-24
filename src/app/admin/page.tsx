@@ -2296,64 +2296,82 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* Üst Özet Kartları */}
+            {/* Üst Özet Kartları (Gradyan Vurgulu Finansal Kokpit Kartları) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-                <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-500">
+              <div className="relative overflow-hidden bg-gradient-to-br from-white via-white to-slate-50 p-5 rounded-2xl border border-slate-200 border-t-4 border-t-indigo-500 shadow-xs space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-extrabold uppercase text-slate-600">
                   <span>Bugünkü Ciro</span>
-                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  <span className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-indigo-600" />
+                  </span>
                 </div>
-                <div className="text-2xl font-black text-slate-900">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
                   {todayRevenue.toFixed(2)} {settings?.currency || "₺"}
                 </div>
-                <p className="text-xs text-slate-500">
-                  Bugün {todayOrders.length} başarılı sipariş
-                </p>
+                <div className="flex items-center justify-between text-xs text-slate-500 pt-0.5">
+                  <span>Bugün {todayOrders.length} başarılı sipariş</span>
+                  <span className="text-[10px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">
+                    Canlı Kasa
+                  </span>
+                </div>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-orange-200 bg-orange-50/20 shadow-xs space-y-1">
-                <div className="flex items-center justify-between text-xs font-bold uppercase text-orange-700">
+              <div className="relative overflow-hidden bg-gradient-to-br from-white via-orange-50/20 to-amber-50/40 p-5 rounded-2xl border border-orange-200 border-t-4 border-t-orange-500 shadow-xs space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-extrabold uppercase text-orange-800">
                   <span>Seçili Dönem Brüt Ciro</span>
-                  <BarChart3 className="w-4 h-4 text-orange-600" />
+                  <span className="w-8 h-8 rounded-xl bg-orange-100/80 border border-orange-300 flex items-center justify-center">
+                    <BarChart3 className="w-4 h-4 text-orange-600" />
+                  </span>
                 </div>
-                <div className="text-2xl font-black text-slate-900">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
                   {totalRevenue.toFixed(2)} {settings?.currency || "₺"}
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600 font-medium">
                   {validOrders.length} başarılı • {rejectedPeriodOrders.length}{" "}
                   iptal ({reportPeriodLabel})
                 </p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-xs space-y-1">
-                <div className="flex items-center justify-between text-xs font-bold uppercase text-emerald-700">
+              <div className="relative overflow-hidden bg-gradient-to-br from-white via-emerald-50/25 to-teal-50/40 p-5 rounded-2xl border border-emerald-200 border-t-4 border-t-emerald-500 shadow-xs space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-extrabold uppercase text-emerald-800">
                   <span>Seçili Dönem GERÇEK NET KÂR</span>
-                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  <span className="w-8 h-8 rounded-xl bg-emerald-100/80 border border-emerald-300 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  </span>
                 </div>
-                <div className="text-2xl font-black text-emerald-700">
-                  {netProfit.toFixed(2)} {settings?.currency || "₺"}
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="text-2xl font-black text-emerald-700 tracking-tight">
+                    {netProfit.toFixed(2)} {settings?.currency || "₺"}
+                  </div>
+                  {totalRevenue > 0 && (
+                    <span className="text-[11px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-lg shadow-2xs">
+                      %{Math.round((netProfit / totalRevenue) * 100)} Marj
+                    </span>
+                  )}
                 </div>
                 <p className="text-[11px] text-slate-600 leading-snug">
                   Ürün Maliyeti: -{totalProductCost.toFixed(2)}{" "}
                   {settings?.currency || "₺"} • Giderler: -
                   {totalExpensesAmount.toFixed(2)} {settings?.currency || "₺"}
                 </p>
-                <p className="text-[11px] font-bold text-emerald-800">
-                  Kasadaki Net Nakit: {netCashInDrawer.toFixed(2)}{" "}
+                <p className="text-[11px] font-extrabold text-emerald-800">
+                  💵 Kasadaki Net Nakit: {netCashInDrawer.toFixed(2)}{" "}
                   {settings?.currency || "₺"}
                 </p>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
-                <div className="flex items-center justify-between text-xs font-bold uppercase text-slate-500">
+              <div className="relative overflow-hidden bg-gradient-to-br from-white via-purple-50/15 to-fuchsia-50/30 p-5 rounded-2xl border border-purple-200 border-t-4 border-t-purple-500 shadow-xs space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-extrabold uppercase text-purple-800">
                   <span>Ortalama Sepet & İndirim</span>
-                  <Tag className="w-4 h-4 text-purple-600" />
+                  <span className="w-8 h-8 rounded-xl bg-purple-100/80 border border-purple-300 flex items-center justify-center">
+                    <Tag className="w-4 h-4 text-purple-600" />
+                  </span>
                 </div>
-                <div className="text-2xl font-black text-slate-900">
+                <div className="text-2xl font-black text-slate-900 tracking-tight">
                   {avgOrderValue.toFixed(2)} {settings?.currency || "₺"}
                 </div>
-                <p className="text-xs text-slate-500">
-                  Toplam İndirim: {totalDiscountGiven.toFixed(2)}{" "}
+                <p className="text-xs text-slate-600 font-medium">
+                  🏷️ Toplam İndirim: {totalDiscountGiven.toFixed(2)}{" "}
                   {settings?.currency || "₺"}
                 </p>
               </div>

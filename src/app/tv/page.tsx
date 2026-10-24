@@ -406,23 +406,36 @@ export default function TvOrderQueuePage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 content-start">
-              {preparingList.map((order) => (
-                <div
-                  key={order.id}
-                  className="bg-slate-950 border-2 border-amber-500/40 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-lg space-y-2"
-                >
-                  <div className="text-4xl sm:text-5xl font-black text-amber-400 tracking-tight">
-                    #{order.orderNumber}
-                  </div>
-                  {renderTypeTag(order)}
-                  {order.estimatedMinutes && (
-                    <div className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400">
-                      <Clock className="w-3 h-3 text-amber-400" /> ~
-                      {order.estimatedMinutes} dk
+              {preparingList.map((order) => {
+                const elapsedPrepMins = Math.max(
+                  1,
+                  Math.floor(
+                    (Date.now() - new Date(order.createdAt).getTime()) / 60000
+                  )
+                );
+                return (
+                  <div
+                    key={order.id}
+                    className="relative overflow-hidden bg-gradient-to-b from-slate-900 via-slate-950 to-amber-950/30 border-2 border-amber-500/50 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-xl shadow-amber-500/10 ring-1 ring-amber-400/20 space-y-2"
+                  >
+                    <div className="text-4xl sm:text-5xl font-black text-amber-400 tracking-tight drop-shadow-[0_2px_10px_rgba(251,191,36,0.35)]">
+                      #{order.orderNumber}
                     </div>
-                  )}
-                </div>
-              ))}
+                    {renderTypeTag(order)}
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
+                      {order.estimatedMinutes && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-200 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                          <Clock className="w-3 h-3 text-amber-400" /> ~
+                          {order.estimatedMinutes} dk
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-slate-300 bg-slate-800/90 border border-slate-700 px-2 py-0.5 rounded-lg">
+                        🔥 {elapsedPrepMins} dk&apos;dır ocakta
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -465,13 +478,15 @@ export default function TvOrderQueuePage() {
                     key={order.id}
                     className={`rounded-2xl p-5 flex flex-col items-center justify-center text-center space-y-2 transition-all ${
                       isNew
-                        ? "bg-emerald-500 text-slate-950 border-4 border-white shadow-2xl shadow-emerald-500/50 animate-bounce"
-                        : "bg-emerald-900/40 border-2 border-emerald-400 text-white shadow-xl"
+                        ? "bg-gradient-to-b from-emerald-400 to-emerald-600 text-slate-950 border-4 border-white shadow-2xl shadow-emerald-500/60 animate-bounce"
+                        : "bg-gradient-to-b from-emerald-900/60 via-emerald-950/80 to-slate-950 border-2 border-emerald-400 text-white shadow-2xl shadow-emerald-500/20 ring-1 ring-emerald-400/30"
                     }`}
                   >
                     <div
                       className={`text-5xl sm:text-6xl font-black tracking-tight ${
-                        isNew ? "text-slate-950" : "text-emerald-300"
+                        isNew
+                          ? "text-slate-950"
+                          : "text-emerald-300 drop-shadow-[0_2px_12px_rgba(52,211,153,0.45)]"
                       }`}
                     >
                       #{order.orderNumber}

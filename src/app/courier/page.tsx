@@ -766,30 +766,54 @@ export default function CourierPage() {
           </div>
         )}
 
-        {/* Günlük Kurye Tahsilat Özeti */}
-        <div className="grid grid-cols-3 gap-2.5">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 text-center">
-            <div className="text-[10px] font-bold uppercase text-slate-400">
-              Bugün Teslim
+        {/* 🛵 4'lü Görsel Vardiya & Tahsilat Kokpiti */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="bg-gradient-to-br from-orange-950/60 to-slate-900 border border-orange-500/40 rounded-2xl p-3 flex flex-col justify-between shadow-sm">
+            <div className="flex items-center justify-between text-[10px] font-extrabold uppercase text-orange-300">
+              <span>Aktif Paket</span>
+              <span>🛵</span>
             </div>
-            <div className="text-lg font-black text-white mt-0.5">
-              {todayCompletedDeliveries.length} Paket
+            <div className="text-xl font-black text-white mt-1">
+              {activeDeliveries.length}
+            </div>
+            <div className="text-[10px] text-orange-200/70 font-semibold">
+              Teslimat bekleyen
             </div>
           </div>
-          <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-2xl p-3 text-center">
-            <div className="text-[10px] font-bold uppercase text-emerald-400">
-              Nakit Tahsilat
+          <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between shadow-sm">
+            <div className="flex items-center justify-between text-[10px] font-extrabold uppercase text-slate-400">
+              <span>Bugün Teslim</span>
+              <span>📦</span>
             </div>
-            <div className="text-lg font-black text-emerald-300 mt-0.5">
+            <div className="text-xl font-black text-white mt-1">
+              {todayCompletedDeliveries.length}
+            </div>
+            <div className="text-[10px] text-slate-500 font-semibold">
+              Tamamlanan
+            </div>
+          </div>
+          <div className="bg-gradient-to-br from-emerald-950/60 to-slate-900 border border-emerald-700/60 rounded-2xl p-3 flex flex-col justify-between shadow-sm">
+            <div className="flex items-center justify-between text-[10px] font-extrabold uppercase text-emerald-400">
+              <span>Nakit Kasa</span>
+              <span>💵</span>
+            </div>
+            <div className="text-xl font-black text-emerald-300 mt-1">
               {todayCashTotal.toFixed(0)} ₺
             </div>
-          </div>
-          <div className="bg-blue-950/40 border border-blue-800/60 rounded-2xl p-3 text-center">
-            <div className="text-[10px] font-bold uppercase text-blue-400">
-              POS (Kart)
+            <div className="text-[10px] text-emerald-400/70 font-semibold">
+              Elden tahsilat
             </div>
-            <div className="text-lg font-black text-blue-300 mt-0.5">
+          </div>
+          <div className="bg-gradient-to-br from-blue-950/60 to-slate-900 border border-blue-700/60 rounded-2xl p-3 flex flex-col justify-between shadow-sm">
+            <div className="flex items-center justify-between text-[10px] font-extrabold uppercase text-blue-400">
+              <span>POS (Kart)</span>
+              <span>💳</span>
+            </div>
+            <div className="text-xl font-black text-blue-300 mt-1">
               {todayCardTotal.toFixed(0)} ₺
+            </div>
+            <div className="text-[10px] text-blue-400/70 font-semibold">
+              Cihaz slipleri
             </div>
           </div>
         </div>

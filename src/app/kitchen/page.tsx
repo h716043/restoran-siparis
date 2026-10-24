@@ -2215,10 +2215,17 @@ export default function KitchenTabletPage() {
                     settings?.estimatedPrepMinutes ||
                     25;
 
+                  const channelStripeClass =
+                    order.orderType === "delivery"
+                      ? "border-l-8 border-l-orange-500"
+                      : order.orderType === "pickup"
+                      ? "border-l-8 border-l-sky-400"
+                      : "border-l-8 border-l-purple-500";
+
                   return (
                     <div
                       key={order.id}
-                      className={`bg-slate-900 border-2 rounded-2xl p-5 shadow-xl space-y-4 ${
+                      className={`bg-slate-900 border-2 ${channelStripeClass} rounded-2xl p-5 shadow-xl space-y-4 ${
                         order.isPriority
                           ? "border-rose-500 ring-2 ring-rose-500/40"
                           : "border-amber-500"
@@ -2227,7 +2234,7 @@ export default function KitchenTabletPage() {
                       <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-lg font-black text-amber-400">
+                            <span className="text-xl font-black text-amber-300 bg-amber-500/15 border border-amber-400/40 px-2.5 py-0.5 rounded-xl tracking-tight shadow-2xs">
                               #{order.orderNumber}
                             </span>
                             {order.isPriority && (
@@ -2671,11 +2678,17 @@ export default function KitchenTabletPage() {
                   );
                   const isLate = elapsedMins >= 20;
                   const isWarn = elapsedMins >= 10 && elapsedMins < 20;
+                  const prepChannelStripeClass =
+                    order.orderType === "delivery"
+                      ? "border-l-8 border-l-orange-500"
+                      : order.orderType === "pickup"
+                      ? "border-l-8 border-l-sky-400"
+                      : "border-l-8 border-l-purple-500";
 
                   return (
                     <div
                       key={order.id}
-                      className={`bg-slate-900/95 backdrop-blur-md rounded-2xl p-5 space-y-4 border transition-all ${
+                      className={`bg-slate-900/95 backdrop-blur-md rounded-2xl p-5 space-y-4 border ${prepChannelStripeClass} transition-all ${
                         order.isPriority
                           ? "border-2 border-rose-500 ring-2 ring-rose-500/40 shadow-lg shadow-rose-950/30"
                           : isLate
@@ -2688,7 +2701,7 @@ export default function KitchenTabletPage() {
                       <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-lg font-black text-white">
+                            <span className="text-xl font-black text-white bg-slate-800 border border-slate-700 px-2.5 py-0.5 rounded-xl tracking-tight shadow-2xs">
                               #{order.orderNumber}
                             </span>
                             {order.isPriority && (

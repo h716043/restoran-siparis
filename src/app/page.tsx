@@ -3830,44 +3830,52 @@ function CustomerMenuContent() {
               ];
               return (
                 <div className="pt-2 space-y-2.5">
-                  <div className="relative h-2.5 w-full rounded-full bg-orange-100 overflow-hidden">
+                  <div className="relative h-3 w-full rounded-full bg-orange-100/90 border border-orange-200/80 overflow-hidden shadow-inner">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-500 transition-all duration-500"
+                      className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-500 transition-all duration-700 relative"
                       style={{ width: `${pct}%` }}
-                    />
+                    >
+                      <div className="absolute inset-0 bg-white/25 animate-pulse" />
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     {steps.map((st) => {
                       const active = stepIdx >= st.id;
                       const isCurrent = stepIdx === st.id;
+                      const isCompleted = stepIdx > st.id;
                       return (
                         <div
                           key={st.id}
-                          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs transition-all ${
+                          className={`relative flex items-center gap-2.5 px-3 py-2.5 rounded-2xl border text-xs transition-all duration-300 ${
                             isCurrent
-                              ? "bg-gradient-to-r from-orange-600 to-red-600 text-white border-orange-600 shadow-md shadow-orange-500/20 scale-[1.02]"
+                              ? "bg-gradient-to-r from-orange-600 via-orange-500 to-red-600 text-white border-orange-500 ring-2 ring-orange-400/50 shadow-lg shadow-orange-500/25 scale-[1.02]"
                               : active
-                              ? "bg-emerald-50 text-emerald-900 border-emerald-300 font-bold"
-                              : "bg-white/75 text-slate-400 border-slate-200"
+                              ? "bg-gradient-to-br from-emerald-50 to-teal-50/70 text-emerald-950 border-emerald-300 font-bold shadow-2xs"
+                              : "bg-white/80 text-slate-400 border-slate-200/90"
                           }`}
                         >
                           <span
-                            className={`w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 ${
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center text-base shrink-0 shadow-2xs ${
                               isCurrent
-                                ? "bg-white/20 animate-pulse"
+                                ? "bg-white/25 ring-2 ring-white/40 animate-bounce"
                                 : active
-                                ? "bg-emerald-200/70"
+                                ? "bg-emerald-500 text-white"
                                 : "bg-slate-100"
                             }`}
                           >
-                            {st.icon}
+                            {isCompleted ? "✓" : st.icon}
                           </span>
-                          <div className="min-w-0">
-                            <div className="font-extrabold truncate">
-                              {st.id}. {st.label}
+                          <div className="min-w-0 flex-1">
+                            <div className="font-black truncate flex items-center justify-between gap-1">
+                              <span>
+                                {st.id}. {st.label}
+                              </span>
+                              {isCurrent && (
+                                <span className="inline-block w-2 h-2 rounded-full bg-white animate-ping shrink-0" />
+                              )}
                             </div>
                             <div
-                              className={`text-[10px] truncate ${
+                              className={`text-[10px] truncate font-semibold ${
                                 isCurrent
                                   ? "text-orange-100"
                                   : active
@@ -3942,46 +3950,68 @@ function CustomerMenuContent() {
                       const inCartQty = cart
                         .filter((c) => c.menuItemId === feat.id)
                         .reduce((s, c) => s + c.quantity, 0);
+                      const featNutri = getItemNutritionAndAllergenInfo(feat);
                       return (
                         <div
                           key={`feat-${feat.id}`}
                           onClick={() => openItemModal(feat)}
-                          className={`w-56 sm:w-64 flex-shrink-0 bg-white rounded-2xl border overflow-hidden cursor-pointer transition flex flex-col justify-between group ${
+                          className={`w-60 sm:w-68 flex-shrink-0 rounded-2xl border overflow-hidden cursor-pointer transition-all duration-300 flex flex-col justify-between group relative bg-slate-900 text-white ${
                             inCartQty > 0
-                              ? "border-orange-500 ring-2 ring-orange-500/30 shadow-md"
-                              : "border-slate-200 hover:border-orange-400 hover:shadow-md"
+                              ? "border-orange-500 ring-2 ring-orange-500/40 shadow-lg shadow-orange-500/20"
+                              : "border-slate-800 hover:border-orange-400 hover:shadow-xl hover:-translate-y-0.5"
                           }`}
                         >
-                          <div>
-                            <div className="relative h-32 bg-slate-100 overflow-hidden">
-                              {feat.imageUrl && (
-                                <img
-                                  src={feat.imageUrl}
-                                  alt={feat.name}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                                />
-                              )}
-                              {hasDisc && (
-                                <span className="absolute top-2 left-2 bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow">
-                                  -%{discPct} İNDİRİM
+                          <div className="relative h-44 w-full overflow-hidden">
+                            {feat.imageUrl ? (
+                              <img
+                                src={feat.imageUrl}
+                                alt={feat.name}
+                                className="w-full h-full object-cover group-hover:scale-110 transition duration-500"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gradient-to-br from-slate-800 to-slate-950 flex items-center justify-center">
+                                <Utensils className="w-10 h-10 text-slate-600" />
+                              </div>
+                            )}
+                            {/* Sinematik Karanlık Gradyan & Glassmorphism Katmanı */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/55 to-transparent" />
+
+                            <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-1.5">
+                              {hasDisc ? (
+                                <span className="bg-rose-600/95 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-md border border-white/20">
+                                  🔥 -%{discPct} İNDİRİM
+                                </span>
+                              ) : (
+                                <span className="bg-slate-900/75 backdrop-blur-md text-amber-300 text-[10px] font-black px-2.5 py-1 rounded-lg border border-amber-400/30">
+                                  ⭐ Şefin Seçimi
                                 </span>
                               )}
                               {inCartQty > 0 && (
-                                <span className="absolute top-2 right-2 bg-orange-600 text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow">
+                                <span className="bg-orange-600/95 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-md border border-white/20">
                                   🛒 Sepette: {inCartQty}
                                 </span>
                               )}
                             </div>
-                            <div className="p-3 space-y-1">
-                              <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 truncate group-hover:text-orange-600">
+
+                            <div className="absolute bottom-2.5 left-3 right-3 space-y-1">
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-200">
+                                <span className="bg-white/15 backdrop-blur-md px-2 py-0.5 rounded-md border border-white/15">
+                                  ⏱️ ~{featNutri.estPrepMins}
+                                </span>
+                                <span className="bg-white/15 backdrop-blur-md px-2 py-0.5 rounded-md border border-white/15">
+                                  🔥 ~{featNutri.estKcal} kcal
+                                </span>
+                              </div>
+                              <h3 className="font-black text-sm sm:text-base text-white truncate group-hover:text-amber-300 transition drop-shadow">
                                 {feat.name}
                               </h3>
-                              <p className="text-[11px] text-slate-500 line-clamp-1">
+                              <p className="text-[11px] text-slate-300 line-clamp-1">
                                 {feat.description}
                               </p>
                             </div>
                           </div>
-                          <div className="px-3 pb-3 pt-1 flex items-center justify-between border-t border-slate-100">
+
+                          <div className="px-3.5 py-2.5 bg-slate-950/90 backdrop-blur-md flex items-center justify-between border-t border-white/10">
                             <div className="flex items-baseline gap-1.5">
                               {hasDisc && (
                                 <span className="text-[11px] text-slate-400 line-through font-semibold">
@@ -3989,12 +4019,12 @@ function CustomerMenuContent() {
                                   {settings?.currency}
                                 </span>
                               )}
-                              <span className="font-black text-sm text-orange-600">
+                              <span className="font-black text-base text-amber-400">
                                 {feat.price.toFixed(0)} {settings?.currency}
                               </span>
                             </div>
-                            <span className="text-[11px] font-extrabold bg-orange-50 group-hover:bg-orange-600 text-orange-700 group-hover:text-white px-2.5 py-1 rounded-lg transition">
-                              + İncele
+                            <span className="text-[11px] font-black bg-gradient-to-r from-orange-500 to-amber-500 group-hover:from-orange-600 group-hover:to-red-600 text-white px-3 py-1 rounded-xl shadow-sm transition">
+                              + Sepete Ekle
                             </span>
                           </div>
                         </div>
@@ -4515,6 +4545,21 @@ function CustomerMenuContent() {
                                 <p className="text-xs text-slate-500 line-clamp-2 mt-1 leading-relaxed">
                                   {item.description}
                                 </p>
+                                {/* ⏱️ 🔥 İkonik Mikro Hazırlık Süresi & Kalori Bilgi Rozetleri */}
+                                {(() => {
+                                  const cardNutri =
+                                    getItemNutritionAndAllergenInfo(item);
+                                  return (
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200/80 px-2 py-0.5 rounded-md">
+                                        ⏱️ ~{cardNutri.estPrepMins}
+                                      </span>
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 rounded-md">
+                                        🔥 ~{cardNutri.estKcal} kcal
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                                 {subProductCount > 0 && (
                                   <div className="flex flex-wrap gap-1 mt-2">
                                     {(item.modifierGroups || [])

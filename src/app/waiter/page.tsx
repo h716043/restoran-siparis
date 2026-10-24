@@ -1435,8 +1435,27 @@ export default function WaiterTerminalPage() {
                       {/* Top Header */}
                       <div>
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm font-black text-white">
-                            {formatTableLabel(tNum)}
+                          <span className="text-sm font-black text-white flex items-center gap-1.5">
+                            <span
+                              className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs border ${
+                                activeCall
+                                  ? "bg-red-500/30 border-red-400 text-red-200"
+                                  : hasReady
+                                  ? "bg-emerald-500/30 border-emerald-400 text-emerald-200"
+                                  : isOccupied
+                                  ? "bg-amber-500/25 border-amber-400/60 text-amber-200"
+                                  : activeReservation
+                                  ? "bg-purple-500/25 border-purple-400/60 text-purple-200"
+                                  : "bg-stone-800 border-stone-700 text-stone-400"
+                              }`}
+                            >
+                              {isOccupied
+                                ? "🍽️"
+                                : activeReservation
+                                ? "📅"
+                                : "🪑"}
+                            </span>
+                            <span>{formatTableLabel(tNum)}</span>
                           </span>
                           {activeCall ? (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white font-black animate-pulse">
@@ -1499,6 +1518,24 @@ export default function WaiterTerminalPage() {
                               <span className="text-stone-300">
                                 ⏱️ {elapsedMins} dk
                               </span>
+                            </div>
+                            {/* Görsel Masa Doluluk & Oturum Süresi Çubuğu */}
+                            <div className="h-1.5 w-full rounded-full bg-stone-800 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  hasReady
+                                    ? "bg-emerald-400"
+                                    : elapsedMins >= 45
+                                    ? "bg-rose-500"
+                                    : "bg-amber-400"
+                                }`}
+                                style={{
+                                  width: `${Math.min(
+                                    100,
+                                    Math.max(18, Math.round((elapsedMins / 60) * 100))
+                                  )}%`,
+                                }}
+                              />
                             </div>
                             {readyDishCount > 0 && (
                               <div className="px-2 py-1 rounded-lg bg-emerald-500 text-stone-950 text-[10px] font-black flex items-center justify-between shadow-sm animate-pulse">
