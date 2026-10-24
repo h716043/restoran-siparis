@@ -173,15 +173,35 @@ export default function KitchenTabletPage() {
     "all" | "grill" | "cold" | "drink_dessert" | "late"
   >("all");
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [voiceTtsEnabled, setVoiceTtsEnabled] = useState(true);
 
   const knownPendingIds = useRef<Set<string>>(new Set());
+  const knownCallIds = useRef<Set<string>>(new Set());
   const knownCallerEventIds = useRef<Set<string>>(new Set());
+
+  const speakKitchenTurkish = (text: string) => {
+    try {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.lang = "tr-TR";
+        utt.rate = 0.98;
+        window.speechSynthesis.speak(utt);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     try {
       const savedAutoPrint = localStorage.getItem("restoran_auto_print_receipt");
       if (savedAutoPrint === "1") {
         setAutoPrintOnAccept(true);
+      }
+      const savedTts = localStorage.getItem("restoran_kitchen_tts");
+      if (savedTts === "0") {
+        setVoiceTtsEnabled(false);
       }
     } catch {
       // ignore
@@ -247,17 +267,44 @@ export default function KitchenTabletPage() {
       );
 
       if (soundEnabled) {
+        const newlyArrivedOrders = pendingOrders.filter(
+          (o) => !knownPendingIds.current.has(o.id)
+        );
+        const newlyArrivedCalls = pendingCalls.filter(
+          (c) => !knownCallIds.current.has(c.id)
+        );
         if (pendingOrders.length > 0) {
           soundAlert.playOrderRing();
+          if (voiceTtsEnabled && newlyArrivedOrders.length > 0) {
+            const firstNew = newlyArrivedOrders[0];
+            const speechMsg =
+              firstNew.orderType === "dine_in" && firstNew.tableNumber
+                ? `Yeni masa siparişi geldi. Masa ${firstNew.tableNumber}.`
+                : firstNew.orderType === "pickup"
+                ? `Yeni gel al siparişi geldi. Numara ${firstNew.orderNumber}.`
+                : `Yeni paket sipariş geldi. Numara ${firstNew.orderNumber}.`;
+            speakKitchenTurkish(speechMsg);
+          }
         } else if (
           pendingCalls.length > 0 ||
           pendingResvs.length > 0 ||
           hasNewCallerId
         ) {
           soundAlert.playTableCallRing();
+          if (voiceTtsEnabled && newlyArrivedCalls.length > 0) {
+            const firstCall = newlyArrivedCalls[0];
+            const callSpeech =
+              firstCall.type === "bill_cash"
+                ? `Masa ${firstCall.tableNumber} nakit hesap istiyor.`
+                : firstCall.type === "bill_card"
+                ? `Masa ${firstCall.tableNumber} pos cihazı ile hesap istiyor.`
+                : `Masa ${firstCall.tableNumber} garson çağırıyor.`;
+            speakKitchenTurkish(callSpeech);
+          }
         }
       }
       knownPendingIds.current = new Set(pendingOrders.map((o) => o.id));
+      knownCallIds.current = new Set(pendingCalls.map((c) => c.id));
       knownCallerEventIds.current = new Set(activeCid.map((c) => c.id));
     } catch (e) {
       console.error("Siparişler alınamadı:", e);
@@ -1555,6 +1602,39 @@ export default function KitchenTabletPage() {
                     >
                       <Printer className="w-3.5 h-3.5" />
                       {autoPrintOnAccept ? "Oto-Fiş: AÇIK" : "Oto-Fiş: KAPALI"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !voiceTtsEnabled;
+                        setVoiceTtsEnabled(next);
+                        try {
+                          localStorage.setItem(
+                            "restoran_kitchen_tts",
+                            next ? "1" : "0"
+                          );
+                        } catch {
+                          // ignore
+                        }
+                        if (next) {
+                          speakKitchenTurkish(
+                            "Türkçe sesli sipariş anonsu aktif edildi."
+                          );
+                        }
+                      }}
+                      className={`col-span-2 flex items-center justify-center gap-1.5 text-xs font-bold px-2.5 py-2 rounded-xl border transition cursor-pointer ${
+                        voiceTtsEnabled
+                          ? "bg-sky-600/20 text-sky-300 border-sky-500/40"
+                          : "bg-slate-800 text-slate-400 border-slate-700"
+                      }`}
+                    >
+                      <span>🗣️</span>
+                      <span>
+                        {voiceTtsEnabled
+                          ? "Türkçe Sesli Sipariş Okuma: AÇIK"
+                          : "Türkçe Sesli Sipariş Okuma: KAPALI"}
+                      </span>
                     </button>
                   </div>
                 </div>

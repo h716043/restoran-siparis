@@ -958,6 +958,9 @@ export default function CourierPage() {
                 const waLocationUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
                   `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişiniz için adresinizi daha hızlı bulabilmem adına bu mesaja WhatsApp üzerinden konum gönderebilir misiniz? 📍`
                 )}`;
+                const waLeftAtDoorUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(
+                  `Merhaba ${order.customerName}, #${order.orderNumber} numaralı siparişinizi notunuz üzerine zile basmadan kapınıza bıraktım 🔔 Afiyet olsun!`
+                )}`;
 
                 const bracketTags = Array.from(
                   (order.orderNote || "").matchAll(/\[([^\]]+)\]/g)
@@ -1177,7 +1180,7 @@ export default function CourierPage() {
                         <MessageCircle className="w-3 h-3" />
                         <span>Tek Tuşla Müşteriye Hazır WhatsApp Mesajı Gönder:</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-1.5">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <a
                           href={waOnWayUrl}
                           target="_blank"
@@ -1201,6 +1204,14 @@ export default function CourierPage() {
                           className="flex items-center justify-center gap-1 bg-sky-950/80 hover:bg-sky-900 text-sky-200 font-bold text-[11px] py-2 px-1.5 rounded-lg border border-sky-800/80 transition text-center"
                         >
                           <span>📍 Konum İste</span>
+                        </a>
+                        <a
+                          href={waLeftAtDoorUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-1 bg-purple-950/80 hover:bg-purple-900 text-purple-200 font-bold text-[11px] py-2 px-1.5 rounded-lg border border-purple-800/80 transition text-center"
+                        >
+                          <span>🚪 Kapıya Bıraktım</span>
                         </a>
                       </div>
                     </div>

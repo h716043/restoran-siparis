@@ -317,6 +317,36 @@ export default function TvOrderQueuePage() {
         </div>
       </header>
 
+      {/* 🔔 YENİ HAZIR SİPARİŞ DEV SPOTLIGHT BANNERI */}
+      {highlightedReadyIds.length > 0 &&
+        (() => {
+          const spotOrder = readyList.find((o) =>
+            highlightedReadyIds.includes(o.id)
+          );
+          if (!spotOrder) return null;
+          return (
+            <div className="mx-6 mt-4 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 text-slate-950 rounded-3xl px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-2xl shadow-emerald-500/30 border-4 border-white animate-pulse">
+              <div className="flex items-center gap-4">
+                <span className="text-4xl sm:text-5xl">🔔🍽️</span>
+                <div>
+                  <div className="text-xs sm:text-sm font-black uppercase tracking-widest text-emerald-950">
+                    SİPARİŞİNİZ ŞİMDİ HAZIRLANDI!
+                  </div>
+                  <div className="text-2xl sm:text-4xl font-black tracking-tight text-slate-950">
+                    Sipariş #{spotOrder.orderNumber}{" "}
+                    {spotOrder.orderType === "dine_in" && spotOrder.tableNumber
+                      ? `• Masa ${spotOrder.tableNumber}`
+                      : "• Teslim Noktasından Alabilirsiniz"}
+                  </div>
+                </div>
+              </div>
+              <span className="bg-slate-950 text-emerald-300 font-black text-sm sm:text-lg px-5 py-2 rounded-2xl">
+                AFİYET OLSUN! ✨
+              </span>
+            </div>
+          );
+        })()}
+
       {/* İki Sütunlu Dev TV Gösterim Alanı */}
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
         {/* SOL SÜTUN: HAZIRLANIYOR */}

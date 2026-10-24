@@ -1988,20 +1988,111 @@ function CustomerMenuContent() {
     }
   };
 
-  // Sepette olmayan tatlı ve içecekleri "Yanına İyi Gider" olarak öner
+  // 🌙 8. Hızlı Etiket / Diyet / İndirim Filtresi State & Canlı Geri Sayım Sayacı
+  const [quickTagFilter, setQuickTagFilter] = useState<
+    "all" | "popular" | "discounted" | "spicy" | "chef"
+  >("all");
+  const [showOrderConfetti, setShowOrderConfetti] = useState(false);
+  const [liveClockMs, setLiveClockMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setLiveClockMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 🎡 3. Müşteri Sadakat Seviyesi (Bronz / Gümüş / Altın VIP) Hesabı
+  const customerLoyaltyTier = useMemo(() => {
+    const count = pastUserOrders.length;
+    if (count >= 8) {
+      return {
+        label: "🥇 Altın VIP",
+        cls: "bg-amber-400/25 text-amber-900 border-amber-400",
+        nextLabel: "En üst VIP seviyesindesiniz!",
+        progressPct: 100,
+      };
+    }
+    if (count >= 3) {
+      return {
+        label: "🥈 Gümüş Gurme",
+        cls: "bg-slate-200 text-slate-800 border-slate-300",
+        nextLabel: `Altın VIP için ${8 - count} sipariş kaldı`,
+        progressPct: Math.round((count / 8) * 100),
+      };
+    }
+    return {
+      label: "🥉 Bronz Üye",
+      cls: "bg-orange-100 text-orange-800 border-orange-300",
+      nextLabel: `Gümüş Gurme için ${Math.max(1, 3 - count)} sipariş kaldı`,
+      progressPct: Math.max(15, Math.round((count / 3) * 100)),
+    };
+  }, [pastUserOrders.length]);
+
+  // 🎯 1. Akıllı "Birlikte Çok İyi Gider (Çapraz Satış / Upsell)" Öneri Motoru
   const upsellSuggestions = useMemo(() => {
     const inCartIds = new Set(cart.map((c) => c.menuItemId));
-    return items
-      .filter(
-        (i) =>
-          i.available &&
-          !inCartIds.has(i.id) &&
-          (i.categoryId === "cat-5" ||
-            i.categoryId === "cat-6" ||
-            i.categoryId === "cat-4")
-      )
-      .slice(0, 3);
-  }, [items, cart]);
+    const cartMenuItems = cart
+      .map((c) => items.find((i) => i.id === c.menuItemId))
+      .filter(Boolean) as MenuItem[];
+
+    const isDrinkOrDessertOrSide = (item: MenuItem) => {
+      if (
+        item.categoryId === "cat-4" ||
+        item.categoryId === "cat-5" ||
+        item.categoryId === "cat-6"
+      ) {
+        return true;
+      }
+      const catName = (
+        categories.find((c) => c.id === item.categoryId)?.name || ""
+      ).toLowerCase();
+      const text = `${catName} ${item.name}`.toLowerCase();
+      return (
+        text.includes("içecek") ||
+        text.includes("ayran") ||
+        text.includes("şalgam") ||
+        text.includes("kola") ||
+        text.includes("tatlı") ||
+        text.includes("künefe") ||
+        text.includes("baklava") ||
+        text.includes("sütlaç") ||
+        text.includes("salata") ||
+        text.includes("meze") ||
+        text.includes("çorba")
+      );
+    };
+
+    const hasDrinkInCart = cartMenuItems.some((m) => {
+      const t = `${m.name} ${
+        categories.find((c) => c.id === m.categoryId)?.name || ""
+      }`.toLowerCase();
+      return (
+        m.categoryId === "cat-6" ||
+        t.includes("içecek") ||
+        t.includes("ayran") ||
+        t.includes("kola") ||
+        t.includes("şalgam")
+      );
+    });
+
+    const candidates = items.filter(
+      (i) =>
+        i.available &&
+        !inCartIds.has(i.id) &&
+        (i.dailyStock === undefined || i.dailyStock === null || i.dailyStock > 0) &&
+        isDrinkOrDessertOrSide(i)
+    );
+
+    return [...candidates]
+      .sort((a, b) => {
+        if (!hasDrinkInCart) {
+          const aDrink = a.categoryId === "cat-6" ? 1 : 0;
+          const bDrink = b.categoryId === "cat-6" ? 1 : 0;
+          if (aDrink !== bDrink) return bDrink - aDrink;
+        }
+        return (b.popular ? 1 : 0) - (a.popular ? 1 : 0);
+      })
+      .slice(0, 4);
+  }, [items, cart, categories]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -2014,9 +2105,25 @@ function CustomerMenuContent() {
         !searchQuery.trim() ||
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.description.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesCat && matchesSearch;
+      const matchesQuickTag =
+        quickTagFilter === "all"
+          ? true
+          : quickTagFilter === "popular"
+          ? Boolean(item.popular)
+          : quickTagFilter === "discounted"
+          ? Boolean(item.originalPrice && item.originalPrice > item.price)
+          : quickTagFilter === "spicy"
+          ? Boolean(
+              item.badges?.includes("spicy") ||
+                item.name.toLowerCase().includes("acılı") ||
+                item.name.toLowerCase().includes("adana")
+            )
+          : quickTagFilter === "chef"
+          ? Boolean(item.badges?.includes("chef") || item.popular)
+          : true;
+      return matchesCat && matchesSearch && matchesQuickTag;
     });
-  }, [items, activeCategory, searchQuery, favoriteIds]);
+  }, [items, activeCategory, searchQuery, favoriteIds, quickTagFilter]);
 
   const isCurrentlyOpen = useMemo(() => {
     if (!settings) return true;
@@ -2248,6 +2355,8 @@ function CustomerMenuContent() {
         setCheckoutDirections("");
         setCheckoutStep("cart");
         setMobileCartOpen(false);
+        setShowOrderConfetti(true);
+        setTimeout(() => setShowOrderConfetti(false), 5500);
         if (orderType === "dine_in" && tableNumber) {
           fetchPublicTableOrders(tableNumber);
         }
@@ -2761,8 +2870,68 @@ function CustomerMenuContent() {
               ))}
             </div>
           </div>
+
+          {/* 🏷️ AKILLI HIZLI ETİKET FİLTRE ÇUBUĞU (Çok Satanlar / İndirimdekiler / Acılı / Şefin Spesiyali) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 mt-2 border-t border-slate-100">
+            {[
+              { id: "all", label: "🍽️ Tüm Lezzetler" },
+              { id: "popular", label: "🔥 Çok Satanlar" },
+              { id: "discounted", label: "🏷️ İndirimdekiler" },
+              { id: "chef", label: "👨‍🍳 Şefin Spesiyali" },
+              { id: "spicy", label: "🌶️ Acılı Seçimler" },
+            ].map((chip) => {
+              const isSelected = quickTagFilter === chip.id;
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() =>
+                    setQuickTagFilter(
+                      chip.id as
+                        | "all"
+                        | "popular"
+                        | "discounted"
+                        | "spicy"
+                        | "chef"
+                    )
+                  }
+                  className={`px-3 py-1 rounded-full text-[11px] font-extrabold whitespace-nowrap transition cursor-pointer border ${
+                    isSelected
+                      ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                      : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
+
+      {/* 🎉 SİPARİŞ ONAY KONFETİ & KUTLAMA BANNERI */}
+      {showOrderConfetti && (
+        <div className="fixed inset-x-0 top-16 z-50 pointer-events-none flex justify-center px-4">
+          <div className="pointer-events-auto bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white px-5 py-3.5 rounded-2xl shadow-2xl border-2 border-white/40 flex items-center gap-3 animate-bounce">
+            <span className="text-2xl">🎉🥳🍕</span>
+            <div>
+              <div className="font-black text-sm sm:text-base">
+                Harika Seçim! Siparişiniz Mutfağa İletildi!
+              </div>
+              <div className="text-[11px] text-emerald-100 font-semibold">
+                Sıcak ve taze şekilde hazırlanmaya başlandı, canlı sayaçtan takip edebilirsiniz.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOrderConfetti(false)}
+              className="ml-2 bg-white/20 hover:bg-white/30 text-white rounded-lg px-2 py-1 text-xs font-bold cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ✨ VİTRİN ÜSTÜ HIZLI RESTORAN BİLGİ & CANLI WHATSAPP DESTEK BANDI */}
       {settings?.showRestaurantInfoBar !== false && (
@@ -3432,6 +3601,35 @@ function CustomerMenuContent() {
                         }`
                       : "🍽️ Siparişiniz servise / teslime hazır!")}
                 </span>
+                {/* ⏱️ CANLI SANİYELİ GERİ SAYIM SAYACI (MM:SS) */}
+                {(bannerActiveOrder.status === "pending" ||
+                  bannerActiveOrder.status === "accepted") &&
+                  (() => {
+                    const estMins =
+                      bannerActiveOrder.estimatedMinutes ||
+                      settings?.estimatedPrepMinutes ||
+                      30;
+                    const createdMs = new Date(
+                      bannerActiveOrder.createdAt
+                    ).getTime();
+                    const targetMs = createdMs + estMins * 60 * 1000;
+                    const diffSec = Math.max(
+                      0,
+                      Math.floor((targetMs - liveClockMs) / 1000)
+                    );
+                    const mm = String(Math.floor(diffSec / 60)).padStart(2, "0");
+                    const ss = String(diffSec % 60).padStart(2, "0");
+                    return (
+                      <div className="mt-1.5 inline-flex items-center gap-1.5 bg-slate-900 text-amber-300 font-black text-[11px] px-2.5 py-1 rounded-lg shadow-2xs">
+                        <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                        <span>
+                          {diffSec > 0
+                            ? `Canlı Geri Sayım: ${mm}:${ss}`
+                            : "Son kontroller yapılıyor, birazdan hazır!"}
+                        </span>
+                      </div>
+                    );
+                  })()}
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {(bannerActiveOrder.status === "pending" ||
@@ -6634,6 +6832,11 @@ function CustomerMenuContent() {
           <div className="text-left">
             <div className="text-xs font-bold text-slate-900 leading-none flex items-center gap-1.5">
               <span>{currentUser.name}</span>
+              <span
+                className={`border text-[10px] font-black px-1.5 py-0.2 rounded-full ${customerLoyaltyTier.cls}`}
+              >
+                {customerLoyaltyTier.label}
+              </span>
               {isLoyaltyEnabled && (
                 <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-black px-1.5 py-0.2 rounded-full">
                   🎁 {(currentUser.loyaltyPoints || 0).toFixed(0)}{" "}
@@ -6970,31 +7173,57 @@ function CustomerMenuContent() {
             })}
           </div>
 
-          {/* SEPETTE "YANINA İYİ GİDER" (UPSELL) ÖNERİLERİ */}
+          {/* SEPETTE "YANINA İYİ GİDER" (AKILLI ÇAPRAZ SATIŞ / UPSELL GÖRSEL KARTLARI) */}
           {upsellSuggestions.length > 0 && (
-            <div className="bg-orange-50/60 border border-orange-200/80 rounded-xl p-3 space-y-2">
-              <div className="text-[11px] font-extrabold uppercase tracking-wider text-orange-700 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> Yanına İyi Gider (Tek Tıkla
-                Ekle)
+            <div className="bg-gradient-to-br from-orange-50/90 to-amber-50/70 border border-orange-200/90 rounded-2xl p-3 space-y-2.5 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-extrabold uppercase tracking-wider text-orange-800 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-orange-600" /> Yanına Çok
+                  Yakışır (Tek Tıkla Ekle)
+                </div>
+                <span className="text-[10px] font-bold text-orange-600 bg-white px-2 py-0.5 rounded-full border border-orange-200">
+                  ⚡ Hızlı Seçim
+                </span>
               </div>
-              <div className="space-y-1.5">
-                {upsellSuggestions.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-orange-100 text-xs"
-                  >
-                    <span className="font-semibold text-slate-800 truncate pr-2">
-                      {u.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickAddUpsell(u)}
-                      className="inline-flex items-center gap-1 bg-orange-600 hover:bg-orange-700 text-white font-bold px-2 py-1 rounded-md whitespace-nowrap transition"
+              <div className="grid grid-cols-1 gap-2">
+                {upsellSuggestions.map((u) => {
+                  const catObj = categories.find((c) => c.id === u.categoryId);
+                  return (
+                    <div
+                      key={u.id}
+                      className="flex items-center justify-between gap-2.5 bg-white p-2 rounded-xl border border-orange-100/90 hover:border-orange-300 transition shadow-2xs"
                     >
-                      <Plus className="w-3 h-3" /> {u.price} {settings?.currency}
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {u.imageUrl ? (
+                          <img
+                            src={u.imageUrl}
+                            alt={u.name}
+                            className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-slate-100"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-100 to-amber-50 border border-orange-200/60 flex items-center justify-center text-base flex-shrink-0">
+                            {catObj?.icon || "🥤"}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-xs text-slate-900 truncate">
+                            {u.name}
+                          </div>
+                          <div className="text-[10px] font-bold text-orange-600">
+                            +{u.price} {settings?.currency}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddUpsell(u)}
+                        className="inline-flex items-center gap-1 bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap transition shadow-2xs cursor-pointer flex-shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Ekle
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -7047,10 +7276,26 @@ function CustomerMenuContent() {
             )}
           </div>
 
-          {/* 🎁 İsteğe Bağlı Müşteri Sadakat & Para Puan Harcama Kutusu */}
+          {/* 🎁 İsteğe Bağlı Müşteri Sadakat, VIP Seviye Rozeti & Para Puan Harcama Kutusu */}
           {isLoyaltyEnabled && currentUser && (
             <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-amber-200/60">
+                <span
+                  className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border ${customerLoyaltyTier.cls}`}
+                >
+                  {customerLoyaltyTier.label} ({pastUserOrders.length} Sipariş)
+                </span>
+                <span className="text-[10px] font-bold text-amber-800">
+                  {customerLoyaltyTier.nextLabel}
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-amber-200/70 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500"
+                  style={{ width: `${customerLoyaltyTier.progressPct}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between pt-0.5">
                 <span className="font-extrabold text-amber-900 flex items-center gap-1">
                   <Gift className="w-3.5 h-3.5 text-amber-600" />
                   Para Puan Cüzdanınız:

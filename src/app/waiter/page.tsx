@@ -1385,6 +1385,17 @@ export default function WaiterTerminalPage() {
                     isSameTableName(r.tableNumber, tNum)
                   );
                   const hasReady = tableOrders.some((o) => o.status === "ready");
+                  const readyDishCount = tableOrders.reduce(
+                    (sum, o) =>
+                      sum +
+                      o.items.reduce(
+                        (iSum, it) =>
+                          iSum +
+                          (o.status === "ready" || it.prepared ? it.quantity : 0),
+                        0
+                      ),
+                    0
+                  );
                   const isPreparing = tableOrders.some(
                     (o) => o.status === "accepted" || o.status === "pending"
                   );
@@ -1489,6 +1500,12 @@ export default function WaiterTerminalPage() {
                                 ⏱️ {elapsedMins} dk
                               </span>
                             </div>
+                            {readyDishCount > 0 && (
+                              <div className="px-2 py-1 rounded-lg bg-emerald-500 text-stone-950 text-[10px] font-black flex items-center justify-between shadow-sm animate-pulse">
+                                <span>🍽️ {readyDishCount} Ürün Tezgahta Hazır!</span>
+                                <span>Servise Al →</span>
+                              </div>
+                            )}
                             {idleMins >= 20 && !activeCall && !posLiveTablesEnabled && (
                               <div className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[10px] font-extrabold text-amber-200">
                                 ☕ {idleMins} dk işlem yok • Çay/Tatlı Sor
