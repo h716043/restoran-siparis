@@ -11,17 +11,14 @@ public class Win32Show {
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 "@
 
-# Tek ornek (Single Instance) kontrolu
-$mutexName = "Global\RestoranPosSunucuDurumGostergesi"
-$createdNew = $false
-$mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
-if (-not $createdNew) {
-    exit 0
-}
+# Eger arkada kalmis eski bir gosterge sureci varsa kapat ki kullanici tikladiginda her zaman acilsin
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and $_.Name -eq 'powershell.exe' -and $_.CommandLine -match 'SUNUCU-DURUM-GOSTERGESI\.ps1' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $workDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $workDir
@@ -219,11 +216,13 @@ $window.Top  = $workArea.Top + 12
 $window.Add_SourceInitialized({
     $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
     [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
+    [Win32Show]::SetForegroundWindow($helper.Handle) | Out-Null
 })
 
 $window.Add_Loaded({
     $helper = New-Object System.Windows.Interop.WindowInteropHelper($window)
     [Win32Show]::ShowWindow($helper.Handle, 5) | Out-Null
+    [Win32Show]::SetForegroundWindow($helper.Handle) | Out-Null
     $window.Visibility = [System.Windows.Visibility]::Visible
     $window.Activate() | Out-Null
 })
