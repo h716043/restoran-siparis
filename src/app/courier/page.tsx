@@ -63,6 +63,7 @@ export default function CourierPage() {
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const knownDeliveryIdsRef = useRef<Set<string>>(new Set());
   const initialLoadedRef = useRef<boolean>(false);
+  const [sunlightHighContrast, setSunlightHighContrast] = useState(false);
 
   // Canlı Kurye GPS Konum Paylaşımı (Kurye telefonundan Mutfak/Admin haritasına gönderir)
   useEffect(() => {
@@ -614,7 +615,11 @@ export default function CourierPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
+    <div
+      className={`min-h-screen bg-slate-950 text-slate-100 pb-12 ${
+        sunlightHighContrast ? "contrast-125 brightness-110" : ""
+      }`}
+    >
       {/* Üst Başlık */}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 px-4 py-3">
         <div className="max-w-xl mx-auto flex flex-col gap-3">
@@ -681,6 +686,18 @@ export default function CourierPage() {
                 }
               >
                 <span>{wakeLockEnabled ? "🔋 Ekran Açık" : "🌙 Uyku"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSunlightHighContrast((v) => !v)}
+                className={`px-2.5 py-2 rounded-xl border text-xs font-extrabold flex items-center gap-1 cursor-pointer transition ${
+                  sunlightHighContrast
+                    ? "bg-amber-400 border-amber-300 text-slate-950 shadow"
+                    : "bg-slate-800 border-slate-700 text-slate-300"
+                }`}
+                title="Güneş Işığı Altında Yüksek Kontrast Modu"
+              >
+                <span>{sunlightHighContrast ? "☀️ Gündüz" : "🌙 Gece"}</span>
               </button>
               <button
                 type="button"
@@ -1168,6 +1185,39 @@ export default function CourierPage() {
 
                     {/* Açık Adres & Hızlı Teslimat Tercih Rozetleri Kutusu */}
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2">
+                      {/* 🏢 6. ÖZELLİK: BİNA / KAT / DAİRE AYRIŞTIRICI DEV ADRES ROZETLERİ */}
+                      {(() => {
+                        const rawAddr = order.customerAddress || "";
+                        const bMatch = rawAddr.match(
+                          /(?:Bina(?:\s*No)?|No)\s*[:.]?\s*([A-Za-z0-9/-]+)/i
+                        );
+                        const fMatch = rawAddr.match(
+                          /Kat\s*[:.]?\s*([A-Za-z0-9/-]+)/i
+                        );
+                        const dMatch = rawAddr.match(
+                          /Daire\s*[:.]?\s*([A-Za-z0-9/-]+)/i
+                        );
+                        if (!bMatch && !fMatch && !dMatch) return null;
+                        return (
+                          <div className="flex flex-wrap items-center gap-1.5 pb-1.5 border-b border-slate-800/80">
+                            {bMatch && (
+                              <span className="bg-orange-500/20 border border-orange-500/50 text-orange-300 font-black text-xs px-2.5 py-1 rounded-lg">
+                                🏢 Bina: {bMatch[1]}
+                              </span>
+                            )}
+                            {fMatch && (
+                              <span className="bg-sky-500/20 border border-sky-500/50 text-sky-300 font-black text-xs px-2.5 py-1 rounded-lg">
+                                🪜 Kat: {fMatch[1]}
+                              </span>
+                            )}
+                            {dMatch && (
+                              <span className="bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-black text-xs px-2.5 py-1 rounded-lg">
+                                🚪 Daire: {dMatch[1]}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
                           <MapPin className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
@@ -1209,27 +1259,27 @@ export default function CourierPage() {
                       )}
                     </div>
 
-                    {/* Hızlı Arama ve Harita Navigasyon Butonları */}
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* 📞 🗺️ 14. ÖZELLİK: ELDİVEN DOSTU DEV ARAMA VE HARİTA NAVİGASYON ÇUBUĞU */}
+                    <div className="grid grid-cols-2 gap-2.5">
                       <a
                         href={`tel:${order.customerPhone}`}
-                        className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 px-3 rounded-xl border border-slate-700 transition"
+                        className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-black text-xs sm:text-sm py-3 px-3 rounded-xl border border-slate-600 shadow-sm transition"
                       >
-                        <Phone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Müşteriyi Ara</span>
+                        <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>📞 Müşteriyi Ara</span>
                       </a>
                       <a
                         href={mapsUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className={`flex items-center justify-center gap-1.5 font-bold text-xs py-2.5 px-3 rounded-xl border transition ${
+                        className={`flex items-center justify-center gap-2 font-black text-xs sm:text-sm py-3 px-3 rounded-xl border shadow-sm transition ${
                           hasExactGps
-                            ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border-emerald-600/80 shadow-sm"
-                            : "bg-blue-950/80 hover:bg-blue-900 text-blue-200 border-blue-800"
+                            ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border-emerald-500"
+                            : "bg-blue-950/90 hover:bg-blue-900 text-blue-200 border-blue-500"
                         }`}
                       >
                         <Navigation
-                          className={`w-3.5 h-3.5 shrink-0 ${
+                          className={`w-4 h-4 shrink-0 ${
                             hasExactGps ? "text-emerald-400" : "text-blue-400"
                           }`}
                         />

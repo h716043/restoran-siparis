@@ -179,6 +179,7 @@ export default function KitchenTabletPage() {
   const knownPendingIds = useRef<Set<string>>(new Set());
   const knownCallIds = useRef<Set<string>>(new Set());
   const knownCallerEventIds = useRef<Set<string>>(new Set());
+  const [kdsFontScale, setKdsFontScale] = useState<"normal" | "large" | "xlarge">("normal");
 
   const speakKitchenTurkish = (text: string) => {
     try {
@@ -2050,6 +2051,111 @@ export default function KitchenTabletPage() {
       <main className="p-4 flex-1 max-w-7xl w-full mx-auto">
         {activeTab === "active" && (
           <div className="space-y-4">
+            {/* 👨‍🍳 4. ÖZELLİK: CANLI MUTFAK HIZ & PERFORMANS (SLA) KOKPİTİ */}
+            {(() => {
+              const activeKdsList = [...pendingOrders, ...preparingOrders];
+              const totalPortionsOnFire = activeKdsList.reduce(
+                (sum, o) =>
+                  sum +
+                  o.items.reduce(
+                    (s, it) => s + (!it.prepared ? it.quantity : 0),
+                    0
+                  ),
+                0
+              );
+              const todayStr = new Date().toLocaleDateString("tr-TR");
+              const todayDone = completedOrders.filter(
+                (o) =>
+                  new Date(o.createdAt).toLocaleDateString("tr-TR") === todayStr
+              );
+              const avgPrepMins =
+                todayDone.length > 0
+                  ? Math.max(
+                      5,
+                      Math.round(
+                        todayDone.reduce((acc, o) => {
+                          const diff =
+                            (new Date(o.updatedAt || o.createdAt).getTime() -
+                              new Date(o.createdAt).getTime()) /
+                            60000;
+                          return acc + Math.min(45, Math.max(4, diff));
+                        }, 0) / todayDone.length
+                      )
+                    )
+                  : settings?.estimatedPrepMinutes || 18;
+              const onTimeCount = activeKdsList.filter((o) => {
+                const el = Math.floor(
+                  (nowMs - new Date(o.createdAt).getTime()) / 60000
+                );
+                return el < 20;
+              }).length;
+              const slaPct =
+                activeKdsList.length > 0
+                  ? Math.round((onTimeCount / activeKdsList.length) * 100)
+                  : 100;
+
+              return (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase text-slate-400">
+                        Ort. Hazırlık Hızı
+                      </div>
+                      <div className="text-lg font-black text-amber-400 mt-0.5">
+                        ⚡ ~{avgPrepMins} dk
+                      </div>
+                    </div>
+                    <span className="text-xl bg-amber-500/15 border border-amber-500/30 w-9 h-9 rounded-xl flex items-center justify-center">
+                      ⏱️
+                    </span>
+                  </div>
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase text-slate-400">
+                        Zamanında Çıkış (SLA)
+                      </div>
+                      <div
+                        className={`text-lg font-black mt-0.5 ${
+                          slaPct >= 85 ? "text-emerald-400" : "text-rose-400"
+                        }`}
+                      >
+                        🎯 %{slaPct} Başarı
+                      </div>
+                    </div>
+                    <span className="text-xl bg-emerald-500/15 border border-emerald-500/30 w-9 h-9 rounded-xl flex items-center justify-center">
+                      📈
+                    </span>
+                  </div>
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase text-slate-400">
+                        Ocaktaki Porsiyon
+                      </div>
+                      <div className="text-lg font-black text-orange-400 mt-0.5">
+                        🔥 {totalPortionsOnFire} Adet
+                      </div>
+                    </div>
+                    <span className="text-xl bg-orange-500/15 border border-orange-500/30 w-9 h-9 rounded-xl flex items-center justify-center">
+                      🍳
+                    </span>
+                  </div>
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase text-slate-400">
+                        Bugün Tamamlanan
+                      </div>
+                      <div className="text-lg font-black text-sky-400 mt-0.5">
+                        ✅ {todayDone.length} Sipariş
+                      </div>
+                    </div>
+                    <span className="text-xl bg-sky-500/15 border border-sky-500/30 w-9 h-9 rounded-xl flex items-center justify-center">
+                      🏆
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Mutfak İstasyon Filtresi & Gecikme Alarmı (KDS) */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -2127,6 +2233,46 @@ export default function KitchenTabletPage() {
                 <span className="text-amber-300">🟡 15-20 dk Uyarı</span>
                 <span>•</span>
                 <span className="text-red-400">🔴 20+ dk SLA Gecikme</span>
+                {/* 🔍 12. ÖZELLİK: UZAKTAN OKUMA İÇİN YAZI BOYUTU (A / A+ / A++) & TAM EKRAN KDS */}
+                <div className="inline-flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-0.5 ml-1">
+                  {(
+                    [
+                      { id: "normal", label: "A Normal" },
+                      { id: "large", label: "A+ Büyük" },
+                      { id: "xlarge", label: "A++ Dev" },
+                    ] as const
+                  ).map((sc) => (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      onClick={() => setKdsFontScale(sc.id)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-black transition cursor-pointer ${
+                        kdsFontScale === sc.id
+                          ? "bg-orange-600 text-white"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                      title="Mutfak fiş yazı boyutunu büyüt / küçült"
+                    >
+                      {sc.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof document !== "undefined") {
+                      if (!document.fullscreenElement) {
+                        document.documentElement.requestFullscreen?.().catch(() => {});
+                      } else {
+                        document.exitFullscreen?.().catch(() => {});
+                      }
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-extrabold cursor-pointer"
+                  title="Tam Ekran Mutfak Odak Modu"
+                >
+                  🖥️ Tam Ekran
+                </button>
               </div>
             </div>
 
@@ -2804,7 +2950,15 @@ export default function KitchenTabletPage() {
                         </div>
                       </div>
 
-                      <div className="space-y-2.5 text-sm">
+                      <div
+                        className={`space-y-2.5 ${
+                          kdsFontScale === "xlarge"
+                            ? "text-lg"
+                            : kdsFontScale === "large"
+                            ? "text-base"
+                            : "text-sm"
+                        }`}
+                      >
                         {(() => {
                           const doneCnt = order.items.filter(
                             (i) => i.prepared

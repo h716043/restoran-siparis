@@ -50,6 +50,7 @@ export default function TvOrderQueuePage() {
   const [currentTime, setCurrentTime] = useState("");
   const [originUrl, setOriginUrl] = useState("https://restoran-siparis.local");
   const [highlightedReadyIds, setHighlightedReadyIds] = useState<string[]>([]);
+  const [slideIndex, setSlideIndex] = useState(0);
   const knownReadyIdsRef = useRef<Set<string>>(new Set());
   const firstLoadRef = useRef(true);
 
@@ -171,7 +172,13 @@ export default function TvOrderQueuePage() {
     };
     updateClock();
     const timer = setInterval(updateClock, 1000);
-    return () => clearInterval(timer);
+    const slideTimer = setInterval(() => {
+      setSlideIndex((prev) => prev + 1);
+    }, 6000);
+    return () => {
+      clearInterval(timer);
+      clearInterval(slideTimer);
+    };
   }, []);
 
   const handleToggleFullscreen = () => {
@@ -494,41 +501,99 @@ export default function TvOrderQueuePage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 content-start">
-              {readyList.map((order) => {
-                const isNew = highlightedReadyIds.includes(order.id);
-                return (
-                  <div
-                    key={order.id}
-                    className={`rounded-2xl p-5 flex flex-col items-center justify-center text-center space-y-2 transition-all ${
-                      isNew
-                        ? "bg-gradient-to-b from-emerald-400 to-emerald-600 text-slate-950 border-4 border-white shadow-2xl shadow-emerald-500/60 animate-bounce"
-                        : "bg-gradient-to-b from-emerald-900/60 via-emerald-950/80 to-slate-950 border-2 border-emerald-400 text-white shadow-2xl shadow-emerald-500/20 ring-1 ring-emerald-400/30"
-                    }`}
-                  >
+            <div className="space-y-4">
+              {/* 📺 7. ÖZELLİK: SON ÇIKAN SİPARİŞ İÇİN PARLAYAN DEV ÇAĞRI SPOTU */}
+              {readyList[0] && (
+                <div className="bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 text-slate-950 rounded-2xl px-5 py-3.5 border-2 border-white shadow-2xl shadow-emerald-500/40 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl sm:text-3xl animate-bounce">
+                      🔔
+                    </span>
+                    <div>
+                      <div className="text-[11px] font-black uppercase tracking-wider text-emerald-950/80">
+                        SON ÇIKAN SİPARİŞ • LÜTFEN TESLİM ALINIZ
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black tracking-tight">
+                        #{readyList[0].orderNumber}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-slate-950 text-emerald-300 px-3.5 py-1.5 rounded-xl font-black text-xs sm:text-sm shadow">
+                    {readyList[0].orderType === "dine_in"
+                      ? `🪑 Masa ${readyList[0].tableNumber || "-"}`
+                      : readyList[0].orderType === "pickup"
+                      ? "🛍️ Bankodan Teslim Alınız"
+                      : "🛵 Kurye Teslimatta"}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 content-start">
+                {readyList.map((order) => {
+                  const isNew = highlightedReadyIds.includes(order.id);
+                  return (
                     <div
-                      className={`text-5xl sm:text-6xl font-black tracking-tight ${
+                      key={order.id}
+                      className={`rounded-2xl p-5 flex flex-col items-center justify-center text-center space-y-2 transition-all ${
                         isNew
-                          ? "text-slate-950"
-                          : "text-emerald-300 drop-shadow-[0_2px_12px_rgba(52,211,153,0.45)]"
+                          ? "bg-gradient-to-b from-emerald-400 to-emerald-600 text-slate-950 border-4 border-white shadow-2xl shadow-emerald-500/60 animate-bounce"
+                          : "bg-gradient-to-b from-emerald-900/60 via-emerald-950/80 to-slate-950 border-2 border-emerald-400 text-white shadow-2xl shadow-emerald-500/20 ring-1 ring-emerald-400/30"
                       }`}
                     >
-                      #{order.orderNumber}
+                      <div
+                        className={`text-5xl sm:text-6xl font-black tracking-tight ${
+                          isNew
+                            ? "text-slate-950"
+                            : "text-emerald-300 drop-shadow-[0_2px_12px_rgba(52,211,153,0.45)]"
+                        }`}
+                      >
+                        #{order.orderNumber}
+                      </div>
+                      {isNew ? (
+                        <span className="bg-slate-950 text-emerald-300 text-xs font-black uppercase px-3 py-1 rounded-full">
+                          🔔 ŞİMDİ HAZIR!
+                        </span>
+                      ) : (
+                        renderTypeTag(order)
+                      )}
                     </div>
-                    {isNew ? (
-                      <span className="bg-slate-950 text-emerald-300 text-xs font-black uppercase px-3 py-1 rounded-full">
-                        🔔 ŞİMDİ HAZIR!
-                      </span>
-                    ) : (
-                      renderTypeTag(order)
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
         </section>
       </main>
+
+      {/* 🖼️ 15. ÖZELLİK: TV DİJİTAL MENÜ SLAYT VİTRİNİ (OTOMATİK DÖNEN ŞEFİN ÖNERİSİ BARI) */}
+      {featuredItems.length > 0 &&
+        (() => {
+          const currentFeat =
+            featuredItems[slideIndex % featuredItems.length] || featuredItems[0];
+          return (
+            <div className="px-6 pb-3">
+              <div className="bg-gradient-to-r from-slate-900 via-amber-950/40 to-slate-900 border border-amber-500/40 rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+                <div className="flex items-center gap-3">
+                  <span className="bg-amber-500 text-slate-950 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow">
+                    ⭐ ŞEFİN VİTRİNİ ({(slideIndex % featuredItems.length) + 1}/
+                    {featuredItems.length})
+                  </span>
+                  <span className="text-base sm:text-lg font-black text-white">
+                    🍽️ {currentFeat.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-lg sm:text-xl font-black text-amber-400">
+                    {currentFeat.price.toFixed(0)} {currency}
+                  </span>
+                  <span className="hidden sm:inline text-xs font-bold text-slate-400">
+                    • Sağ üstteki QR kodu okutarak masanızdan veya sıradan hemen sipariş verebilirsiniz!
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* 7. ÖZELLİK: TV Digital Signage Alt Kayan Yazı (Kampanya, Happy Hour & Popüler Menü Bandı) */}
       <footer className="bg-gradient-to-r from-slate-950 via-orange-950/80 to-slate-950 border-t-2 border-orange-500/40 py-3 overflow-hidden flex items-center relative">

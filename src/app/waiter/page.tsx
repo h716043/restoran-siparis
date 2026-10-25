@@ -1527,8 +1527,25 @@ export default function WaiterTerminalPage() {
 
                         {isOccupied ? (
                           <div className="mt-2 space-y-1">
-                            <div className="text-sm font-black text-amber-300">
-                              {formatCurrency(totalBill)}
+                            <div className="flex items-baseline justify-between gap-1">
+                              <div className="text-sm font-black text-amber-300">
+                                {formatCurrency(totalBill)}
+                              </div>
+                              {/* 👥 13. ÖZELLİK: KİŞİ BAŞI OTOMATİK HESAP BÖLÜŞTÜRÜCÜ ROZETİ */}
+                              <span
+                                className="text-[10px] font-extrabold bg-stone-950/90 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-md"
+                                title="Kişi başı ortalama düşen tutar"
+                              >
+                                👥{" "}
+                                {formatCurrency(
+                                  totalBill /
+                                    Math.max(
+                                      2,
+                                      tableOrders[0]?.guestCount || 2
+                                    )
+                                )}
+                                /kişi
+                              </span>
                             </div>
                             <div className="text-[11px] text-stone-200 flex items-center justify-between">
                               <span>
@@ -1593,16 +1610,35 @@ export default function WaiterTerminalPage() {
                           {isOccupied ? "➕ Ürün Ekle" : "➕ Sipariş Aç"}
                         </button>
                         {isOccupied && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedTable(tNum);
-                              setActiveTab("bill");
-                            }}
-                            className="flex-1 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-100 font-bold text-[11px] border border-stone-700 transition"
-                          >
-                            🧾 Adisyon
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTable(tNum);
+                                setActiveTab("bill");
+                              }}
+                              className="flex-1 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-100 font-bold text-[11px] border border-stone-700 transition cursor-pointer"
+                            >
+                              🧾 Adisyon
+                            </button>
+                            {/* 🔄 5. ÖZELLİK: MASA KARTINDAN TEK TIKLA MASA TAŞI / BİRLEŞTİR KISAYOLU */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTable(tNum);
+                                setActiveTab("bill");
+                                showToast(
+                                  `🔄 ${formatTableLabel(
+                                    tNum
+                                  )} için hedef masayı seçip "Taşı / Birleştir" butonuna basın.`
+                                );
+                              }}
+                              title="Masayı başka masaya taşı veya birleştir"
+                              className="px-2 py-1.5 rounded-xl bg-sky-950/80 hover:bg-sky-900 text-sky-300 font-black text-[11px] border border-sky-500/40 transition cursor-pointer"
+                            >
+                              🔄
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>

@@ -2039,6 +2039,62 @@ export default function AdminDashboardPage() {
         </div>
       </header>
 
+      {/* 💓 16. ÖZELLİK: HER SEKMEDE GÖRÜNEN "CANLI RESTORAN NABZI" ÜST BANDI */}
+      {(() => {
+        const allTables = getRestaurantTables(settings);
+        const occupiedTablesSet = new Set(
+          orders
+            .filter(
+              (o) =>
+                o.orderType === "dine_in" &&
+                o.tableNumber &&
+                ["pending", "accepted", "ready"].includes(o.status)
+            )
+            .map((o) => o.tableNumber!)
+        );
+        const inKitchenCount = orders.filter((o) =>
+          ["pending", "accepted"].includes(o.status)
+        ).length;
+        const onRoadCount = orders.filter(
+          (o) => o.orderType === "delivery" && o.status === "ready"
+        ).length;
+        return (
+          <div className="bg-slate-950 border-b border-slate-800 px-6 py-2 text-xs text-slate-300">
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-black text-orange-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>CANLI RESTORAN NABZI:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <span className="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg font-bold">
+                  🪑 Dolu Masa:{" "}
+                  <strong className="text-purple-300">
+                    {occupiedTablesSet.size} / {allTables.length}
+                  </strong>
+                </span>
+                <span className="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg font-bold">
+                  🔥 Ocakta Bekleyen:{" "}
+                  <strong className="text-amber-300">
+                    {inKitchenCount} Sipariş
+                  </strong>
+                </span>
+                <span className="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg font-bold">
+                  🛵 Yoldaki Paket:{" "}
+                  <strong className="text-sky-300">{onRoadCount} Paket</strong>
+                </span>
+                <span className="bg-emerald-950/60 border border-emerald-700/60 px-2.5 py-1 rounded-lg font-bold text-emerald-200">
+                  💰 Bugünkü Canlı Ciro:{" "}
+                  <strong className="text-emerald-300 font-black">
+                    {todayRevenue.toFixed(2)} {settings?.currency || "₺"}
+                  </strong>{" "}
+                  ({todayOrders.length} Sipariş)
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Bildirim Toast */}
       {savingMsg && (
         <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 text-sm font-semibold border border-slate-700">
@@ -2830,10 +2886,25 @@ export default function AdminDashboardPage() {
                 {/* 📊 SAATLİK SİPARİŞ YOĞUNLUK ISI HARİTASI & AKILLI HAPPY HOUR / RFM RADARI */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                    <div>
-                      <h3 className="font-bold text-base text-slate-900">
-                        📊 Saatlik Sipariş Yoğunluk Isı Haritası (08:00 - 23:00)
-                      </h3>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-bold text-base text-slate-900">
+                          📊 Saatlik Sipariş Yoğunluk Isı Haritası (08:00 - 23:00)
+                        </h3>
+                        {(() => {
+                          const peakObj = [...hourlyStats].sort(
+                            (a, b) => b.count - a.count
+                          )[0];
+                          if (!peakObj || peakObj.count === 0) return null;
+                          return (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-black bg-gradient-to-r from-rose-600 to-orange-600 text-white px-2.5 py-0.5 rounded-full shadow-2xs">
+                              🔥 Zirve Saat (Peak Hour): {peakObj.hourLabel} (
+                              {peakObj.count} Sipariş •{" "}
+                              {peakObj.revenue.toFixed(0)} {settings?.currency})
+                            </span>
+                          );
+                        })()}
+                      </div>
                       <p className="text-xs text-slate-500">
                         Restoranın en yoğun ve en sakin saatlerini analiz edin, sakin saatlere tek tıkla Happy Hour tanımlayın
                       </p>
@@ -2886,10 +2957,10 @@ export default function AdminDashboardPage() {
                         h.count === 0
                           ? "bg-slate-50 border-slate-200 text-slate-400"
                           : ratio >= 0.75
-                          ? "bg-orange-600 border-orange-700 text-white shadow-sm"
+                          ? "bg-gradient-to-br from-rose-600 to-orange-600 border-rose-700 text-white shadow-md shadow-orange-500/20"
                           : ratio >= 0.4
-                          ? "bg-orange-100 border-orange-300 text-orange-900"
-                          : "bg-amber-50 border-amber-200 text-amber-900";
+                          ? "bg-gradient-to-br from-orange-100 to-amber-100 border-orange-300 text-orange-950"
+                          : "bg-amber-50/90 border-amber-200 text-amber-900";
                       return (
                         <div
                           key={h.hourLabel}

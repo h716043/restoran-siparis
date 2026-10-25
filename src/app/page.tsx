@@ -3039,6 +3039,37 @@ function CustomerMenuContent() {
                 </button>
               );
             })}
+            {/* 🎲 9. ÖZELLİK: "BUGÜN NE YESEM?" ŞEFİN ŞANSLI SEÇİMİ BUTONU */}
+            {items.some((i) => i.available) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const pool = items.filter(
+                    (i) =>
+                      i.available &&
+                      (i.popular ||
+                        i.badges?.includes("chef") ||
+                        i.categoryId !== "cat-6")
+                  );
+                  const candidates =
+                    pool.length > 0 ? pool : items.filter((i) => i.available);
+                  if (candidates.length === 0) return;
+                  const picked =
+                    candidates[Math.floor(Math.random() * candidates.length)];
+                  openItemModal(picked);
+                  setTableCallToast(
+                    `🎲 Şefin Şanslı Seçimi: "${picked.name}" (${picked.price.toFixed(
+                      0
+                    )} ${settings?.currency || "₺"})!`
+                  );
+                  setTimeout(() => setTableCallToast(""), 4200);
+                }}
+                className="px-3 py-1 rounded-full text-[11px] font-black whitespace-nowrap transition cursor-pointer bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white shadow-sm flex items-center gap-1"
+                title="Kararsız kaldığınızda şefin önerdiği rastgele bir lezzeti keşfedin"
+              >
+                <span>🎲 Bugün Ne Yesem?</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -3797,6 +3828,32 @@ function CustomerMenuContent() {
                     Sipariş Detayı →
                   </button>
                 )}
+                {/* 📲 11. ÖZELLİK: SİPARİŞ FİŞİNİ WHATSAPP'TA PAYLAŞ BUTONU */}
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(
+                    `🍽️ *${settings?.name || "Restoran"} Sipariş Özeti (#${
+                      bannerActiveOrder.orderNumber
+                    })*\n` +
+                      bannerActiveOrder.items
+                        .map(
+                          (it) =>
+                            `• ${it.quantity}x ${it.name} (${it.totalPrice.toFixed(
+                              0
+                            )} ${settings?.currency || "₺"})`
+                        )
+                        .join("\n") +
+                      `\n💰 *Toplam:* ${bannerActiveOrder.totalAmount.toFixed(
+                        2
+                      )} ${settings?.currency || "₺"}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-extrabold text-xs bg-[#25D366]/15 hover:bg-[#25D366] text-emerald-900 hover:text-slate-950 border border-[#25D366]/60 px-2.5 py-1.5 rounded-xl transition inline-flex items-center gap-1"
+                  title="Sipariş fişini arkadaşlarınla veya ailenle WhatsApp'tan paylaş"
+                >
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>📲 Fişi Paylaş</span>
+                </a>
               </div>
             </div>
 
@@ -4729,10 +4786,69 @@ function CustomerMenuContent() {
                     Müşteri Değerlendirmeleri ({publicReviews.length})
                   </h2>
                 </div>
-                <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
-                  ★ Doğrulanmış Sipariş Yorumları
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                  🛡️ %100 Doğrulanmış Sipariş Deneyimi
                 </span>
               </div>
+
+              {/* ⭐ 1. ÖZELLİK: 5 YILDIZ DAĞILIMLI GÖRSEL MÜŞTERİ MEMNUNİYET KOKPİTİ */}
+              {(() => {
+                const totalRev = Math.max(1, publicReviews.length);
+                const avgScore = (
+                  publicReviews.reduce((s, r) => s + r.rating, 0) / totalRev
+                ).toFixed(1);
+                const positivePct = Math.round(
+                  (publicReviews.filter((r) => r.rating >= 4).length /
+                    totalRev) *
+                    100
+                );
+                return (
+                  <div className="bg-gradient-to-r from-amber-50/80 via-orange-50/40 to-slate-50 border border-amber-200/80 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+                    <div className="sm:col-span-4 flex flex-col items-center justify-center text-center sm:border-r border-amber-200/70 pr-0 sm:pr-4">
+                      <div className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
+                        {avgScore}{" "}
+                        <span className="text-base font-bold text-slate-400">
+                          / 5.0
+                        </span>
+                      </div>
+                      <div className="text-sm text-amber-500 font-black tracking-widest mt-0.5">
+                        ★★★★★
+                      </div>
+                      <div className="text-[11px] font-extrabold text-emerald-700 mt-1">
+                        %{positivePct} Olumlu Deneyim ({publicReviews.length}{" "}
+                        Yorum)
+                      </div>
+                    </div>
+                    <div className="sm:col-span-8 space-y-1.5">
+                      {[5, 4, 3, 2, 1].map((star) => {
+                        const cnt = publicReviews.filter(
+                          (r) => Math.round(r.rating) === star
+                        ).length;
+                        const pct = Math.round((cnt / totalRev) * 100);
+                        return (
+                          <div
+                            key={star}
+                            className="flex items-center gap-2 text-xs"
+                          >
+                            <span className="w-8 font-extrabold text-slate-700 text-right">
+                              {star} ★
+                            </span>
+                            <div className="flex-1 h-2 bg-slate-200/80 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="w-9 text-[11px] font-bold text-slate-500">
+                              %{pct}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {publicReviews.slice(0, 6).map((rev) => (
@@ -6788,10 +6904,51 @@ function CustomerMenuContent() {
                 );
               })}
 
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">
-                  Ürün Notu (İsteğe Bağlı)
+              <div className="space-y-2">
+                <label className="block text-xs font-bold uppercase text-slate-500">
+                  Ürün Notu &amp; Hızlı Pişirme/Servis Tercihi (İsteğe Bağlı)
                 </label>
+                {/* 🌶️ 10. ÖZELLİK: ÜRÜN DETAY PENCERESİNDE İKONİK HIZLI TERCİH ÇİPLERİ */}
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "🌶️ Acısız Olsun",
+                    "🔥 Bol Acılı",
+                    "🧅 Soğansız",
+                    "🥖 Bol Lavaş / Ekmek",
+                    "🍽️ İyi Pişmiş",
+                    "🍋 Bol Limon & Yeşillik",
+                  ].map((chip) => {
+                    const active = itemNote.includes(chip);
+                    return (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => {
+                          if (active) {
+                            setItemNote(
+                              itemNote
+                                .replace(chip, "")
+                                .replace(/\s*,\s*,/g, ",")
+                                .replace(/^,\s*|\s*,\s*$/g, "")
+                                .trim()
+                            );
+                          } else {
+                            setItemNote((prev) =>
+                              prev.trim() ? `${prev.trim()}, ${chip}` : chip
+                            );
+                          }
+                        }}
+                        className={`text-[11px] font-extrabold px-2.5 py-1 rounded-xl border transition cursor-pointer ${
+                          active
+                            ? "bg-orange-600 text-white border-orange-600 shadow-2xs"
+                            : "bg-slate-100 hover:bg-orange-50 text-slate-700 border-slate-200"
+                        }`}
+                      >
+                        {active ? `✓ ${chip}` : chip}
+                      </button>
+                    );
+                  })}
+                </div>
                 <input
                   type="text"
                   placeholder="Örn: Tuzu az olsun, sos ayrı pakette gelsin..."
@@ -7449,6 +7606,7 @@ function CustomerMenuContent() {
               <div className="grid grid-cols-1 gap-2">
                 {upsellSuggestions.map((u) => {
                   const catObj = categories.find((c) => c.id === u.categoryId);
+                  const upPh = getCategoryVisualPlaceholder(u.categoryId, u.name);
                   return (
                     <div
                       key={u.id}
@@ -7459,26 +7617,35 @@ function CustomerMenuContent() {
                           <img
                             src={u.imageUrl}
                             alt={u.name}
-                            className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-slate-100"
+                            className="w-11 h-11 rounded-xl object-cover flex-shrink-0 border border-slate-100 shadow-2xs"
                           />
                         ) : (
-                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-100 to-amber-50 border border-orange-200/60 flex items-center justify-center text-base flex-shrink-0">
-                            {catObj?.icon || "🥤"}
+                          <div
+                            className={`w-11 h-11 rounded-xl bg-gradient-to-br ${upPh.gradient} flex items-center justify-center text-lg flex-shrink-0 shadow-2xs`}
+                          >
+                            {catObj?.icon || upPh.icon || "🥤"}
                           </div>
                         )}
                         <div className="min-w-0">
                           <div className="font-extrabold text-xs text-slate-900 truncate">
                             {u.name}
                           </div>
-                          <div className="text-[10px] font-bold text-orange-600">
-                            +{u.price} {settings?.currency}
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[11px] font-black text-orange-600">
+                              +{u.price.toFixed(0)} {settings?.currency}
+                            </span>
+                            {catObj && (
+                              <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded">
+                                {catObj.name}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => handleQuickAddUpsell(u)}
-                        className="inline-flex items-center gap-1 bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-[11px] px-2.5 py-1.5 rounded-lg whitespace-nowrap transition shadow-2xs cursor-pointer flex-shrink-0"
+                        className="inline-flex items-center gap-1 bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-700 hover:to-red-600 text-white font-extrabold text-[11px] px-2.5 py-1.5 rounded-xl whitespace-nowrap transition shadow-2xs cursor-pointer flex-shrink-0"
                       >
                         <Plus className="w-3.5 h-3.5" /> Ekle
                       </button>
@@ -8428,7 +8595,16 @@ function CustomerMenuContent() {
           </label>
         )}
 
-        <div className="pt-2 border-t border-slate-100 space-y-1">
+        {/* 🧾 3. ÖZELLİK: SİPARİŞ ONAY ADIMINDA GÖRSEL TERMAL FİŞ & TASARRUF ÖZETİ */}
+        <div className="bg-gradient-to-b from-amber-50/50 via-white to-slate-50 border-2 border-dashed border-slate-300 rounded-2xl p-3.5 space-y-1.5 shadow-2xs">
+          <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-500 border-b border-dashed border-slate-200 pb-1.5">
+            <span>🧾 Sipariş Adisyon Özeti ({cart.reduce((s, i) => s + i.quantity, 0)} Ürün)</span>
+            <span>{orderType === "delivery" ? "🛵 Paket" : orderType === "pickup" ? "🛍️ Gel-Al" : "🪑 Masa"}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs text-slate-600 font-semibold pt-0.5">
+            <span>Ara Toplam:</span>
+            <span>{subtotal.toFixed(2)} {settings?.currency}</span>
+          </div>
           {discountAmount > 0 && (
             <div className="flex items-center justify-between text-xs font-bold text-emerald-600">
               <span>{activePriceAdjustment.label}:</span>
@@ -8463,12 +8639,18 @@ function CustomerMenuContent() {
               </span>
             </div>
           )}
-          <div className="flex items-center justify-between font-extrabold text-base">
-            <span>Ödenecek Tutar</span>
+          <div className="flex items-center justify-between font-black text-base pt-1.5 border-t border-dashed border-slate-300">
+            <span>Ödenecek Net Tutar</span>
             <span className="text-orange-600">
               {totalAmount.toFixed(2)} {settings?.currency}
             </span>
           </div>
+          {discountAmount + loyaltyPointsToUse > 0 && (
+            <div className="bg-emerald-600 text-white text-[11px] font-black px-2.5 py-1 rounded-xl text-center shadow-2xs">
+              🎉 Bu siparişte toplam {(discountAmount + loyaltyPointsToUse).toFixed(2)}{" "}
+              {settings?.currency} tasarruf ettiniz!
+            </div>
+          )}
           {orderType === "dine_in" && splitPeopleCount > 1 && (
             <div className="flex items-center justify-between text-xs font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1">
               <span>👥 Kişi Başı ({splitPeopleCount} Kişi):</span>
