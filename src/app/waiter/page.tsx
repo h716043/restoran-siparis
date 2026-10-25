@@ -319,14 +319,25 @@ export default function WaiterTerminalPage() {
     }
   };
 
-  const fetchAllData = useCallback(async () => {
+  const lastWaiterMenuFetchRef = useRef<number>(0);
+  const isWaiterFetchingRef = useRef<boolean>(false);
+
+  const fetchAllData = useCallback(async (forceMenu = false) => {
+    if (isWaiterFetchingRef.current && !forceMenu) return;
+    isWaiterFetchingRef.current = true;
     try {
+      const now = Date.now();
+      const shouldFetchMenu =
+        forceMenu || now - lastWaiterMenuFetchRef.current > 25000;
+
       const [ordersRes, menuRes, reqRes] = await Promise.all([
         fetch("/api/orders", {
           headers: getWaiterHeaders(false),
           cache: "no-store",
         }),
-        fetch("/api/menu", { cache: "no-store" }),
+        shouldFetchMenu
+          ? fetch("/api/menu", { cache: "no-store" })
+          : Promise.resolve(null),
         fetch("/api/table-calls", { cache: "no-store" }),
       ]);
       if (ordersRes.status === 401) {
@@ -346,7 +357,8 @@ export default function WaiterTerminalPage() {
           setWaiterName(oData.authenticatedWaiter);
         }
       }
-      if (menuRes.ok) {
+      if (menuRes && menuRes.ok) {
+        lastWaiterMenuFetchRef.current = now;
         const mData = await menuRes.json();
         setCategories(mData.categories || []);
         setMenuItems(mData.items || mData.menuItems || []);
@@ -358,13 +370,15 @@ export default function WaiterTerminalPage() {
       }
     } catch (err) {
       console.error("Garson verisi alınamadı:", err);
+    } finally {
+      isWaiterFetchingRef.current = false;
     }
   }, [getWaiterHeaders]);
 
   useEffect(() => {
     if (!authenticated) return;
-    fetchAllData();
-    const interval = setInterval(fetchAllData, 4000);
+    fetchAllData(true);
+    const interval = setInterval(() => fetchAllData(false), 4000);
     return () => clearInterval(interval);
   }, [authenticated, fetchAllData]);
 

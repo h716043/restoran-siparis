@@ -16,7 +16,7 @@ export async function GET(
 ) {
   try {
     await pullActivityFromCloud();
-    await autoSyncOrdersWithPosIfNeeded().catch(() => {});
+    void autoSyncOrdersWithPosIfNeeded().catch(() => {});
     const { id } = await context.params;
     const order = getOrderById(id);
     if (!order) {
@@ -34,7 +34,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    await pullActivityFromCloud(true);
+    await pullActivityFromCloud();
     const { id } = await context.params;
     const body = await req.json();
 

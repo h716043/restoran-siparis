@@ -78,7 +78,33 @@ const nextProcess = spawn(
   }
 );
 
-// Sunucu hazır olduğunda tarayıcıda Admin panelini otomatik aç
+// Sunucu hazır olduğunda tüm ekranları arka planda önceden ısıt (Pre-Warm) ve tarayıcıda Admin panelini otomatik aç
+function preWarmAllRoutes() {
+  const routes = [
+    "/api/menu",
+    "/api/orders?publicTv=1",
+    "/api/table-calls",
+    "/api/caller-id",
+    "/admin",
+    "/kitchen",
+    "/waiter",
+    "/courier",
+    "/tv",
+    "/",
+  ];
+  routes.forEach((route, idx) => {
+    setTimeout(() => {
+      try {
+        const req = http.get(`http://localhost:${APP_PORT}${route}`, (res) => {
+          res.resume();
+        });
+        req.on("error", () => {});
+        req.setTimeout(20000, () => req.destroy());
+      } catch {}
+    }, idx * 400);
+  });
+}
+
 if (!noBrowserOpen) {
   let opened = false;
   const checkServer = setInterval(() => {
@@ -91,9 +117,27 @@ if (!noBrowserOpen) {
         opened = true;
         clearInterval(checkServer);
         console.log(
-          `\n🌐 Sunucu hazır! Tarayıcıda Admin Paneli açılıyor: http://localhost:${APP_PORT}/admin\n`
+          `\n🌐 Sunucu hazır! Tüm ekranlar önbelleğe alınıyor ve Admin Paneli açılıyor: http://localhost:${APP_PORT}/admin\n`
         );
+        preWarmAllRoutes();
         openBrowser();
+      }
+    });
+    req.on("error", () => {});
+    req.end();
+  }, 1500);
+} else {
+  let warmed = false;
+  const checkWarm = setInterval(() => {
+    if (warmed) {
+      clearInterval(checkWarm);
+      return;
+    }
+    const req = http.get(`http://localhost:${APP_PORT}/api/settings`, (res) => {
+      if (res.statusCode && res.statusCode < 500 && !warmed) {
+        warmed = true;
+        clearInterval(checkWarm);
+        preWarmAllRoutes();
       }
     });
     req.on("error", () => {});

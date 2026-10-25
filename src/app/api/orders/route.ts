@@ -31,7 +31,7 @@ import {
 export async function GET(req: NextRequest) {
   try {
     await pullActivityFromCloud();
-    await autoSyncOrdersWithPosIfNeeded().catch(() => {});
+    void autoSyncOrdersWithPosIfNeeded().catch(() => {});
     const settings = getSettings();
 
     // TV Müşteri Sıra Çağrı Ekranı (/tv) için şifresiz, kişisel veri içermeyen özet akış + Digital Signage kampanya bandı
@@ -238,10 +238,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Yetkisiz erişim" }, { status: 401 });
     }
 
-    if (role === "admin" || role === "kitchen") {
-      await autoSyncOrdersWithPosIfNeeded().catch(() => {});
-    }
-
     const orders = getOrders();
     const posLiveTables = await fetchPosLiveTableStates();
 
@@ -268,7 +264,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await pullActivityFromCloud(true);
+    await pullActivityFromCloud();
     const body = await req.json();
     if (!body.items || body.items.length === 0) {
       return NextResponse.json({ error: "Sepet boş" }, { status: 400 });
@@ -529,21 +525,38 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Siteden sipariş veren veya cari hesaba yazılan müşteriyi SambaPOS'a aktar
-    if (
-      (order.orderType !== "dine_in" && (order.customerName || order.customerPhone)) ||
-      body.paymentMethod === "credit"
-    ) {
-      await syncCustomerToSambaPos({
-        name: body.creditAccountName || order.customerName || "",
-        phone: order.customerPhone || "",
-        address: order.customerAddress || "",
-      });
-    }
+    // Siteden sipariş veren veya cari hesaba yazılan müşteriyi SambaPOS'a ve buluta arka planda aktar
+    const isServerless =
+      process.env.NETLIFY === "true" ||
+      Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME) ||
+      process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
 
-    await autoSyncOrdersWithPosIfNeeded().catch(() => {});
-    await syncActivityWithCloud();
-    await pushCatalogToCloud();
+    const runPostOrderSync = async () => {
+      try {
+        if (
+          (order.orderType !== "dine_in" &&
+            (order.customerName || order.customerPhone)) ||
+          body.paymentMethod === "credit"
+        ) {
+          await syncCustomerToSambaPos({
+            name: body.creditAccountName || order.customerName || "",
+            phone: order.customerPhone || "",
+            address: order.customerAddress || "",
+          });
+        }
+        await autoSyncOrdersWithPosIfNeeded(true).catch(() => {});
+        await syncActivityWithCloud();
+        await pushCatalogToCloud();
+      } catch (e) {
+        console.error("runPostOrderSync error:", e);
+      }
+    };
+
+    if (isServerless) {
+      await runPostOrderSync();
+    } else {
+      void runPostOrderSync();
+    }
     return NextResponse.json({ order, user: customerRecord }, { status: 201 });
   } catch (error) {
     console.error("POST /api/orders error:", error);
@@ -556,7 +569,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await pullActivityFromCloud(true);
+    await pullActivityFromCloud();
     const settings = getSettings();
     const role = req.cookies.get("restoran_staff_role")?.value;
     const waiterPin = req.headers.get("x-waiter-pin")?.trim();
@@ -627,7 +640,7 @@ export async function PATCH(req: NextRequest) {
       await syncActivityWithCloud();
       if (body.paymentMethod === "credit") {
         if (body.creditAccountName || body.creditAccountPhone) {
-          await syncCustomerToSambaPos({
+          void syncCustomerToSambaPos({
             name: String(body.creditAccountName || ""),
             phone: String(body.creditAccountPhone || ""),
           });
@@ -669,7 +682,7 @@ export async function PATCH(req: NextRequest) {
               String(body.customerName).trim().toLocaleLowerCase("tr-TR"))
       );
       if (matchedAcc) {
-        await syncCustomerToSambaPos({
+        void syncCustomerToSambaPos({
           name: matchedAcc.customerName,
           phone: matchedAcc.customerPhone,
         });

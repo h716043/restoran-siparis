@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await pullActivityFromCloud(true);
+    await pullActivityFromCloud();
     const body = await req.json();
     const tableNumber = String(body.tableNumber || "").trim();
     const type = body.type as
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await pullActivityFromCloud(true);
+    await pullActivityFromCloud();
     const body = await req.json();
     if (!body.id) {
       return NextResponse.json({ error: "ID gerekli" }, { status: 400 });

@@ -2584,55 +2584,64 @@ export function mergeCatalogFromCloud(payload: {
   menuItems?: MenuItem[];
 }) {
   const db = getDb();
-  if (payload.settings) {
-    const localSettings = getSettings();
-    const merged: RestaurantSettings = {
-      ...payload.settings,
-      securityConfig:
-        payload.settings.securityConfig || localSettings.securityConfig,
-      cloudSyncConfig:
-        localSettings.cloudSyncConfig || payload.settings.cloudSyncConfig,
-      posIntegrationConfig:
-        localSettings.posIntegrationConfig ||
-        payload.settings.posIntegrationConfig,
-    };
-    db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(
-      JSON.stringify(merged)
-    );
-  }
-  if (payload.categories && payload.categories.length > 0) {
-    db.prepare("DELETE FROM categories").run();
-    const stmt = db.prepare(
-      "INSERT INTO categories (id, name, slug, sortOrder, icon) VALUES (?, ?, ?, ?, ?)"
-    );
-    for (const c of payload.categories) {
-      stmt.run(c.id, c.name, c.slug, c.sortOrder, c.icon);
-    }
-  }
-  if (payload.menuItems && payload.menuItems.length > 0) {
-    db.prepare("DELETE FROM menu_items").run();
-    const stmt = db.prepare(`
-      INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, dailyStock, modifierGroupsJson)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const item of payload.menuItems) {
-      stmt.run(
-        item.id,
-        item.categoryId,
-        item.name,
-        item.description,
-        item.price,
-        item.imageUrl,
-        item.available ? 1 : 0,
-        item.popular ? 1 : 0,
-        item.dailyStock !== undefined && item.dailyStock !== null
-          ? Number(item.dailyStock)
-          : null,
-        JSON.stringify(item.modifierGroups || [])
+  db.exec("BEGIN");
+  try {
+    if (payload.settings) {
+      const localSettings = getSettings();
+      const merged: RestaurantSettings = {
+        ...payload.settings,
+        securityConfig:
+          payload.settings.securityConfig || localSettings.securityConfig,
+        cloudSyncConfig:
+          localSettings.cloudSyncConfig || payload.settings.cloudSyncConfig,
+        posIntegrationConfig:
+          localSettings.posIntegrationConfig ||
+          payload.settings.posIntegrationConfig,
+      };
+      db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(
+        JSON.stringify(merged)
       );
     }
+    if (payload.categories && payload.categories.length > 0) {
+      db.prepare("DELETE FROM categories").run();
+      const stmt = db.prepare(
+        "INSERT INTO categories (id, name, slug, sortOrder, icon) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const c of payload.categories) {
+        stmt.run(c.id, c.name, c.slug, c.sortOrder, c.icon);
+      }
+    }
+    if (payload.menuItems && payload.menuItems.length > 0) {
+      db.prepare("DELETE FROM menu_items").run();
+      const stmt = db.prepare(`
+        INSERT INTO menu_items (id, categoryId, name, description, price, imageUrl, available, popular, dailyStock, modifierGroupsJson)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const item of payload.menuItems) {
+        stmt.run(
+          item.id,
+          item.categoryId,
+          item.name,
+          item.description,
+          item.price,
+          item.imageUrl,
+          item.available ? 1 : 0,
+          item.popular ? 1 : 0,
+          item.dailyStock !== undefined && item.dailyStock !== null
+            ? Number(item.dailyStock)
+            : null,
+          JSON.stringify(item.modifierGroups || [])
+        );
+      }
+    }
+    ensureCampaignCategoryAndItems(db);
+    db.exec("COMMIT");
+  } catch (e) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw e;
   }
-  ensureCampaignCategoryAndItems(db);
 }
 
 export function mergeActivityFromCloud(payload: {
@@ -2644,199 +2653,217 @@ export function mergeActivityFromCloud(payload: {
   whatsappLogs?: WhatsAppLog[];
 }) {
   const db = getDb();
-
-  if (payload.orders) {
-    const existingRows = db
-      .prepare("SELECT id, splitPaymentJson FROM orders")
-      .all() as Array<{ id: string; splitPaymentJson: string | null }>;
-    const existingSplitMap = new Map<string, string | null>();
-    for (const row of existingRows) {
-      existingSplitMap.set(row.id, row.splitPaymentJson);
-    }
-
-    const upsertOrder = db.prepare(`
-      INSERT INTO orders (
-        id, orderNumber, orderType, status, tableNumber, userId,
-        customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
-        scheduledTime, orderNote, paymentMethod, splitPaymentJson, subtotal, discountAmount, couponCode,
-        deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
-        loyaltyPointsEarned, loyaltyPointsUsed, rating, reviewText, reviewedAt,
-        itemsJson, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        status = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.status ELSE orders.status END,
-        tableNumber = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.tableNumber ELSE orders.tableNumber END,
-        customerName = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.customerName ELSE orders.customerName END,
-        orderNote = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.orderNote ELSE orders.orderNote END,
-        paymentMethod = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.paymentMethod ELSE orders.paymentMethod END,
-        splitPaymentJson = COALESCE(excluded.splitPaymentJson, orders.splitPaymentJson),
-        subtotal = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.subtotal ELSE orders.subtotal END,
-        discountAmount = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.discountAmount ELSE orders.discountAmount END,
-        totalAmount = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.totalAmount ELSE orders.totalAmount END,
-        itemsJson = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.itemsJson ELSE orders.itemsJson END,
-        estimatedMinutes = COALESCE(excluded.estimatedMinutes, orders.estimatedMinutes),
-        courierName = COALESCE(excluded.courierName, orders.courierName),
-        rejectReason = COALESCE(excluded.rejectReason, orders.rejectReason),
-        rating = COALESCE(excluded.rating, orders.rating),
-        reviewText = COALESCE(excluded.reviewText, orders.reviewText),
-        reviewedAt = COALESCE(excluded.reviewedAt, orders.reviewedAt),
-        updatedAt = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.updatedAt ELSE orders.updatedAt END
-    `);
-    for (const o of payload.orders) {
-      let localPosSyncInfo = undefined;
-      const localSplitRaw = existingSplitMap.get(o.id);
-      if (localSplitRaw) {
-        try {
-          localPosSyncInfo = JSON.parse(localSplitRaw)?.posSyncInfo;
-        } catch {
-          // ignore
-        }
+  db.exec("BEGIN");
+  try {
+    if (payload.orders) {
+      const existingRows = db
+        .prepare("SELECT id, updatedAt, splitPaymentJson FROM orders")
+        .all() as Array<{
+        id: string;
+        updatedAt: string;
+        splitPaymentJson: string | null;
+      }>;
+      const existingSplitMap = new Map<string, string | null>();
+      const existingUpdatedAtMap = new Map<string, string>();
+      for (const row of existingRows) {
+        existingSplitMap.set(row.id, row.splitPaymentJson);
+        existingUpdatedAtMap.set(row.id, row.updatedAt);
       }
-      const mergedPosSync =
-        localPosSyncInfo?.status === "synced"
-          ? localPosSyncInfo
-          : o.posSyncInfo || o.splitPaymentInfo?.posSyncInfo || localPosSyncInfo;
-      const mergedSplit =
-        o.splitPaymentInfo || mergedPosSync
-          ? {
-              cashAmount: o.splitPaymentInfo?.cashAmount || 0,
-              cardAmount: o.splitPaymentInfo?.cardAmount || 0,
-              ...(o.splitPaymentInfo || {}),
-              ...(mergedPosSync ? { posSyncInfo: mergedPosSync } : {}),
-            }
-          : null;
 
-      upsertOrder.run(
-        o.id,
-        o.orderNumber,
-        o.orderType,
-        o.status,
-        o.tableNumber || null,
-        o.userId || null,
-        o.customerName,
-        o.customerPhone,
-        o.customerAddress || null,
-        o.deliveryZoneId || null,
-        o.deliveryZoneName || null,
-        o.scheduledTime || null,
-        o.orderNote || null,
-        o.paymentMethod,
-        mergedSplit ? JSON.stringify(mergedSplit) : null,
-        o.subtotal,
-        o.discountAmount || 0,
-        o.couponCode || null,
-        o.deliveryFee,
-        o.totalAmount,
-        o.estimatedMinutes || null,
-        o.courierName || null,
-        o.rejectReason || null,
-        o.loyaltyPointsEarned || 0,
-        o.loyaltyPointsUsed || 0,
-        o.rating || null,
-        o.reviewText || null,
-        o.reviewedAt || null,
-        JSON.stringify(o.items || []),
-        o.createdAt,
-        o.updatedAt
-      );
-    }
-  }
+      const upsertOrder = db.prepare(`
+        INSERT INTO orders (
+          id, orderNumber, orderType, status, tableNumber, userId,
+          customerName, customerPhone, customerAddress, deliveryZoneId, deliveryZoneName,
+          scheduledTime, orderNote, paymentMethod, splitPaymentJson, subtotal, discountAmount, couponCode,
+          deliveryFee, totalAmount, estimatedMinutes, courierName, rejectReason,
+          loyaltyPointsEarned, loyaltyPointsUsed, rating, reviewText, reviewedAt,
+          itemsJson, createdAt, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.status ELSE orders.status END,
+          tableNumber = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.tableNumber ELSE orders.tableNumber END,
+          customerName = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.customerName ELSE orders.customerName END,
+          orderNote = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.orderNote ELSE orders.orderNote END,
+          paymentMethod = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.paymentMethod ELSE orders.paymentMethod END,
+          splitPaymentJson = COALESCE(excluded.splitPaymentJson, orders.splitPaymentJson),
+          subtotal = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.subtotal ELSE orders.subtotal END,
+          discountAmount = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.discountAmount ELSE orders.discountAmount END,
+          totalAmount = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.totalAmount ELSE orders.totalAmount END,
+          itemsJson = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.itemsJson ELSE orders.itemsJson END,
+          estimatedMinutes = COALESCE(excluded.estimatedMinutes, orders.estimatedMinutes),
+          courierName = COALESCE(excluded.courierName, orders.courierName),
+          rejectReason = COALESCE(excluded.rejectReason, orders.rejectReason),
+          rating = COALESCE(excluded.rating, orders.rating),
+          reviewText = COALESCE(excluded.reviewText, orders.reviewText),
+          reviewedAt = COALESCE(excluded.reviewedAt, orders.reviewedAt),
+          updatedAt = CASE WHEN excluded.updatedAt >= orders.updatedAt THEN excluded.updatedAt ELSE orders.updatedAt END
+      `);
+      for (const o of payload.orders) {
+        const localUpdatedAt = existingUpdatedAtMap.get(o.id);
+        if (localUpdatedAt && localUpdatedAt >= o.updatedAt && !o.rating) {
+          continue;
+        }
+        let localPosSyncInfo = undefined;
+        const localSplitRaw = existingSplitMap.get(o.id);
+        if (localSplitRaw) {
+          try {
+            localPosSyncInfo = JSON.parse(localSplitRaw)?.posSyncInfo;
+          } catch {
+            // ignore
+          }
+        }
+        const mergedPosSync =
+          localPosSyncInfo?.status === "synced"
+            ? localPosSyncInfo
+            : o.posSyncInfo || o.splitPaymentInfo?.posSyncInfo || localPosSyncInfo;
+        const mergedSplit =
+          o.splitPaymentInfo || mergedPosSync
+            ? {
+                cashAmount: o.splitPaymentInfo?.cashAmount || 0,
+                cardAmount: o.splitPaymentInfo?.cardAmount || 0,
+                ...(o.splitPaymentInfo || {}),
+                ...(mergedPosSync ? { posSyncInfo: mergedPosSync } : {}),
+              }
+            : null;
 
-  if (payload.reservations) {
-    const upsertRes = db.prepare(`
-      INSERT INTO reservations (
-        id, reservationNumber, customerName, customerPhone,
-        guestCount, reservationDate, reservationTime, specialRequests,
-        assignedTable, status, rejectReason, createdAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        status = CASE WHEN reservations.status != 'pending' AND excluded.status = 'pending' THEN reservations.status ELSE excluded.status END,
-        assignedTable = COALESCE(excluded.assignedTable, reservations.assignedTable),
-        rejectReason = COALESCE(excluded.rejectReason, reservations.rejectReason)
-    `);
-    for (const r of payload.reservations) {
-      upsertRes.run(
-        r.id,
-        r.reservationNumber || 501,
-        r.customerName,
-        r.customerPhone,
-        r.guestCount,
-        r.reservationDate,
-        r.reservationTime,
-        r.specialRequests || null,
-        r.assignedTable || null,
-        r.status,
-        r.rejectReason || null,
-        r.createdAt
-      );
+        upsertOrder.run(
+          o.id,
+          o.orderNumber,
+          o.orderType,
+          o.status,
+          o.tableNumber || null,
+          o.userId || null,
+          o.customerName,
+          o.customerPhone,
+          o.customerAddress || null,
+          o.deliveryZoneId || null,
+          o.deliveryZoneName || null,
+          o.scheduledTime || null,
+          o.orderNote || null,
+          o.paymentMethod,
+          mergedSplit ? JSON.stringify(mergedSplit) : null,
+          o.subtotal,
+          o.discountAmount || 0,
+          o.couponCode || null,
+          o.deliveryFee,
+          o.totalAmount,
+          o.estimatedMinutes || null,
+          o.courierName || null,
+          o.rejectReason || null,
+          o.loyaltyPointsEarned || 0,
+          o.loyaltyPointsUsed || 0,
+          o.rating || null,
+          o.reviewText || null,
+          o.reviewedAt || null,
+          JSON.stringify(o.items || []),
+          o.createdAt,
+          o.updatedAt
+        );
+      }
     }
-  }
 
-  if (payload.tableCalls) {
-    const upsertCall = db.prepare(`
-      INSERT INTO table_calls (id, tableNumber, type, status, createdAt)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        status = CASE WHEN table_calls.status = 'resolved' OR excluded.status = 'resolved' THEN 'resolved' ELSE excluded.status END
-    `);
-    for (const c of payload.tableCalls) {
-      upsertCall.run(c.id, c.tableNumber, c.type, c.status, c.createdAt);
+    if (payload.reservations) {
+      const upsertRes = db.prepare(`
+        INSERT INTO reservations (
+          id, reservationNumber, customerName, customerPhone,
+          guestCount, reservationDate, reservationTime, specialRequests,
+          assignedTable, status, rejectReason, createdAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status = CASE WHEN reservations.status != 'pending' AND excluded.status = 'pending' THEN reservations.status ELSE excluded.status END,
+          assignedTable = COALESCE(excluded.assignedTable, reservations.assignedTable),
+          rejectReason = COALESCE(excluded.rejectReason, reservations.rejectReason)
+      `);
+      for (const r of payload.reservations) {
+        upsertRes.run(
+          r.id,
+          r.reservationNumber || 501,
+          r.customerName,
+          r.customerPhone,
+          r.guestCount,
+          r.reservationDate,
+          r.reservationTime,
+          r.specialRequests || null,
+          r.assignedTable || null,
+          r.status,
+          r.rejectReason || null,
+          r.createdAt
+        );
+      }
     }
-  }
 
-  if (payload.users) {
-    const upsertUser = db.prepare(`
-      INSERT INTO users (id, phone, name, addressesJson, loyaltyPoints, createdAt, lastLoginAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(phone) DO UPDATE SET
-        name = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.name ELSE users.name END,
-        addressesJson = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.addressesJson ELSE users.addressesJson END,
-        loyaltyPoints = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.loyaltyPoints ELSE users.loyaltyPoints END,
-        lastLoginAt = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.lastLoginAt ELSE users.lastLoginAt END
-    `);
-    for (const u of payload.users) {
-      upsertUser.run(
-        u.id,
-        u.phone,
-        u.name,
-        JSON.stringify(u.addresses || []),
-        Number(u.loyaltyPoints || 0),
-        u.createdAt,
-        u.lastLoginAt
-      );
+    if (payload.tableCalls) {
+      const upsertCall = db.prepare(`
+        INSERT INTO table_calls (id, tableNumber, type, status, createdAt)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status = CASE WHEN table_calls.status = 'resolved' OR excluded.status = 'resolved' THEN 'resolved' ELSE excluded.status END
+      `);
+      for (const c of payload.tableCalls) {
+        upsertCall.run(c.id, c.tableNumber, c.type, c.status, c.createdAt);
+      }
     }
-  }
 
-  if (payload.otpCodes) {
-    const upsertOtp = db.prepare(`
-      INSERT INTO otp_codes (phone, code, expiresAt)
-      VALUES (?, ?, ?)
-      ON CONFLICT(phone) DO UPDATE SET
-        code = excluded.code,
-        expiresAt = excluded.expiresAt
-    `);
-    for (const otp of payload.otpCodes) {
-      upsertOtp.run(otp.phone, otp.code, otp.expiresAt);
+    if (payload.users) {
+      const upsertUser = db.prepare(`
+        INSERT INTO users (id, phone, name, addressesJson, loyaltyPoints, createdAt, lastLoginAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(phone) DO UPDATE SET
+          name = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.name ELSE users.name END,
+          addressesJson = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.addressesJson ELSE users.addressesJson END,
+          loyaltyPoints = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.loyaltyPoints ELSE users.loyaltyPoints END,
+          lastLoginAt = CASE WHEN excluded.lastLoginAt > COALESCE(users.lastLoginAt, '') THEN excluded.lastLoginAt ELSE users.lastLoginAt END
+      `);
+      for (const u of payload.users) {
+        upsertUser.run(
+          u.id,
+          u.phone,
+          u.name,
+          JSON.stringify(u.addresses || []),
+          Number(u.loyaltyPoints || 0),
+          u.createdAt,
+          u.lastLoginAt
+        );
+      }
     }
-  }
 
-  if (payload.whatsappLogs) {
-    const upsertWaLog = db.prepare(`
-      INSERT INTO whatsapp_logs (id, phone, message, type, status, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        status = CASE WHEN whatsapp_logs.status = 'sent' OR excluded.status = 'sent' THEN 'sent' ELSE excluded.status END
-    `);
-    for (const log of payload.whatsappLogs) {
-      upsertWaLog.run(
-        log.id,
-        log.phone,
-        log.message,
-        log.type,
-        log.status,
-        log.createdAt
-      );
+    if (payload.otpCodes) {
+      const upsertOtp = db.prepare(`
+        INSERT INTO otp_codes (phone, code, expiresAt)
+        VALUES (?, ?, ?)
+        ON CONFLICT(phone) DO UPDATE SET
+          code = excluded.code,
+          expiresAt = excluded.expiresAt
+      `);
+      for (const otp of payload.otpCodes) {
+        upsertOtp.run(otp.phone, otp.code, otp.expiresAt);
+      }
     }
+
+    if (payload.whatsappLogs) {
+      const upsertWaLog = db.prepare(`
+        INSERT INTO whatsapp_logs (id, phone, message, type, status, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status = CASE WHEN whatsapp_logs.status = 'sent' OR excluded.status = 'sent' THEN 'sent' ELSE excluded.status END
+      `);
+      for (const log of payload.whatsappLogs) {
+        upsertWaLog.run(
+          log.id,
+          log.phone,
+          log.message,
+          log.type,
+          log.status,
+          log.createdAt
+        );
+      }
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw e;
   }
 }
 

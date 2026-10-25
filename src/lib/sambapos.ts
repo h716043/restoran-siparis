@@ -118,6 +118,10 @@ function normalizeServerUrl(raw: string): string {
   return (raw || "http://localhost:9000").trim().replace(/\/+$/, "");
 }
 
+let cachedSambaAccessToken = "";
+let cachedSambaTokenKey = "";
+let cachedSambaTokenExpiresAt = 0;
+
 /**
  * SambaPOS V5 Message Server OAuth2 (/Token) üzerinden Access Token alır.
  * Kullanıcının girdiği bilgileri önce dener; eğer client_id veya kullanıcı adı
@@ -126,6 +130,14 @@ function normalizeServerUrl(raw: string): string {
  */
 async function authenticateSambaPos(cfg: SambaPosConfig): Promise<string> {
   const baseUrl = normalizeServerUrl(cfg.serverUrl);
+  const cacheKey = `${baseUrl}|${cfg.clientId || ""}|${cfg.username || ""}|${cfg.password || ""}`;
+  if (
+    cachedSambaAccessToken &&
+    cachedSambaTokenKey === cacheKey &&
+    Date.now() < cachedSambaTokenExpiresAt
+  ) {
+    return cachedSambaAccessToken;
+  }
 
   const candidateCredentials: Array<{
     clientId: string;
@@ -174,12 +186,15 @@ async function authenticateSambaPos(cfg: SambaPosConfig): Promise<string> {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: body.toString(),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(2000),
       });
 
       if (res.ok) {
         const data = (await res.json()) as { access_token?: string };
         if (data?.access_token) {
+          cachedSambaAccessToken = data.access_token;
+          cachedSambaTokenKey = cacheKey;
+          cachedSambaTokenExpiresAt = Date.now() + 10 * 60 * 1000;
           return data.access_token;
         }
       } else {
@@ -2125,7 +2140,9 @@ export async function syncSiteOrderUpdateToSambaPos(
  * 1) Hem yerel hem de Netlify/Turso buluttan yeni gelen siparişleri `syncTrigger` ayarına göre otomatik SambaPOS, Adisyo veya NarPOS/Kerzz/Özel POS'a aktarır.
  * 2) POS sistemlerinde kurye ataması veya "Teslim Edildi / Ödendi" yapılan siparişleri otomatik olarak sitede de günceller.
  */
-export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
+let lastAutoSyncAttemptMs = 0;
+
+export async function autoSyncOrdersWithPosIfNeeded(force = false): Promise<void> {
   if (
     process.env.NETLIFY === "true" ||
     process.env.AWS_LAMBDA_FUNCTION_NAME ||
@@ -2134,6 +2151,11 @@ export async function autoSyncOrdersWithPosIfNeeded(): Promise<void> {
     return;
   }
   if (isAutoSyncRunning) return;
+  const nowCheck = Date.now();
+  if (!force && nowCheck - lastAutoSyncAttemptMs < 4500) {
+    return;
+  }
+  lastAutoSyncAttemptMs = nowCheck;
 
   const posCfg = getResolvedPosConfig();
   const sambaCfg = posCfg.sambaPos;
@@ -3353,9 +3375,9 @@ export async function syncCustomerToSambaPos(customer: {
 
 let cachedPosTableStates: Record<string, PosTableLiveState> | null = null;
 let cachedPosTableStatesAtMs = 0;
+let isRefreshingPosTables = false;
 
 export function invalidatePosTableStatesCache(): void {
-  cachedPosTableStates = null;
   cachedPosTableStatesAtMs = 0;
 }
 
@@ -3390,8 +3412,24 @@ export async function fetchPosLiveTableStates(options?: {
   if (
     !options?.force &&
     cachedPosTableStates &&
-    now - cachedPosTableStatesAtMs < 1500
+    now - cachedPosTableStatesAtMs < 4000
   ) {
+    return { enabled: true, tables: cachedPosTableStates };
+  }
+
+  // Eğer önbellekte zaten veri varsa ve zorunlu yenileme değilse anında önbelleği döndür, SQL sorgusunu arka planda çalıştır
+  if (!options?.force && cachedPosTableStates) {
+    if (!isRefreshingPosTables) {
+      isRefreshingPosTables = true;
+      cachedPosTableStatesAtMs = now;
+      setTimeout(() => {
+        fetchPosLiveTableStates({ force: true })
+          .catch(() => {})
+          .finally(() => {
+            isRefreshingPosTables = false;
+          });
+      }, 0);
+    }
     return { enabled: true, tables: cachedPosTableStates };
   }
 

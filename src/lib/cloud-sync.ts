@@ -91,12 +91,24 @@ async function executeTursoStatements(
   return res.json();
 }
 
+let cloudTableEnsured = false;
+
 export async function ensureCloudTable() {
+  if (cloudTableEnsured) return;
   await executeTursoStatements([
     {
       sql: "CREATE TABLE IF NOT EXISTS restoran_cloud_store (k TEXT PRIMARY KEY, v TEXT NOT NULL, updatedAt TEXT NOT NULL)",
     },
   ]);
+  cloudTableEnsured = true;
+}
+
+function isServerlessEnv(): boolean {
+  return (
+    process.env.NETLIFY === "true" ||
+    Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME) ||
+    process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true"
+  );
 }
 
 /**
@@ -104,60 +116,79 @@ export async function ensureCloudTable() {
  * buluta (Turso) gönderir. Böylece Netlify'daki müşteri sayfası anında güncellenir.
  */
 export async function pushCatalogToCloud(): Promise<boolean> {
-  try {
-    if (!resolveTursoCredentials()) return false;
-    await ensureCloudTable();
+  const doPush = async (): Promise<boolean> => {
+    try {
+      if (!resolveTursoCredentials()) return false;
+      await ensureCloudTable();
 
-    const settings = getSettings();
-    const categories = getCategories();
-    const menuItems = getMenuItems();
+      const settings = getSettings();
+      const categories = getCategories();
+      const menuItems = getMenuItems();
 
-    const catalogPayload = JSON.stringify({
-      settings: {
-        ...settings,
-        securityConfig: undefined,
-        cloudSyncConfig: undefined,
-        posIntegrationConfig: undefined,
-      },
-      categories,
-      menuItems,
-    });
+      const catalogPayload = JSON.stringify({
+        settings: {
+          ...settings,
+          securityConfig: undefined,
+          cloudSyncConfig: undefined,
+          posIntegrationConfig: undefined,
+        },
+        categories,
+        menuItems,
+      });
 
-    await executeTursoStatements([
-      {
-        sql: `INSERT INTO restoran_cloud_store (k, v, updatedAt) VALUES ('catalog', ?, ?)
-              ON CONFLICT(k) DO UPDATE SET v = excluded.v, updatedAt = excluded.updatedAt`,
-        args: [catalogPayload, new Date().toISOString()],
-      },
-    ]);
+      const nowIso = new Date().toISOString();
+      await executeTursoStatements([
+        {
+          sql: `INSERT INTO restoran_cloud_store (k, v, updatedAt) VALUES ('catalog', ?, ?)
+                ON CONFLICT(k) DO UPDATE SET v = excluded.v, updatedAt = excluded.updatedAt`,
+          args: [catalogPayload, nowIso],
+        },
+      ]);
+      lastCloudCatalogUpdatedAt = nowIso;
+      return true;
+    } catch (e) {
+      console.error("pushCatalogToCloud error:", e);
+      return false;
+    }
+  };
+
+  if (!isServerlessEnv()) {
+    void doPush();
     return true;
-  } catch (e) {
-    console.error("pushCatalogToCloud error:", e);
-    return false;
   }
+  return doPush();
 }
+
+let lastCloudCatalogUpdatedAt = "";
+let lastCatalogPullTime = 0;
 
 /**
  * Netlify müşteri sayfası açıldığında buluttaki güncel menü ve dükkan ayarlarını çeker.
  */
 export async function pullCatalogFromCloud(force = false): Promise<boolean> {
   try {
-    const isNetlify =
-      process.env.NETLIFY === "true" ||
-      process.env.NEXT_PUBLIC_CUSTOMER_ONLY === "true";
+    const isNetlify = isServerlessEnv();
     if (!isNetlify && !force) return false;
+    if (!force && Date.now() - lastCatalogPullTime < 5000) return true;
     if (!resolveTursoCredentials()) return false;
     const data = await executeTursoStatements([
       {
-        sql: "SELECT v FROM restoran_cloud_store WHERE k = 'catalog'",
+        sql: "SELECT updatedAt, CASE WHEN updatedAt != ? THEN v ELSE NULL END FROM restoran_cloud_store WHERE k = 'catalog'",
+        args: [lastCloudCatalogUpdatedAt],
       },
     ]);
+    lastCatalogPullTime = Date.now();
     const row = data?.results?.[0]?.response?.result?.rows?.[0];
-    const jsonStr = row?.[0]?.value;
-    if (!jsonStr) return false;
+    const remoteUpdatedAt = row?.[0]?.value || "";
+    const jsonStr = row?.[1]?.value;
+    if (!jsonStr) {
+      if (remoteUpdatedAt) lastCloudCatalogUpdatedAt = remoteUpdatedAt;
+      return true;
+    }
 
     const parsed = JSON.parse(jsonStr);
     mergeCatalogFromCloud(parsed);
+    if (remoteUpdatedAt) lastCloudCatalogUpdatedAt = remoteUpdatedAt;
     return true;
   } catch (e) {
     console.error("pullCatalogFromCloud error:", e);
@@ -167,45 +198,62 @@ export async function pullCatalogFromCloud(force = false): Promise<boolean> {
 
 let inFlightPull: Promise<boolean> | null = null;
 let lastPullTime = 0;
+let lastCloudActivityUpdatedAt = "";
 
 /**
  * Sadece OKUMA (GET) isteklerinde kullanılır: Buluttaki yeni siparişleri, rezervasyonları,
  * masa çağrılarını, OTP kodlarını ve WhatsApp loglarını yerel SQLite'a çeker (bulutu ezmez!).
  */
 export async function pullActivityFromCloud(force = false): Promise<boolean> {
-  if (!force && Date.now() - lastPullTime < 1200) {
+  const now = Date.now();
+  if (!force && now - lastPullTime < 3000) {
     return true;
   }
-  if (inFlightPull) {
+
+  const runPull = (): Promise<boolean> => {
+    if (inFlightPull) return inFlightPull;
+    inFlightPull = (async () => {
+      try {
+        if (!resolveTursoCredentials()) return false;
+        const data = await executeTursoStatements([
+          {
+            sql: "SELECT updatedAt, CASE WHEN updatedAt != ? THEN v ELSE NULL END FROM restoran_cloud_store WHERE k = 'activity'",
+            args: [lastCloudActivityUpdatedAt],
+          },
+        ]);
+        const row = data?.results?.[0]?.response?.result?.rows?.[0];
+        const remoteUpdatedAt = row?.[0]?.value || "";
+        const jsonStr = row?.[1]?.value;
+        if (jsonStr) {
+          const cloudActivity = JSON.parse(jsonStr);
+          mergeActivityFromCloud(cloudActivity);
+        }
+        if (remoteUpdatedAt) {
+          lastCloudActivityUpdatedAt = remoteUpdatedAt;
+        }
+        lastPullTime = Date.now();
+        return true;
+      } catch (e) {
+        console.error("pullActivityFromCloud error:", e);
+        return false;
+      } finally {
+        inFlightPull = null;
+      }
+    })();
     return inFlightPull;
+  };
+
+  // Yerel sunucuda (Kasa PC) ilk çekimden sonraki rutin okumalarda arayüzü bekletmeden arka planda senkronize et
+  if (!isServerlessEnv() && !force && lastPullTime > 0) {
+    lastPullTime = now;
+    void runPull();
+    return true;
   }
 
-  inFlightPull = (async () => {
-    try {
-      if (!resolveTursoCredentials()) return false;
-      const data = await executeTursoStatements([
-        {
-          sql: "SELECT v FROM restoran_cloud_store WHERE k = 'activity'",
-        },
-      ]);
-      const row = data?.results?.[0]?.response?.result?.rows?.[0];
-      const jsonStr = row?.[0]?.value;
-      if (jsonStr) {
-        const cloudActivity = JSON.parse(jsonStr);
-        mergeActivityFromCloud(cloudActivity);
-      }
-      lastPullTime = Date.now();
-      return true;
-    } catch (e) {
-      console.error("pullActivityFromCloud error:", e);
-      return false;
-    } finally {
-      inFlightPull = null;
-    }
-  })();
-
-  return inFlightPull;
+  return runPull();
 }
+
+let inFlightSync: Promise<boolean> | null = null;
 
 /**
  * YAZMA (POST / PATCH / DELETE) isteklerinde kullanılır:
@@ -213,49 +261,66 @@ export async function pullActivityFromCloud(force = false): Promise<boolean> {
  * ardından birleşmiş güncel durumu buluta yazar.
  */
 export async function syncActivityWithCloud(): Promise<boolean> {
-  try {
-    if (!resolveTursoCredentials()) return false;
-    if (inFlightPull) {
-      await inFlightPull.catch(() => false);
-    }
-    await ensureCloudTable();
+  const doSync = async (): Promise<boolean> => {
+    try {
+      if (!resolveTursoCredentials()) return false;
+      if (inFlightPull) {
+        await inFlightPull.catch(() => false);
+      }
+      if (inFlightSync) {
+        await inFlightSync.catch(() => false);
+      }
+      await ensureCloudTable();
 
-    // 1. Önce buluttaki mevcut sipariş/rezervasyon/çağrı verilerini çekip yerelle birleştir
-    const data = await executeTursoStatements([
-      {
-        sql: "SELECT v FROM restoran_cloud_store WHERE k = 'activity'",
-      },
-    ]);
-    const row = data?.results?.[0]?.response?.result?.rows?.[0];
-    const jsonStr = row?.[0]?.value;
-    if (jsonStr) {
-      const cloudActivity = JSON.parse(jsonStr);
-      mergeActivityFromCloud(cloudActivity);
-    }
+      // 1. Önce buluttaki veri değişmişse çekip yerelle birleştir
+      const data = await executeTursoStatements([
+        {
+          sql: "SELECT updatedAt, CASE WHEN updatedAt != ? THEN v ELSE NULL END FROM restoran_cloud_store WHERE k = 'activity'",
+          args: [lastCloudActivityUpdatedAt],
+        },
+      ]);
+      const row = data?.results?.[0]?.response?.result?.rows?.[0];
+      const jsonStr = row?.[1]?.value;
+      if (jsonStr) {
+        const cloudActivity = JSON.parse(jsonStr);
+        mergeActivityFromCloud(cloudActivity);
+      }
 
-    // 2. Birleşmiş güncel durumu tekrar buluta yaz
-    const mergedPayload = JSON.stringify({
-      orders: getOrders(),
-      reservations: getReservations(),
-      tableCalls: getAllTableCalls(),
-      users: getAllUsers(),
-      otpCodes: getActiveOtpCodes(),
-      whatsappLogs: getWhatsAppLogs(),
+      // 2. Birleşmiş güncel durumu tekrar buluta yaz
+      const mergedPayload = JSON.stringify({
+        orders: getOrders(),
+        reservations: getReservations(),
+        tableCalls: getAllTableCalls(),
+        users: getAllUsers(),
+        otpCodes: getActiveOtpCodes(),
+        whatsappLogs: getWhatsAppLogs(),
+      });
+
+      const nowIso = new Date().toISOString();
+      await executeTursoStatements([
+        {
+          sql: `INSERT INTO restoran_cloud_store (k, v, updatedAt) VALUES ('activity', ?, ?)
+                ON CONFLICT(k) DO UPDATE SET v = excluded.v, updatedAt = excluded.updatedAt`,
+          args: [mergedPayload, nowIso],
+        },
+      ]);
+      lastCloudActivityUpdatedAt = nowIso;
+      lastPullTime = Date.now();
+      return true;
+    } catch (e) {
+      console.error("syncActivityWithCloud error:", e);
+      return false;
+    }
+  };
+
+  if (!isServerlessEnv()) {
+    inFlightSync = doSync().finally(() => {
+      inFlightSync = null;
     });
-
-    await executeTursoStatements([
-      {
-        sql: `INSERT INTO restoran_cloud_store (k, v, updatedAt) VALUES ('activity', ?, ?)
-              ON CONFLICT(k) DO UPDATE SET v = excluded.v, updatedAt = excluded.updatedAt`,
-        args: [mergedPayload, new Date().toISOString()],
-      },
-    ]);
-    lastPullTime = Date.now();
     return true;
-  } catch (e) {
-    console.error("syncActivityWithCloud error:", e);
-    return false;
   }
+
+  return doSync();
 }
 
 export async function testAndSyncCloudConnection(): Promise<{

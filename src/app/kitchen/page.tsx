@@ -218,32 +218,50 @@ export default function KitchenTabletPage() {
     return () => clearInterval(clock);
   }, []);
 
-  const fetchOrders = async () => {
+  const lastMenuFetchMsRef = useRef<number>(0);
+  const isFetchingOrdersRef = useRef<boolean>(false);
+
+  const fetchOrders = async (forceAll = false) => {
+    if (isFetchingOrdersRef.current && !forceAll) return;
+    isFetchingOrdersRef.current = true;
     try {
+      const now = Date.now();
+      const shouldFetchMenu =
+        forceAll || now - lastMenuFetchMsRef.current > 20000;
+
       const [ordRes, menuRes, callRes, resvRes, cidRes, courRes] =
         await Promise.all([
           fetch("/api/orders"),
-          fetch("/api/menu"),
+          shouldFetchMenu ? fetch("/api/menu") : Promise.resolve(null),
           fetch("/api/table-calls"),
-          fetch("/api/reservations"),
+          shouldFetchMenu ? fetch("/api/reservations") : Promise.resolve(null),
           fetch("/api/caller-id"),
-          fetch("/api/courier-locations"),
+          shouldFetchMenu
+            ? fetch("/api/courier-locations")
+            : Promise.resolve(null),
         ]);
       const ordData = await ordRes.json();
-      const menuData = await menuRes.json();
+      const menuData = menuRes && menuRes.ok ? await menuRes.json() : null;
       const callData = await callRes.json();
-      const resvData = await resvRes.json();
+      const resvData = resvRes && resvRes.ok ? await resvRes.json() : null;
       const cidData = cidRes.ok ? await cidRes.json() : { activeCalls: [] };
-      const courData = courRes.ok ? await courRes.json() : { locations: [] };
+      const courData =
+        courRes && courRes.ok ? await courRes.json() : null;
+
+      if (shouldFetchMenu) {
+        lastMenuFetchMsRef.current = now;
+      }
 
       const list: Order[] = ordData.orders || [];
       const calls: TableCall[] = callData.calls || [];
-      const resvs: TableReservation[] = resvData.reservations || [];
+      const resvs: TableReservation[] = resvData
+        ? resvData.reservations || []
+        : reservations;
       const activeCid: CallerIdIncomingEvent[] = cidData.activeCalls || [];
 
       setOrders(list);
       setCallerEvents(activeCid);
-      if (Array.isArray(courData.locations)) {
+      if (courData && Array.isArray(courData.locations)) {
         setCourierLocations(courData.locations);
       }
       setPosLiveTablesEnabled(Boolean(ordData.posLiveTablesEnabled));
@@ -254,11 +272,15 @@ export default function KitchenTabletPage() {
           ? (Object.values(ordData.posTableStates) as PosTableLiveState[])
           : []
       );
-      if (menuData.settings) setSettings(menuData.settings);
-      if (menuData.items) setMenuItems(menuData.items);
-      if (menuData.categories) setCategories(menuData.categories);
+      if (menuData) {
+        if (menuData.settings) setSettings(menuData.settings);
+        if (menuData.items) setMenuItems(menuData.items);
+        if (menuData.categories) setCategories(menuData.categories);
+      }
       setTableCalls(calls);
-      setReservations(resvs);
+      if (resvData) {
+        setReservations(resvs);
+      }
 
       // Yeni bekleyen sipariş, masa çağrısı, rezervasyon veya gelen telefon araması varsa zil çal
       const pendingOrders = list.filter((o) => o.status === "pending");
@@ -310,6 +332,8 @@ export default function KitchenTabletPage() {
       knownCallerEventIds.current = new Set(activeCid.map((c) => c.id));
     } catch (e) {
       console.error("Siparişler alınamadı:", e);
+    } finally {
+      isFetchingOrdersRef.current = false;
     }
   };
 
