@@ -7,8 +7,8 @@
  *   1) OAuth2 (/Token) ile bağlantı kurar (restoran_pos, pda, gokiosk otomatik yedekli).
  *   2) Siparişteki ürünler SambaPOS menüsünde yoksa GraphQL `addProduct` ile otomatik oluşturur.
  *   3) Müşteri (Müşteriler) veya Masa (Masalar) varlığını otomatik eşleştirir / oluşturur.
- *   4) Paket Servis (`Paket=Bekliyor`), Gel-Al (`Paket=GelAl`) ve Masa (`Status=Yeni Siparişler`)
- *      durumlarını Türkçe SambaPOS V5 kurallarına uygun şekilde oluşturur ve ekranı canlı yeniler.
+ *   4) Paket Servis (`Paket=Bekliyor`), Gel-Al (`Paket=GelAl`), Masa (`Status=Yeni Siparişler`)
+ *      ve tüm siparişler için `Kaynak=Online` durumlarını Türkçe SambaPOS V5 kurallarına uygun şekilde oluşturur ve ekranı canlı yeniler.
  */
 
 import fs from "fs";
@@ -712,10 +712,11 @@ export function buildSambaPosAddTicketMutation(
     }`);
   }
 
-  // Türkçe SambaPOS V5 Adisyon Durumları (Paket Servis, Gel-Al ve Masa ekranlarında görünmesi için)
+  // Türkçe SambaPOS V5 Adisyon Durumları (Paket Servis, Gel-Al, Masa ekranları ve Kaynak=Online için)
   const ticketStates: string[] = [
     `{ stateName: "Durum", state: "Ödenmedi" }`,
     `{ stateName: "Status", state: "Yeni Siparişler" }`,
+    `{ stateName: "Kaynak", state: "Online" }`,
   ];
   if (order.orderType === "delivery") {
     ticketStates.push(`{ stateName: "Paket", state: "Bekliyor" }`);
@@ -999,6 +1000,7 @@ function insertOrderDirectToLocalSqlSambaPos(
   const ticketStatesArr: Array<{ D: string; S: string; SN: string; SV?: string }> = [
     { D: sambaDateJson, S: "Ödenmedi", SN: "Durum", SV: "" },
     { D: sambaDateJson, S: "Yeni Siparişler", SN: "Status" },
+    { D: sambaDateJson, S: "Online", SN: "Kaynak", SV: "" },
   ];
   if (order.orderType === "delivery") {
     ticketStatesArr.push({ D: sambaDateJson, S: "Bekliyor", SN: "Paket", SV: "" });
@@ -1478,9 +1480,25 @@ export async function sendOrderToSambaPos(
         addedTicket?.number || addedTicket?.id || "SAMBA-OK"
       );
 
-      // 4) Masa siparişi ise masanın rengini "Yeni Siparişler" yap ve SambaPOS ekranını yenile
+      // 4) Adisyonun Kaynak=Online durumunu garanti altına al, masa siparişi ise masanın rengini "Yeni Siparişler" yap ve SambaPOS ekranını yenile
+      const gStr = (val: string) => JSON.stringify(String(val ?? ""));
+      const userNameForState = cfg.userName || cfg.username || "Administrator";
+      if (numericId > 0) {
+        await executeSambaGraphQL(
+          cfg,
+          accessToken,
+          `mutation {
+            updateStateOfTicket(
+              ticketId: ${numericId},
+              stateName: "Kaynak",
+              state: "Online",
+              userName: ${gStr(userNameForState)}
+            )
+          }`
+        ).catch(() => {});
+      }
+
       if (order.orderType === "dine_in" && ticketContext.resolvedTableName) {
-        const gStr = (val: string) => JSON.stringify(String(val ?? ""));
         await executeSambaGraphQL(
           cfg,
           accessToken,
@@ -2045,6 +2063,12 @@ export async function syncSiteOrderUpdateToSambaPos(
         cfg,
         accessToken,
         `mutation {
+          k: updateStateOfTicket(
+            ticketId: ${ticketDbId},
+            stateName: "Kaynak",
+            state: "Online",
+            userName: ${gStr(userName)}
+          )
           s1: updateStateOfTicket(
             ticketId: ${ticketDbId},
             stateName: "Paket",
@@ -2069,6 +2093,12 @@ export async function syncSiteOrderUpdateToSambaPos(
         cfg,
         accessToken,
         `mutation {
+          k: updateStateOfTicket(
+            ticketId: ${ticketDbId},
+            stateName: "Kaynak",
+            state: "Online",
+            userName: ${gStr(userName)}
+          )
           s1: updateStateOfTicket(
             ticketId: ${ticketDbId},
             stateName: "Paket",
@@ -2100,6 +2130,7 @@ export async function syncSiteOrderUpdateToSambaPos(
         },
         { D: sambaDateJson, S: newPaketState, SN: "Paket", SV: "" },
         { D: sambaDateJson, S: "Yeni Siparişler", SN: "Status" },
+        { D: sambaDateJson, S: "Online", SN: "Kaynak", SV: "" },
       ];
       if (order.courierName) {
         statesArr.push({
@@ -3755,7 +3786,7 @@ export async function closeTableTicketInSambaPos(
             RemainingAmount = 0,
             LastPaymentDate = @now,
             LastUpdateTime = @now,
-            TicketStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Ödendi","SN":"Durum","SV":""}]'
+            TicketStates = N'[{"D":"${escSql(sambaDateJson)}","S":"Ödendi","SN":"Durum","SV":""},{"D":"${escSql(sambaDateJson)}","S":"Online","SN":"Kaynak","SV":""}]'
         WHERE IsClosed = 0
           AND Id IN (SELECT Ticket_Id FROM TicketEntities WHERE EntityTypeId = 2 AND EntityId = @tblEntId);
 
